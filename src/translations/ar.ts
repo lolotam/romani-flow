@@ -331,6 +331,7 @@ export const ar = {
       expired: 'منتهية',
       danger: 'خطر',
       warning: 'تحذير',
+      actions: 'الإجراءات',
       moreItemsInReport: 'وعرض {count} إقامة أخرى في التقرير الكامل',
       moreDocumentsInReport: 'وعرض {count} وثيقة أخرى في التقرير الكامل',
       emailConfigNote: 'ملاحظة مهمة حول إعدادات البريد الإلكتروني',
@@ -375,7 +376,17 @@ export const ar = {
       dailyBackups: 'نسخ احتياطية يومية',
       dailyBackupsDesc: 'الاحتفاظ بآخر نسختين فقط',
       backupNotifications: 'إشعارات النسخ الاحتياطي',
-      backupNotificationsDesc: 'إرسال تأكيد عبر البريد الإلكتروني'
+      backupNotificationsDesc: 'إرسال تأكيد عبر البريد الإلكتروني',
+      eraseData: 'مسح جميع البيانات',
+      eraseDataDescription: 'حذف جميع البيانات من قاعدة البيانات نهائياً. لا يمكن التراجع عن هذا الإجراء.',
+      eraseButton: 'مسح جميع البيانات',
+      eraseConfirmTitle: 'هل أنت متأكد تماماً؟',
+      eraseConfirmDescription: 'سيؤدي هذا إلى حذف جميع البيانات بشكل دائم بما في ذلك الشركات والموظفين والوثائق والإعدادات. هذا الإجراء لا يمكن التراجع عنه. يرجى كتابة "DELETE ALL" للتأكيد.',
+      eraseConfirmPlaceholder: 'اكتب DELETE ALL',
+      eraseCancel: 'إلغاء',
+      eraseConfirmButton: 'نعم، امسح كل شيء',
+      eraseSuccess: 'تم مسح جميع البيانات بنجاح',
+      eraseError: 'فشل في مسح البيانات'
     },
 
     // Companies Management

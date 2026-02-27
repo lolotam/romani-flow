@@ -136,13 +136,6 @@ export default function Dashboard() {
           .select('*')
           .execute();
 
-        // DEBUG: Log actual document count from database
-        console.log('🔍 DEBUG - Documents from database:', documents);
-        console.log('📊 DEBUG - Document count:', documents?.length || 0);
-
-        // Force zero if documents is empty or undefined
-        const actualDocumentCount = Array.isArray(documents) ? documents.length : 0;
-
         // Fetch total employees
         const { data: employees } = await jsonDatabase
           .from('employees')
@@ -155,8 +148,24 @@ export default function Dashboard() {
           .select('*')
           .execute();
 
-        const documentsCount = actualDocumentCount;
-        const employeesCount = employees?.length || 0;
+        const validCompanies = new Set(companies?.map(c => c.id) || []);
+
+        // Filter out orphaned employees
+        const actualEmployees = employees?.filter(emp =>
+          !emp.company_id || validCompanies.has(emp.company_id)
+        ) || [];
+
+        const validEmployees = new Set(actualEmployees.map(e => e.id));
+
+        // Filter out orphaned documents
+        const actualDocuments = documents?.filter(doc => {
+          if (doc.employee_id && !validEmployees.has(doc.employee_id)) return false;
+          if (doc.company_id && !validCompanies.has(doc.company_id)) return false;
+          return true;
+        }) || [];
+
+        const documentsCount = actualDocuments.length;
+        const employeesCount = actualEmployees.length;
         const companiesCount = companies?.length || 0;
 
         // DEBUG: Log all counts for verification
@@ -166,20 +175,13 @@ export default function Dashboard() {
           companies: companiesCount
         });
 
-        // Force display refresh by clearing any cached data
-        if (documentsCount === 0) {
-          console.log('✅ DEBUG - Correctly showing 0 documents');
-        } else {
-          console.log('✅ DEBUG - Correctly showing', documentsCount, 'documents');
-        }
-
         // Calculate expiring and expired documents based on actual expiry dates
         let expiringCount = 0;
         let expiredCount = 0;
 
-        if (documents && documents.length > 0) {
+        if (actualDocuments.length > 0) {
           const today = new Date();
-          documents.forEach(doc => {
+          actualDocuments.forEach(doc => {
             if (doc.expiry_date) {
               const expiryDate = new Date(doc.expiry_date);
               const diffTime = expiryDate.getTime() - today.getTime();
@@ -206,8 +208,8 @@ export default function Dashboard() {
         const activities: RecentActivity[] = [];
 
         // Add real recent employees (only if they exist)
-        if (employees && employees.length > 0) {
-          const recentEmployees = employees
+        if (actualEmployees.length > 0) {
+          const recentEmployees = actualEmployees
             .filter(emp => emp.created_at)
             .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
             .slice(0, 2);
@@ -224,8 +226,8 @@ export default function Dashboard() {
         }
 
         // Add real recent documents (only if they exist)
-        if (documents && documents.length > 0) {
-          const recentDocuments = documents
+        if (actualDocuments.length > 0) {
+          const recentDocuments = actualDocuments
             .filter(doc => doc.created_at)
             .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
             .slice(0, 3);
@@ -250,7 +252,7 @@ export default function Dashboard() {
         const expiringItemsData: ExpiringItem[] = [];
 
         // Check employee residency expiry
-        employees?.forEach(employee => {
+        actualEmployees.forEach(employee => {
           if (employee.residency_expiry_date) {
             const today = new Date();
             const expiry = new Date(employee.residency_expiry_date);
@@ -292,7 +294,7 @@ export default function Dashboard() {
         });
 
         // Check document expiry
-        documents?.forEach(doc => {
+        actualDocuments.forEach(doc => {
           if (doc.expiry_date) {
             const today = new Date();
             const expiry = new Date(doc.expiry_date);
