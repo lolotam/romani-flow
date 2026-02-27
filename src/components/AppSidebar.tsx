@@ -32,7 +32,7 @@ export function AppSidebar() {
   const collapsed = state === 'collapsed';
   const location = useLocation();
   const { logout } = useAuth();
-  const { t } = useLanguage();
+  const { t, language } = useLanguage();
 
   const mainItems = [
     { title: t('nav.dashboard'), url: "/dashboard", icon: LayoutDashboard },
@@ -52,6 +52,7 @@ export function AppSidebar() {
 
   return (
     <Sidebar
+      side={language === 'ar' ? 'right' : 'left'}
       className={`${collapsed ? "w-16" : "w-64"} transition-all duration-300 border-r border-border/50 bg-card/50 backdrop-blur-sm`}
     >
       <SidebarContent className="p-0">

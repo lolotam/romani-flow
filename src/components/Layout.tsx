@@ -10,11 +10,11 @@ interface LayoutProps {
 }
 
 export function Layout({ children }: LayoutProps) {
-  const { t } = useLanguage();
+  const { t, language } = useLanguage();
 
   return (
     <SidebarProvider defaultOpen={true}>
-      <div className="min-h-screen flex w-full bg-gradient-subtle" dir="rtl">
+      <div className="min-h-screen flex w-full bg-gradient-subtle" dir={t('dir') || (language === 'ar' ? 'rtl' : 'ltr')} >
         <div className="flex-1 flex flex-col">
           {/* Header with trigger for all screen sizes */}
           <header className="h-14 flex items-center justify-between border-b border-border/50 bg-card/80 backdrop-blur-sm px-4">

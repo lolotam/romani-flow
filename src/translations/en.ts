@@ -770,48 +770,6 @@ export const en = {
     photoDeleteConfirm: 'Are you sure you want to delete the employee photo?'
   },
 
-  // Settings Page
-  settings: {
-    title: 'Settings',
-    subtitle: 'Manage system settings and configurations',
-
-    tabs: {
-      companies: 'Companies',
-      positions: 'Positions',
-      documentTypes: 'Document Types',
-      system: 'System'
-    },
-
-    companies: {
-      title: 'Company Management',
-      add: 'Add Company',
-      edit: 'Edit Company',
-      delete: 'Delete Company',
-      nameEn: 'Company Name (English)',
-      nameAr: 'Company Name (Arabic)',
-      addSuccess: 'Company added successfully',
-      editSuccess: 'Company updated successfully',
-      deleteSuccess: 'Company deleted successfully',
-      deleteConfirm: 'Are you sure you want to delete this company?'
-    },
-
-    positions: {
-      title: 'Position Management',
-      add: 'Add Position',
-      edit: 'Edit Position',
-      delete: 'Delete Position',
-      nameEn: 'Position Name (English)',
-      nameAr: 'Position Name (Arabic)',
-      value: 'Value'
-    },
-
-    documentTypes: {
-      title: 'Document Type Management',
-      add: 'Add Document Type',
-      edit: 'Edit Document Type',
-      delete: 'Delete Document Type'
-    }
-  },
 
   // Login Page
   login: {
