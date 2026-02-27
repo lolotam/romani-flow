@@ -152,7 +152,7 @@ export default function Employees() {
 
     try {
       const { error } = await jsonDatabase.delete('employees', employeeId);
-      
+
       if (error) {
         toast({
           title: t('employees.messages.error'),
@@ -621,7 +621,7 @@ export default function Employees() {
                 <Table>
                   <TableHeader>
                     <TableRow className="border-border/50">
-                      <TableHead className="w-[70px] text-right">#</TableHead>
+                      <TableHead className="w-[70px] text-start">#</TableHead>
                       <TableHead
                         className="cursor-pointer hover:bg-accent/50 transition-colors"
                         onClick={() => handleSort('name')}
@@ -697,7 +697,7 @@ export default function Employees() {
                   <TableBody>
                     {filteredAndSortedEmployees.map((employee, index) => (
                       <TableRow key={employee.id} className="hover:bg-accent/30 transition-colors">
-                        <TableCell className="text-right font-medium">{index + 1}</TableCell>
+                        <TableCell className="text-start font-medium">{index + 1}</TableCell>
                         <TableCell>
                           <div className="space-y-1">
                             <div className="font-medium">{employee.name}</div>

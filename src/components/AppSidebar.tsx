@@ -59,7 +59,7 @@ export function AppSidebar() {
         {/* Header */}
         <div className={`p-4 border-b border-border/50 ${collapsed ? "px-2" : "px-4"}`}>
           <div className="flex items-center justify-between">
-            <div className={`flex items-center space-x-3 ${collapsed ? "justify-center" : ""}`}>
+            <div className={`flex items-center gap-3 ${collapsed ? "justify-center" : ""}`}>
               <div className="p-2 bg-primary/10 rounded-lg">
                 <Building2 className="h-6 w-6 text-primary" />
               </div>
@@ -93,9 +93,9 @@ export function AppSidebar() {
                     <NavLink
                       to={item.url}
                       end
-                      className={`${getNavCls({ isActive: isActive(item.url) })} flex items-center space-x-3 px-3 py-3 rounded-lg transition-all duration-200 ${collapsed ? "justify-center" : ""}`}
+                      className={`${getNavCls({ isActive: isActive(item.url) })} flex items-center gap-3 px-3 py-3 rounded-lg transition-all duration-200 ${collapsed ? "justify-center" : ""}`}
                     >
-                      <item.icon className={`h-5 w-5 ${collapsed ? "" : "ml-3"}`} />
+                      <item.icon className="h-5 w-5" />
                       {!collapsed && <span className="font-medium">{item.title}</span>}
                     </NavLink>
                   </SidebarMenuButton>
@@ -111,9 +111,9 @@ export function AppSidebar() {
           <Button
             variant="ghost"
             onClick={logout}
-            className={`w-full ${collapsed ? "px-2" : "px-3"} py-3 text-destructive hover:bg-destructive/10 hover:text-destructive transition-colors`}
+            className={`w-full flex items-center gap-2 ${collapsed ? "px-2 justify-center" : "px-3 justify-start"} py-3 text-destructive hover:bg-destructive/10 hover:text-destructive transition-colors`}
           >
-            <LogOut className={`h-5 w-5 ${collapsed ? "" : "ml-2"}`} />
+            <LogOut className="h-5 w-5" />
             {!collapsed && <span>{t('nav.logout')}</span>}
           </Button>
         </div>

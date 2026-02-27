@@ -8,6 +8,9 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { useAuth } from '@/hooks/useAuth';
 import { useToast } from '@/hooks/use-toast';
 import { Eye, EyeOff, Shield, Stethoscope } from 'lucide-react';
+import { ThemeToggle } from '@/components/ThemeToggle';
+import { LanguageToggle } from '@/components/ui/LanguageToggle';
+import { useLanguage } from '@/contexts/LanguageContext';
 
 export default function Login() {
   const [username, setUsername] = useState('');
@@ -17,6 +20,7 @@ export default function Login() {
   const { login } = useAuth();
   const { toast } = useToast();
   const navigate = useNavigate();
+  const { t } = useLanguage();
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -57,6 +61,11 @@ export default function Login() {
         <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 w-96 h-96 bg-gradient-corporate rounded-full opacity-10 blur-3xl"></div>
       </div>
 
+      <div className="absolute top-4 right-4 z-50 flex items-center gap-2 rtl:left-4 rtl:right-auto">
+        <ThemeToggle />
+        <LanguageToggle />
+      </div>
+
       <motion.div
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
@@ -76,7 +85,7 @@ export default function Login() {
                 <Stethoscope className="w-6 h-6 text-primary-foreground" />
               </div>
             </motion.div>
-            
+
             <div>
               <CardTitle className="text-2xl font-display text-gradient">
                 Romani CureMed
@@ -95,16 +104,16 @@ export default function Login() {
                 transition={{ delay: 0.3 }}
                 className="space-y-2"
               >
-                <Label htmlFor="username" className="text-right block">
-                  اسم المستخدم
+                <Label htmlFor="username" className="text-start block">
+                  {t('login.username')}
                 </Label>
                 <Input
                   id="username"
                   type="text"
                   value={username}
                   onChange={(e) => setUsername(e.target.value)}
-                  className="text-right neomorphism-inset transition-all duration-300 focus:shadow-glow"
-                  placeholder="أدخل اسم المستخدم"
+                  className="text-start neomorphism-inset transition-all duration-300 focus:shadow-glow"
+                  placeholder={t('login.usernamePlaceholder')}
                   required
                 />
               </motion.div>
@@ -115,8 +124,8 @@ export default function Login() {
                 transition={{ delay: 0.4 }}
                 className="space-y-2"
               >
-                <Label htmlFor="password" className="text-right block">
-                  كلمة المرور
+                <Label htmlFor="password" className="text-start block">
+                  {t('login.password')}
                 </Label>
                 <div className="relative">
                   <Input
@@ -124,8 +133,8 @@ export default function Login() {
                     type={showPassword ? "text" : "password"}
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
-                    className="text-right neomorphism-inset transition-all duration-300 focus:shadow-glow pl-10"
-                    placeholder="أدخل كلمة المرور"
+                    className="text-start neomorphism-inset transition-all duration-300 focus:shadow-glow pl-10"
+                    placeholder="••••••••"
                     required
                   />
                   <Button

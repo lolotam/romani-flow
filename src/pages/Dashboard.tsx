@@ -666,12 +666,12 @@ export default function Dashboard() {
                       <Table>
                         <TableHeader>
                           <TableRow>
-                            <TableHead className="text-right w-12"></TableHead>
-                            <TableHead className="text-right">{t('dashboard.reminders.table.type')}</TableHead>
-                            <TableHead className="text-right">{t('dashboard.reminders.table.name')}</TableHead>
-                            <TableHead className="text-right">{t('dashboard.reminders.table.expiryDate')}</TableHead>
-                            <TableHead className="text-right">{t('dashboard.reminders.table.status')}</TableHead>
-                            <TableHead className="text-right w-20">{t('dashboard.reminders.table.actions')}</TableHead>
+                            <TableHead className="text-left rtl:text-right w-12"></TableHead>
+                            <TableHead className="text-left rtl:text-right">{t('dashboard.reminders.table.type')}</TableHead>
+                            <TableHead className="text-left rtl:text-right">{t('dashboard.reminders.table.name')}</TableHead>
+                            <TableHead className="text-left rtl:text-right">{t('dashboard.reminders.table.expiryDate')}</TableHead>
+                            <TableHead className="text-left rtl:text-right">{t('dashboard.reminders.table.status')}</TableHead>
+                            <TableHead className="text-left rtl:text-right w-20">{t('dashboard.reminders.table.actions')}</TableHead>
                           </TableRow>
                         </TableHeader>
                         <TableBody>

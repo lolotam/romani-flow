@@ -978,10 +978,10 @@ export default function Settings() {
                             <table className="w-full text-sm">
                               <thead className="bg-muted/50">
                                 <tr>
-                                  <th className="text-right p-2 font-medium">{t('settings.email.employeeName')}</th>
-                                  <th className="text-right p-2 font-medium">{t('settings.email.residencyExpiryDate')}</th>
-                                  <th className="text-right p-2 font-medium">{t('settings.email.timeRemaining')}</th>
-                                  <th className="text-right p-2 font-medium">{t('settings.email.status')}</th>
+                                  <th className="text-start p-2 font-medium">{t('settings.email.employeeName')}</th>
+                                  <th className="text-start p-2 font-medium">{t('settings.email.residencyExpiryDate')}</th>
+                                  <th className="text-start p-2 font-medium">{t('settings.email.timeRemaining')}</th>
+                                  <th className="text-start p-2 font-medium">{t('settings.email.status')}</th>
                                 </tr>
                               </thead>
                               <tbody>
@@ -996,10 +996,10 @@ export default function Settings() {
                                     </td>
                                     <td className="p-2">
                                       <span className={`px-2 py-1 rounded-full text-xs ${emp.daysUntilExpiry < 0
-                                          ? 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400'
-                                          : emp.daysUntilExpiry <= 7
-                                            ? 'bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-400'
-                                            : 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400'
+                                        ? 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400'
+                                        : emp.daysUntilExpiry <= 7
+                                          ? 'bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-400'
+                                          : 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400'
                                         }`}>
                                         {emp.daysUntilExpiry < 0 ? t('settings.email.expired') : emp.daysUntilExpiry <= 7 ? t('settings.email.danger') : t('settings.email.warning')}
                                       </span>
@@ -1025,11 +1025,11 @@ export default function Settings() {
                             <table className="w-full text-sm">
                               <thead className="bg-muted/50">
                                 <tr>
-                                  <th className="text-right p-2 font-medium">{t('settings.email.documentName')}</th>
-                                  <th className="text-right p-2 font-medium">{t('settings.email.employee')}</th>
-                                  <th className="text-right p-2 font-medium">{t('settings.email.expiryDate')}</th>
-                                  <th className="text-right p-2 font-medium">{t('settings.email.timeRemaining')}</th>
-                                  <th className="text-right p-2 font-medium">{t('settings.email.status')}</th>
+                                  <th className="text-start p-2 font-medium">{t('settings.email.documentName')}</th>
+                                  <th className="text-start p-2 font-medium">{t('settings.email.employee')}</th>
+                                  <th className="text-start p-2 font-medium">{t('settings.email.expiryDate')}</th>
+                                  <th className="text-start p-2 font-medium">{t('settings.email.timeRemaining')}</th>
+                                  <th className="text-start p-2 font-medium">{t('settings.email.status')}</th>
                                 </tr>
                               </thead>
                               <tbody>
@@ -1045,10 +1045,10 @@ export default function Settings() {
                                     </td>
                                     <td className="p-2">
                                       <span className={`px-2 py-1 rounded-full text-xs ${doc.daysUntilExpiry < 0
-                                          ? 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400'
-                                          : doc.daysUntilExpiry <= 7
-                                            ? 'bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-400'
-                                            : 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400'
+                                        ? 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400'
+                                        : doc.daysUntilExpiry <= 7
+                                          ? 'bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-400'
+                                          : 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400'
                                         }`}>
                                         {doc.daysUntilExpiry < 0 ? t('settings.email.expired') : doc.daysUntilExpiry <= 7 ? t('settings.email.danger') : t('settings.email.warning')}
                                       </span>
