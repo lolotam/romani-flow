@@ -42,7 +42,7 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
     try {
       // For demo purposes, we'll use hardcoded credentials
       // In production, this should hash the password and store it properly
-      if (username === 'Admin' && password === '@Xx123456789xX@') {
+      if (username === 'admin' && password === '@Xx123456789xX@') {
         // Set authentication token
         localStorage.setItem('romani_admin_token', 'authenticated');
         setIsAuthenticated(true);
