@@ -84,7 +84,7 @@ interface DocumentFormProps {
     employee_id?: string;
     company_id?: string;
     issue_date?: string;
-    expiry_date: string;
+    expiry_date?: string;
     notes?: string;
     file_path?: string;
     file_name?: string;

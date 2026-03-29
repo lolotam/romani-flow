@@ -353,41 +353,7 @@ export const ar = {
       darkModeDescription: 'تفعيل أو إلغاء تفعيل الوضع المظلم'
     },
 
-    // Backup Settings
-    backup: {
-      title: 'النسخ الاحتياطي واستعادة البيانات',
-      description: 'إنشاء نسخ احتياطية واستعادة البيانات',
-      backupSection: 'النسخ الاحتياطي',
-      backupDescription: 'تصدير جميع بيانات النظام إلى ملف JSON',
-      backupSection: 'النسخ الاحتياطي',
-      exportBackup: 'تصدير نسخة احتياطية',
-      restoreSection: 'استعادة البيانات',
-      restoreDescription: 'استيراد البيانات من ملف نسخة احتياطية',
-      chooseFile: 'اختر الملف',
-      importBackup: 'استيراد نسخة احتياطية',
-      automaticBackups: 'النسخ التلقائية',
-      dailyBackups: 'نسخ احتياطية يومية',
-      dailyBackupsDesc: 'الاحتفاظ بآخر نسختين فقط',
-      backupNotifications: 'إشعارات النسخ الاحتياطي',
-      backupNotificationsDesc: 'إرسال تأكيد عبر البريد الإلكتروني',
-      chooseFile: 'اختر الملف',
-      importBackup: 'استيراد نسخة احتياطية',
-      automaticBackups: 'النسخ التلقائية',
-      dailyBackups: 'نسخ احتياطية يومية',
-      dailyBackupsDesc: 'الاحتفاظ بآخر نسختين فقط',
-      backupNotifications: 'إشعارات النسخ الاحتياطي',
-      backupNotificationsDesc: 'إرسال تأكيد عبر البريد الإلكتروني',
-      eraseData: 'مسح جميع البيانات',
-      eraseDataDescription: 'حذف جميع البيانات من قاعدة البيانات نهائياً. لا يمكن التراجع عن هذا الإجراء.',
-      eraseButton: 'مسح جميع البيانات',
-      eraseConfirmTitle: 'هل أنت متأكد تماماً؟',
-      eraseConfirmDescription: 'سيؤدي هذا إلى حذف جميع البيانات بشكل دائم بما في ذلك الشركات والموظفين والوثائق والإعدادات. هذا الإجراء لا يمكن التراجع عنه. يرجى كتابة "DELETE ALL" للتأكيد.',
-      eraseConfirmPlaceholder: 'اكتب DELETE ALL',
-      eraseCancel: 'إلغاء',
-      eraseConfirmButton: 'نعم، امسح كل شيء',
-      eraseSuccess: 'تم مسح جميع البيانات بنجاح',
-      eraseError: 'فشل في مسح البيانات'
-    },
+    // Backup Settings (first instance removed - using the one at line ~460)
 
     // Companies Management
     companies: {
