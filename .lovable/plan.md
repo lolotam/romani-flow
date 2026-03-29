@@ -1,62 +1,78 @@
 
 
-# Fix Build Error + Refactoring Plan
+# Plan: Fix Build Errors, Replace Auth, and Split Settings
 
-## Problem
-`Settings.tsx` has a missing `useEffect` wrapper around lines 125-143. The code calls `fetchData()` and sets state directly in the component body instead of inside a `useEffect`. This causes the build error `Unexpected ","` at line 143 where `}, []);` appears without a matching `useEffect(() => {`.
-
-## Fix (Step 1) — Restore missing useEffect
-
-**File**: `src/pages/Settings.tsx`
-
-Add `useEffect(() => {` between line 125 and 126:
-
-```tsx
-// Line 123: const { toast } = useToast();
-// Line 124: (blank)
-// INSERT THIS:
-  useEffect(() => {
-    fetchData();
-    // Check for dark mode preference
-    const isDark = localStorage.getItem('darkMode') === 'true';
-    // ... rest stays the same through line 143
-```
-
-This single line addition fixes the build error — the closing `}, []);` on line 143 will then have a matching opening.
+## Overview
+Three tasks: (1) fix duplicate property build errors in translation files, (2) replace hardcoded admin credentials with Supabase Auth, (3) split the 1777-line Settings.tsx into smaller components.
 
 ---
 
-## Refactoring Plan (Step 2) — Code Quality Improvements
+## Task 1: Fix Translation File Duplicate Properties
 
-After fixing the build error, the codebase has several areas to improve:
+**Problem**: Both `ar.ts` and `en.ts` have duplicate property names within the same object literals (TS1117 errors at ~16 locations total).
 
-### 2.1 Split Settings.tsx (1777 lines — too large)
-- Extract into smaller components: `EmailSettings`, `ThemeSettings`, `DataManagement`, `ExpiryReminders`
-- Each section becomes its own file under `src/components/settings/`
+**Approach**: Rewrite both translation files completely, preserving all translation content but ensuring every property name is unique within its parent object. The structure will remain identical (same keys used by `t()` calls throughout the app), just with duplicates removed.
 
-### 2.2 Replace Hardcoded Auth with Supabase Auth
-- Current `useAuth.tsx` uses hardcoded credentials (`admin` / `@Xx123456789xX@`) with localStorage token
-- Migrate to Supabase Auth for proper security
-- Remove plaintext credentials from source code
+**Files modified**:
+- `src/translations/ar.ts` — full rewrite, ~853 lines
+- `src/translations/en.ts` — full rewrite, ~869 lines
 
-### 2.3 Remove Exposed SMTP Credentials
-- `Settings.tsx` lines 101-106 contain hardcoded SMTP passwords and email addresses
-- Move to environment variables or Supabase secrets
+---
 
-### 2.4 Consolidate Database Layer
-- `jsonDatabase` and Supabase client coexist — clarify which is the source of truth
-- Remove unused database abstraction if Supabase is primary
+## Task 2: Replace Hardcoded Auth with Supabase Auth
 
-### 2.5 Extract Reusable Hooks
-- Create `useDocumentStatus` hook from repeated status calculation logic
-- Create `useEmployeeDocuments` hook for document fetching patterns used across pages
+**Current state**: `useAuth.tsx` has hardcoded `admin` / `@Xx123456789xX@` credentials stored in plaintext, with a localStorage token for session persistence.
+
+**New approach**: Use Supabase Auth (`supabase.auth.signInWithPassword`, `signOut`, `onAuthStateChange`, `getSession`).
+
+**Files modified**:
+- `src/hooks/useAuth.tsx` — Replace with Supabase Auth calls:
+  - `login()` calls `supabase.auth.signInWithPassword({ email, password })`
+  - `logout()` calls `supabase.auth.signOut()`
+  - `useEffect` sets up `onAuthStateChange` listener (set up BEFORE calling `getSession`)
+  - Export `user` and `session` from context
+- `src/pages/Login.tsx` — Change "username" field to "email" field, update form labels
+- `src/components/ProtectedRoute.tsx` — No changes needed (already uses `isAuthenticated` / `isLoading`)
+
+**Migration note**: The existing admin user needs to be created in Supabase Auth (via dashboard or signup). No profiles table needed since this is a single-admin system.
+
+---
+
+## Task 3: Split Settings.tsx into Components
+
+**Current state**: `Settings.tsx` is 1777 lines with 7 tab sections, all CRUD logic, and all edit dialogs in one file.
+
+**New structure**:
+
+```text
+src/components/settings/
+├── EmailSettings.tsx        (~250 lines) — SMTP config + expiry monitoring
+├── AppearanceSettings.tsx   (~50 lines)  — Dark mode toggle
+├── CompaniesSettings.tsx    (~150 lines) — Company CRUD + edit dialog
+├── PositionsSettings.tsx    (~150 lines) — Position CRUD + edit dialog
+├── DocumentTypesSettings.tsx(~150 lines) — Doc type CRUD + edit dialog
+├── MinistriesSettings.tsx   (~150 lines) — Ministry CRUD + edit dialog
+├── BackupSettings.tsx       (~150 lines) — Export/import/erase
+└── types.ts                 (~30 lines)  — Shared interfaces
+```
+
+**Settings.tsx** becomes a thin orchestrator (~200 lines):
+- Keeps top-level state (`companies`, `documentTypes`, etc.)
+- Keeps `fetchData()` function
+- Passes state and handlers as props to each tab component
+- Renders the `Tabs` layout with each `TabsContent` delegating to the sub-component
+
+**Shared interfaces** (`types.ts`): `EmailSettings`, `Company`, `DocumentType`, `Ministry`, `Position` interfaces extracted from Settings.tsx lines 45-81.
 
 ---
 
 ## Implementation Order
-1. Fix the `useEffect` build error (immediate)
-2. Remove hardcoded credentials (security priority)
+1. Fix translation duplicates (unblocks build)
+2. Replace auth with Supabase Auth
 3. Split Settings.tsx into components
-4. Consolidate database layer
-5. Extract reusable hooks
+
+## Technical Notes
+- The `login` function signature changes from `(username, password)` to `(email, password)` — Login.tsx form already has an email-style input
+- Hardcoded SMTP credentials on lines 101-106 of Settings.tsx will remain as env var fallbacks for now (separate security concern, not blocking)
+- All `t()` translation keys remain unchanged, so no other files need updating for translations
 
