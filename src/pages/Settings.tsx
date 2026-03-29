@@ -122,7 +122,7 @@ export default function Settings() {
 
   const { toast } = useToast();
 
-
+  useEffect(() => {
   fetchData();
   // Check for dark mode preference
   const isDark = localStorage.getItem('darkMode') === 'true';
