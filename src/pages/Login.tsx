@@ -13,7 +13,7 @@ import { LanguageToggle } from '@/components/ui/LanguageToggle';
 import { useLanguage } from '@/contexts/LanguageContext';
 
 export default function Login() {
-  const [username, setUsername] = useState('');
+  const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
@@ -27,17 +27,17 @@ export default function Login() {
     setIsLoading(true);
 
     try {
-      const result = await login(username, password);
+      const result = await login(email, password);
       if (result.success) {
         toast({
-          title: "تم تسجيل الدخول بنجاح",
+          title: t('login.success'),
           description: "مرحباً بك في نظام Romani CureMed",
         });
         navigate('/dashboard');
       } else {
         toast({
           title: "خطأ في تسجيل الدخول",
-          description: result.error || "حدث خطأ غير متوقع",
+          description: result.error || t('login.error'),
           variant: "destructive",
         });
       }
@@ -104,16 +104,16 @@ export default function Login() {
                 transition={{ delay: 0.3 }}
                 className="space-y-2"
               >
-                <Label htmlFor="username" className="text-start block">
-                  {t('login.username')}
+                <Label htmlFor="email" className="text-start block">
+                  {t('login.email')}
                 </Label>
                 <Input
-                  id="username"
-                  type="text"
-                  value={username}
-                  onChange={(e) => setUsername(e.target.value)}
+                  id="email"
+                  type="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
                   className="text-start neomorphism-inset transition-all duration-300 focus:shadow-glow"
-                  placeholder={t('login.usernamePlaceholder')}
+                  placeholder="admin@example.com"
                   required
                 />
               </motion.div>
@@ -163,7 +163,7 @@ export default function Login() {
                   className="w-full bg-gradient-primary hover:opacity-90 text-primary-foreground shadow-elegant hover:shadow-glow transition-all duration-300 transform hover:scale-105"
                   disabled={isLoading}
                 >
-                  {isLoading ? 'جارٍ تسجيل الدخول...' : 'تسجيل الدخول'}
+                  {isLoading ? 'جارٍ تسجيل الدخول...' : t('login.loginButton')}
                 </Button>
               </motion.div>
             </form>

@@ -1,9 +1,13 @@
 import { createContext, useContext, useEffect, useState, ReactNode } from 'react';
+import { supabase } from '@/integrations/supabase/client';
+import type { User, Session } from '@supabase/supabase-js';
 
 interface AuthContextType {
   isAuthenticated: boolean;
   isLoading: boolean;
-  login: (username: string, password: string) => Promise<{ success: boolean; error?: string }>;
+  user: User | null;
+  session: Session | null;
+  login: (email: string, password: string) => Promise<{ success: boolean; error?: string }>;
   logout: () => void;
 }
 
@@ -24,44 +28,54 @@ interface AuthProviderProps {
 export const AuthProvider = ({ children }: AuthProviderProps) => {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
+  const [user, setUser] = useState<User | null>(null);
+  const [session, setSession] = useState<Session | null>(null);
 
   useEffect(() => {
-    // Check if user is already authenticated on app load
-    const checkAuth = () => {
-      const token = localStorage.getItem('romani_admin_token');
-      if (token) {
-        setIsAuthenticated(true);
+    // Set up auth state listener BEFORE checking session
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(
+      (_event, session) => {
+        setSession(session);
+        setUser(session?.user ?? null);
+        setIsAuthenticated(!!session);
+        setIsLoading(false);
       }
-      setIsLoading(false);
-    };
+    );
 
-    checkAuth();
+    // Check for existing session
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setSession(session);
+      setUser(session?.user ?? null);
+      setIsAuthenticated(!!session);
+      setIsLoading(false);
+    });
+
+    return () => subscription.unsubscribe();
   }, []);
 
-  const login = async (username: string, password: string): Promise<{ success: boolean; error?: string }> => {
+  const login = async (email: string, password: string): Promise<{ success: boolean; error?: string }> => {
     try {
-      // For demo purposes, we'll use hardcoded credentials
-      // In production, this should hash the password and store it properly
-      if (username === 'admin' && password === '@Xx123456789xX@') {
-        // Set authentication token
-        localStorage.setItem('romani_admin_token', 'authenticated');
-        setIsAuthenticated(true);
-        return { success: true };
-      } else {
-        return { success: false, error: 'اسم المستخدم أو كلمة المرور غير صحيحة' };
+      const { error } = await supabase.auth.signInWithPassword({ email, password });
+
+      if (error) {
+        return { success: false, error: error.message };
       }
+
+      return { success: true };
     } catch (error) {
       return { success: false, error: 'حدث خطأ أثناء تسجيل الدخول' };
     }
   };
 
-  const logout = () => {
-    localStorage.removeItem('romani_admin_token');
+  const logout = async () => {
+    await supabase.auth.signOut();
+    setSession(null);
+    setUser(null);
     setIsAuthenticated(false);
   };
 
   return (
-    <AuthContext.Provider value={{ isAuthenticated, isLoading, login, logout }}>
+    <AuthContext.Provider value={{ isAuthenticated, isLoading, user, session, login, logout }}>
       {children}
     </AuthContext.Provider>
   );
