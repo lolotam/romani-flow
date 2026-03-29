@@ -363,7 +363,6 @@ export const ar = {
       name: 'اسم الشركة',
       nameArabic: 'الاسم بالعربية',
       nameEnglish: 'الاسم بالإنجليزية',
-      description: 'الوصف',
       currentCompanies: 'الشركات الحالية',
       employeeCount: '{{count}} موظف',
       nameArabicPlaceholder: 'أدخل اسم الشركة بالعربية',
@@ -596,12 +595,6 @@ export const ar = {
       actions: 'الإجراءات'
     },
 
-    status: {
-      valid: 'سارية',
-      expiring: 'تنتهي قريباً',
-      expired: 'منتهية',
-      daysLeft: 'باقي {{days}} يوم'
-    },
 
     actions: {
       view: 'عرض',
@@ -643,7 +636,6 @@ export const ar = {
 
       // Additional form labels
       entityNameLabel: 'اسم الجهة *',
-      entityNamePlaceholder: 'أدخل اسم الجهة',
       employeeDataLabel: 'بيانات الموظف',
       filterByCompanyLabel: 'تصفية حسب الشركة (اختياري)',
       allCompaniesOption: 'جميع الشركات',
