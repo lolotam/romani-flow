@@ -121,7 +121,7 @@ export default function EmployeeDocuments() {
   const [isPhotoUploadOpen, setIsPhotoUploadOpen] = useState(false);
   const [employeePhoto, setEmployeePhoto] = useState<string | null>(null);
   const { toast } = useToast();
-  const { t } = useLanguage();
+  const { t, language } = useLanguage();
 
   useEffect(() => {
     if (employeeId) {

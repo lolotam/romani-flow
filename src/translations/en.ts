@@ -202,8 +202,6 @@ export const en = {
       addDescription: 'Enter new employee information',
       editTitle: 'Edit Employee',
       editDescription: 'Update employee information',
-      editTitle: 'Edit Employee',
-      editDescription: 'Update employee information',
       viewTitle: 'Employee Details',
       viewDescription: 'View employee details',
 
@@ -266,44 +264,8 @@ export const en = {
     exportJSON: 'Export as JSON',
 
     // Dialog
-    dialog: {
-      addTitle: 'Add New Employee',
-      addDescription: 'Enter new employee information',
-      editTitle: 'Edit Employee',
-      editDescription: 'Edit selected employee information',
-      buttons: {
-        add: 'Add Employee',
-        update: 'Update Information',
-        cancel: 'Cancel'
-      },
-      fields: {
-        name: 'Name *',
-        email: 'Email Address',
-        mobileNo: 'Mobile Number',
-        position: 'Position',
-        selectPosition: 'Select Position',
-        company: 'Company *',
-        selectCompany: 'Select Company',
-        birthDate: 'Birth Date (dd/mm/yyyy)',
-        civilId: 'Civil ID Number',
-        hireDate: 'Hire Date (dd/mm/yyyy)',
-        residencyExpiry: 'Residency Expiry (dd/mm/yyyy)',
-        drivingLicense: 'Driving License',
-        validLicense: 'Valid ✓',
-        invalidLicense: 'Invalid ✗',
-        drivingLicenseExpiry: 'Driving License Expiry (dd/mm/yyyy)',
-        employeeStatus: 'Employee Status',
-        documentCount: 'Document Count',
-        willUpdateAfterAdd: '0 documents (will be updated after adding documents)',
-        documentCountEdit: 'documents'
-      }
-    },
 
     // Search
-    search: 'Search',
-    searchPlaceholder: 'Search by name, email, mobile, or position...',
-    filterByCompany: 'Filter by Company',
-    allCompanies: 'All Companies'
   },
 
   // Settings Page
@@ -395,7 +357,6 @@ export const en = {
       name: 'Company Name',
       nameArabic: 'Name in Arabic',
       nameEnglish: 'Name in English',
-      description: 'Description',
       currentCompanies: 'Current Companies',
       employeeCount: '{{count}} employees',
       nameArabicPlaceholder: 'Enter company name in Arabic',
@@ -651,12 +612,6 @@ export const en = {
       actions: 'Actions'
     },
 
-    status: {
-      valid: 'Valid',
-      expiring: 'Expiring Soon',
-      expired: 'Expired',
-      daysLeft: '{{days}} days left'
-    },
 
     actions: {
       view: 'View',
@@ -698,7 +653,6 @@ export const en = {
 
       // Additional form labels
       entityNameLabel: 'Entity Name *',
-      entityNamePlaceholder: 'Enter entity name',
       employeeDataLabel: 'Employee Data',
       filterByCompanyLabel: 'Filter by Company (optional)',
       allCompaniesOption: 'All Companies',
