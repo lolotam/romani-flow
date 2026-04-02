@@ -1,90 +1,80 @@
 
 
-# Implement Resend Email System — Full Implementation Plan
+# Frontend Redesign — Teal/Cyan Medical Color Palette
 
-## Overview
-Replace the current EmailJS-based email system with Resend API via a Supabase Edge Function. Create a daily cron job for automated expiry checking. Update the UI to remove SMTP fields. The Resend connector will be connected later when the API key is available.
+## Extracted Color Palette from Reference Image
 
-## Step 1: Create Edge Function `send-expiry-report`
-**New file**: `supabase/functions/send-expiry-report/index.ts`
+The reference image uses a clean medical/health teal-cyan palette:
 
-This Edge Function will:
-- Accept POST requests with optional `recipientEmail` and `senderEmail` parameters
-- Create a Supabase client with service role key
-- Query `employees` table for records where `residency_expiry_date` is within 30 days or expired
-- Query `documents` table for records where `expiry_date` is within 30 days or expired
-- Join documents with employees to get employee names
-- Build a styled HTML report (RTL Arabic) with:
-  - Summary stats (total expiring, expired, critical)
-  - Table of expiring employee residencies
-  - Table of expiring employee/company documents
-- Send via Resend connector gateway (`https://connector-gateway.lovable.dev/resend/emails`) using `RESEND_API_KEY` and `LOVABLE_API_KEY`
-- Return success/failure response with CORS headers
-- Gracefully handle missing API keys with a clear error message (so the app works before the connector is linked)
-
-## Step 2: Create pg_cron Migration for Daily Trigger
-**New file**: `supabase/migrations/XXXX_daily_expiry_cron.sql`
-
-```sql
-SELECT cron.schedule(
-  'daily-expiry-check',
-  '0 8 * * *',
-  $$
-  SELECT net.http_post(
-    url := '...' || '/functions/v1/send-expiry-report',
-    headers := jsonb_build_object(...),
-    body := '{}'::jsonb
-  )
-  $$
-);
+```text
+Primary Teal:     HSL(175, 45%, 42%)  — #3BA99E (dominant buttons, headers)
+Dark Teal:        HSL(178, 55%, 25%)  — #1C6B66 (sidebar, headings)
+Light Ice Blue:   HSL(195, 45%, 92%)  — #D8EDF2 (backgrounds, cards)
+Pale Cyan:        HSL(185, 35%, 96%)  — #EDF6F8 (subtle backgrounds)
+Accent Mint:      HSL(165, 40%, 85%)  — #BDE8DD (badges, highlights)
+White:            #FFFFFF             (card surfaces)
+Dark Navy:        HSL(210, 50%, 15%)  — #132A3E (text)
 ```
 
-## Step 3: Rewrite `src/lib/emailService.ts`
-- Remove `import emailjs` and all EmailJS constants/initialization
-- Keep utility functions: `ExpiryData`, `EmailNotificationSettings`, `getExpiringEmployees`, `getExpiringDocuments`, `calculateDaysUntilExpiry`, `generateEmailHTML`
-- Replace `sendExpiryNotification` to call `supabase.functions.invoke('send-expiry-report', { body: { recipientEmail, senderEmail } })`
-- Replace `checkAndSendNotifications` similarly
-- Remove `sendEmployeeExpiryNotification`, `sendCompanyExpiryNotification`, `sendIndividualEmployeeNotifications`, `checkAndSendNotificationsLegacy` (all used EmailJS directly)
+## What Changes (Frontend Only)
 
-## Step 4: Update `src/components/settings/types.ts`
-Replace `EmailSettingsData`:
-```typescript
-export interface EmailSettingsData {
-  resend_from_email: string;    // sender address
-  email_receiver: string;       // recipient
-  enable_notifications: boolean;
-  daily_schedule: boolean;      // replaces weekly/monthly
-}
-```
+### 1. CSS Variables (`src/index.css`)
+- Replace the entire `:root` color system with the teal palette
+- Replace the `.dark` theme with a complementary dark teal scheme
+- Update gradients to use teal-to-cyan instead of indigo-to-purple
+- Update shadow variables to use teal tints
+- Remove the duplicate second `:root` block (lines 225-311) — consolidate into one clean block
 
-## Step 5: Update `src/components/settings/EmailSettings.tsx`
-- Remove all SMTP fields (server, port, username, password, sender)
-- Replace with:
-  - Resend sender email input
-  - Recipient email input
-  - Enable daily notifications toggle
-- Keep the expiry monitoring cards, tables, and action buttons as-is
+### 2. Tailwind Config (`tailwind.config.ts`)
+- No structural changes needed (it references CSS variables)
+- Update font stack: add Inter for LTR alongside Tajawal/Cairo for Arabic
 
-## Step 6: Update `src/pages/Settings.tsx`
-- Update `emailSettings` initial state to match new `EmailSettingsData` type
-- Update `handleSendTestEmail` to invoke the Edge Function via `supabase.functions.invoke`
-- Update `handleAutoNotifications` similarly
-- Remove imports of deleted functions from emailService
+### 3. Login Page (`src/pages/Login.tsx`)
+- Update gradient orbs to teal/cyan/mint instead of primary/medical/corporate
+- Style the login card with a subtle teal border accent
+- Update the icon container to teal gradient
 
-## Step 7: Remove `@emailjs/browser` Dependency
-- Remove from `package.json`
+### 4. Landing Page (`src/pages/Index.tsx`)
+- Update feature cards to use glass-teal styling
+- Update gradient backgrounds to teal palette
+- Refine the hero section with cleaner spacing
+
+### 5. Layout & Sidebar (`src/components/Layout.tsx`, `src/components/AppSidebar.tsx`)
+- Update header: clean white with subtle teal bottom border
+- Sidebar: dark teal background with white text (matches reference's professional look)
+- Active nav item: mint/light-teal highlight with teal text
+- Sidebar header: teal gradient brand area
+
+### 6. Dashboard (`src/pages/Dashboard.tsx`)
+- Stat cards: clean white cards with teal icon accents and subtle left-border color coding
+- Remove the debug/force-refresh section (not professional)
+- Quick action buttons: teal-outlined style
+- Expiry table: teal header row, clean alternating rows
+
+### 7. Employee Card (`src/components/EmployeeCard.tsx`)
+- Avatar fallback: teal background with white text
+- Document count badge: teal instead of blue
+- Hover state: subtle teal shadow
+
+### 8. Global Component Touches
+- Buttons (`src/components/ui/button.tsx`): primary variant picks up new teal from CSS vars automatically
+- Badges, status indicators: will inherit new palette from CSS vars
+- No changes to data logic, API calls, database layer, or Edge Functions
 
 ## Files Modified
-1. `supabase/functions/send-expiry-report/index.ts` — NEW
-2. `supabase/migrations/XXXX_daily_expiry_cron.sql` — NEW
-3. `src/lib/emailService.ts` — Rewrite (remove EmailJS, keep utilities, add Edge Function invoke)
-4. `src/components/settings/types.ts` — Update interface
-5. `src/components/settings/EmailSettings.tsx` — Remove SMTP fields, simplify
-6. `src/pages/Settings.tsx` — Update state and handlers
-7. `package.json` — Remove `@emailjs/browser`
+1. `src/index.css` — Full color system rewrite (consolidated, no duplicates)
+2. `tailwind.config.ts` — Minor font update
+3. `src/pages/Login.tsx` — Visual styling classes only
+4. `src/pages/Index.tsx` — Visual styling classes only
+5. `src/pages/Dashboard.tsx` — Card styling, remove debug section
+6. `src/components/Layout.tsx` — Header styling
+7. `src/components/AppSidebar.tsx` — Sidebar color scheme
+8. `src/components/EmployeeCard.tsx` — Card accent colors
 
-## Important Notes
-- The Edge Function will return a descriptive error if the Resend connector is not yet linked — the app will still build and run
-- Once you provide the Resend API key, we will connect it and the system will start sending emails automatically
-- The cron job runs daily at 8 AM and requires no manual intervention
+## What Does NOT Change
+- All backend logic, Supabase queries, Edge Functions
+- All translation files
+- All routing, authentication, data flow
+- Settings, Documents, EmployeeDocuments pages (they inherit new colors from CSS vars)
+- Package dependencies
 
