@@ -53,12 +53,11 @@ export default function Login() {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-subtle flex items-center justify-center p-4 relative overflow-hidden">
-      {/* Background decorative elements */}
+    <div className="min-h-screen bg-background flex items-center justify-center p-4 relative overflow-hidden">
       <div className="absolute inset-0 overflow-hidden">
-        <div className="absolute -top-40 -right-40 w-80 h-80 bg-gradient-primary rounded-full opacity-20 blur-3xl animate-pulse-glow"></div>
-        <div className="absolute -bottom-40 -left-40 w-80 h-80 bg-gradient-medical rounded-full opacity-20 blur-3xl animate-pulse-glow"></div>
-        <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 w-96 h-96 bg-gradient-corporate rounded-full opacity-10 blur-3xl"></div>
+        <div className="absolute -top-40 -right-40 w-80 h-80 bg-primary rounded-full opacity-10 blur-3xl"></div>
+        <div className="absolute -bottom-40 -left-40 w-80 h-80 bg-[hsl(var(--medical))] rounded-full opacity-15 blur-3xl"></div>
+        <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 w-96 h-96 bg-[hsl(var(--corporate))] rounded-full opacity-10 blur-3xl"></div>
       </div>
 
       <div className="absolute top-4 right-4 z-50 flex items-center gap-2 rtl:left-4 rtl:right-auto">
