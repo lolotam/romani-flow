@@ -356,10 +356,10 @@ export default function Dashboard() {
   };
 
   const quickActions = [
-    { titleKey: 'dashboard.quickActions.addDocument', icon: Plus, href: '/documents', action: () => window.location.href = '/documents' },
-    { titleKey: 'dashboard.quickActions.addEmployee', icon: Users, href: '/employees', action: () => window.location.href = '/employees' },
+    { titleKey: 'dashboard.quickActions.addDocument', icon: Plus, href: '/documents', action: () => navigate('/documents') },
+    { titleKey: 'dashboard.quickActions.addEmployee', icon: Users, href: '/employees', action: () => navigate('/employees') },
     { titleKey: 'dashboard.quickActions.exportData', icon: Download, href: '#', action: exportAllData },
-    { titleKey: 'dashboard.quickActions.settings', icon: Settings, href: '/settings', action: () => window.location.href = '/settings' }
+    { titleKey: 'dashboard.quickActions.settings', icon: Settings, href: '/settings', action: () => navigate('/settings') }
   ];
 
   if (isLoading) {
