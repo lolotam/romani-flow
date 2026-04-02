@@ -2,12 +2,12 @@ import { Button } from "@/components/ui/button";
 
 const Index = () => {
   return (
-    <div className="min-h-screen bg-gradient-subtle flex items-center justify-center p-4 relative overflow-hidden">
+    <div className="min-h-screen bg-background flex items-center justify-center p-4 relative overflow-hidden">
       {/* Background decorative elements */}
       <div className="absolute inset-0 overflow-hidden">
-        <div className="absolute -top-40 -right-40 w-80 h-80 bg-gradient-primary rounded-full opacity-20 blur-3xl animate-pulse-glow"></div>
-        <div className="absolute -bottom-40 -left-40 w-80 h-80 bg-gradient-medical rounded-full opacity-20 blur-3xl animate-pulse-glow"></div>
-        <div className="absolute top-1/4 left-1/4 w-96 h-96 bg-gradient-corporate rounded-full opacity-10 blur-3xl"></div>
+        <div className="absolute -top-40 -right-40 w-80 h-80 rounded-full opacity-15 blur-3xl bg-primary"></div>
+        <div className="absolute -bottom-40 -left-40 w-80 h-80 rounded-full opacity-15 blur-3xl bg-[hsl(var(--medical))]"></div>
+        <div className="absolute top-1/4 left-1/4 w-96 h-96 rounded-full opacity-10 blur-3xl bg-[hsl(var(--corporate))]"></div>
       </div>
 
       <div className="text-center space-y-8 p-8 relative z-10 max-w-4xl">
@@ -26,7 +26,7 @@ const Index = () => {
         <div className="flex flex-col sm:flex-row gap-4 justify-center items-center animate-fade-up">
           <Button 
             size="lg"
-            className="bg-gradient-primary hover:opacity-90 text-primary-foreground shadow-elegant hover:shadow-glow transition-all duration-300 transform hover:scale-105 px-8 py-4 text-lg"
+            className="bg-primary hover:bg-primary/90 text-primary-foreground shadow-elegant hover:shadow-glow transition-all duration-300 transform hover:scale-105 px-8 py-4 text-lg"
             onClick={() => window.location.href = '/login'}
           >
             تسجيل الدخول للنظام
@@ -34,7 +34,7 @@ const Index = () => {
           <Button 
             variant="outline"
             size="lg"
-            className="border-border hover:bg-accent transition-all duration-300 px-8 py-4 text-lg neomorphism"
+            className="border-primary/30 hover:bg-accent transition-all duration-300 px-8 py-4 text-lg"
           >
             معرفة المزيد
           </Button>
@@ -42,7 +42,7 @@ const Index = () => {
 
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mt-16 animate-fade-up">
           <div className="text-center p-6 rounded-xl glass">
-            <div className="w-12 h-12 bg-gradient-primary rounded-lg mx-auto mb-4 flex items-center justify-center shadow-glow">
+            <div className="w-12 h-12 bg-primary rounded-lg mx-auto mb-4 flex items-center justify-center">
               <span className="text-primary-foreground font-bold text-xl">📄</span>
             </div>
             <h3 className="font-semibold text-foreground mb-2">إدارة الوثائق</h3>
@@ -52,7 +52,7 @@ const Index = () => {
           </div>
 
           <div className="text-center p-6 rounded-xl glass">
-            <div className="w-12 h-12 bg-gradient-medical rounded-lg mx-auto mb-4 flex items-center justify-center shadow-glow">
+            <div className="w-12 h-12 bg-[hsl(var(--success))] rounded-lg mx-auto mb-4 flex items-center justify-center">
               <span className="text-primary-foreground font-bold text-xl">👥</span>
             </div>
             <h3 className="font-semibold text-foreground mb-2">إدارة الموظفين</h3>
@@ -62,7 +62,7 @@ const Index = () => {
           </div>
 
           <div className="text-center p-6 rounded-xl glass">
-            <div className="w-12 h-12 bg-gradient-corporate rounded-lg mx-auto mb-4 flex items-center justify-center shadow-glow">
+            <div className="w-12 h-12 bg-[hsl(var(--corporate))] rounded-lg mx-auto mb-4 flex items-center justify-center">
               <span className="text-primary-foreground font-bold text-xl">📊</span>
             </div>
             <h3 className="font-semibold text-foreground mb-2">التقارير والإحصائيات</h3>

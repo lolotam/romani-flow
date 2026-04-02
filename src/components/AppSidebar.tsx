@@ -8,7 +8,6 @@ import {
   LogOut,
   ChevronLeft,
   ChevronRight,
-  Home
 } from "lucide-react";
 import {
   Sidebar,
@@ -41,48 +40,37 @@ export function AppSidebar() {
     { title: t('nav.settings'), url: "/settings", icon: Settings },
   ];
 
-  const currentPath = location.pathname;
-
-  const isActive = (path: string) => currentPath === path;
-
-  const getNavCls = ({ isActive }: { isActive: boolean }) =>
-    isActive
-      ? "bg-primary/10 text-primary font-medium border-r-2 border-primary"
-      : "hover:bg-accent/50 text-muted-foreground hover:text-foreground";
+  const isActive = (path: string) => location.pathname === path;
 
   return (
     <Sidebar
       side={language === 'ar' ? 'right' : 'left'}
-      className={`${collapsed ? "w-16" : "w-64"} transition-all duration-300 border-r border-border/50 bg-card/50 backdrop-blur-sm`}
+      className={`${collapsed ? "w-16" : "w-64"} transition-all duration-300 border-none`}
     >
-      <SidebarContent className="p-0">
+      <SidebarContent className="p-0 bg-[hsl(var(--sidebar-background))] text-[hsl(var(--sidebar-foreground))]">
         {/* Header */}
-        <div className={`p-4 border-b border-border/50 ${collapsed ? "px-2" : "px-4"}`}>
+        <div className={`p-4 border-b border-[hsl(var(--sidebar-border))] ${collapsed ? "px-2" : "px-4"}`}>
           <div className="flex items-center justify-between">
             <div className={`flex items-center gap-3 ${collapsed ? "justify-center" : ""}`}>
-              <div className="p-2 bg-primary/10 rounded-lg">
-                <Building2 className="h-6 w-6 text-primary" />
+              <div className="p-2 bg-[hsl(var(--sidebar-primary))] rounded-lg">
+                <Building2 className="h-6 w-6 text-[hsl(var(--sidebar-primary-foreground))]" />
               </div>
               {!collapsed && (
                 <div>
-                  <h2 className="text-lg font-bold text-gradient">{t('header.title')}</h2>
-                  <p className="text-xs text-muted-foreground">{t('header.subtitle')}</p>
+                  <h2 className="text-lg font-bold text-[hsl(var(--sidebar-foreground))]">{t('header.title')}</h2>
+                  <p className="text-xs text-[hsl(var(--sidebar-foreground))] opacity-60">{t('header.subtitle')}</p>
                 </div>
               )}
             </div>
-            <SidebarTrigger className="h-8 w-8 rounded-md hover:bg-accent">
-              {collapsed ? (
-                <ChevronRight className="h-4 w-4" />
-              ) : (
-                <ChevronLeft className="h-4 w-4" />
-              )}
+            <SidebarTrigger className="h-8 w-8 rounded-md hover:bg-[hsl(var(--sidebar-accent))] text-[hsl(var(--sidebar-foreground))]">
+              {collapsed ? <ChevronRight className="h-4 w-4" /> : <ChevronLeft className="h-4 w-4" />}
             </SidebarTrigger>
           </div>
         </div>
 
-        {/* Navigation Menu */}
+        {/* Navigation */}
         <SidebarGroup className="px-0">
-          <SidebarGroupLabel className={`px-4 text-xs uppercase tracking-wide text-muted-foreground ${collapsed ? "sr-only" : ""}`}>
+          <SidebarGroupLabel className={`px-4 text-xs uppercase tracking-wide text-[hsl(var(--sidebar-foreground))] opacity-50 ${collapsed ? "sr-only" : ""}`}>
             {t('nav.dashboard')}
           </SidebarGroupLabel>
           <SidebarGroupContent className="px-2">
@@ -93,7 +81,11 @@ export function AppSidebar() {
                     <NavLink
                       to={item.url}
                       end
-                      className={`${getNavCls({ isActive: isActive(item.url) })} flex items-center gap-3 px-3 py-3 rounded-lg transition-all duration-200 ${collapsed ? "justify-center" : ""}`}
+                      className={`flex items-center gap-3 px-3 py-3 rounded-lg transition-all duration-200 ${collapsed ? "justify-center" : ""} ${
+                        isActive(item.url)
+                          ? "bg-[hsl(var(--sidebar-primary))] text-[hsl(var(--sidebar-primary-foreground))] font-medium shadow-sm"
+                          : "text-[hsl(var(--sidebar-foreground))] opacity-80 hover:opacity-100 hover:bg-[hsl(var(--sidebar-accent))]"
+                      }`}
                     >
                       <item.icon className="h-5 w-5" />
                       {!collapsed && <span className="font-medium">{item.title}</span>}
@@ -106,12 +98,12 @@ export function AppSidebar() {
         </SidebarGroup>
 
         {/* Footer */}
-        <div className="mt-auto p-2 border-t border-border/50 space-y-1">
+        <div className="mt-auto p-2 border-t border-[hsl(var(--sidebar-border))] space-y-1">
           <ThemeToggle collapsed={collapsed} />
           <Button
             variant="ghost"
             onClick={logout}
-            className={`w-full flex items-center gap-2 ${collapsed ? "px-2 justify-center" : "px-3 justify-start"} py-3 text-destructive hover:bg-destructive/10 hover:text-destructive transition-colors`}
+            className={`w-full flex items-center gap-2 ${collapsed ? "px-2 justify-center" : "px-3 justify-start"} py-3 text-red-300 hover:bg-red-500/20 hover:text-red-200 transition-colors`}
           >
             <LogOut className="h-5 w-5" />
             {!collapsed && <span>{t('nav.logout')}</span>}

@@ -1,87 +1,104 @@
-@import url('https://fonts.googleapis.com/css2?family=Cairo:wght@200..1000&family=Tajawal:wght@200;300;400;500;700;800;900&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Cairo:wght@200..1000&family=Tajawal:wght@200;300;400;500;700;800;900&family=Inter:wght@300;400;500;600;700&display=swap');
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
 @layer base {
   :root {
-    /* Modern Arabic RTL design system - inspired by Canva */
-    --background: 248 250 252;
-    --foreground: 15 23 42;
-    --card: 255 255 255;
-    --card-foreground: 15 23 42;
-    --popover: 255 255 255;
-    --popover-foreground: 15 23 42;
-    --primary: 79 70 229;
-    --primary-foreground: 248 250 252;
-    --primary-glow: 109 40 217;
-    --secondary: 241 245 249;
-    --secondary-foreground: 15 23 42;
-    --muted: 248 250 252;
-    --muted-foreground: 100 116 139;
-    --accent: 236 254 255;
-    --accent-foreground: 15 23 42;
-    --destructive: 239 68 68;
-    --destructive-foreground: 248 250 252;
-    --border: 226 232 240;
-    --input: 226 232 240;
-    --ring: 79 70 229;
+    /* Teal/Cyan Medical Color Palette */
+    --background: 185 35% 97%;
+    --foreground: 210 50% 15%;
+    --card: 0 0% 100%;
+    --card-foreground: 210 50% 15%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 210 50% 15%;
+    --primary: 175 45% 42%;
+    --primary-foreground: 0 0% 100%;
+    --primary-glow: 170 50% 35%;
+    --secondary: 195 30% 94%;
+    --secondary-foreground: 210 50% 15%;
+    --muted: 195 25% 94%;
+    --muted-foreground: 210 15% 47%;
+    --accent: 165 30% 92%;
+    --accent-foreground: 210 50% 15%;
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 195 25% 88%;
+    --input: 195 25% 88%;
+    --ring: 175 45% 42%;
     --radius: 0.75rem;
 
-    /* Custom color palette */
-    --success: 34 197 94;
-    --warning: 251 191 36;
-    --info: 59 130 246;
-    --medical: 16 185 129;
-    --corporate: 99 102 241;
+    /* Custom palette */
+    --success: 152 69% 45%;
+    --warning: 38 92% 56%;
+    --info: 195 85% 50%;
+    --medical: 165 40% 85%;
+    --corporate: 178 55% 25%;
 
-    /* Gradients for modern design */
-    --gradient-primary: linear-gradient(135deg, hsl(var(--primary)), hsl(var(--primary-glow)));
-    --gradient-subtle: linear-gradient(135deg, hsl(var(--background)), hsl(var(--accent)));
-    --gradient-medical: linear-gradient(135deg, hsl(var(--medical)), hsl(var(--info)));
-    --gradient-corporate: linear-gradient(135deg, hsl(var(--corporate)), hsl(var(--primary)));
+    /* Sidebar */
+    --sidebar-background: 178 55% 22%;
+    --sidebar-foreground: 170 20% 95%;
+    --sidebar-primary: 165 40% 85%;
+    --sidebar-primary-foreground: 178 55% 18%;
+    --sidebar-accent: 178 45% 28%;
+    --sidebar-accent-foreground: 170 20% 95%;
+    --sidebar-border: 178 40% 30%;
+    --sidebar-ring: 175 45% 42%;
 
-    /* Shadows with depth */
-    --shadow-elegant: 0 20px 25px -5px hsl(var(--primary) / 0.1), 0 10px 10px -5px hsl(var(--primary) / 0.04);
-    --shadow-glow: 0 0 40px hsl(var(--primary-glow) / 0.3);
-    --shadow-soft: 0 4px 6px -1px hsl(var(--foreground) / 0.1), 0 2px 4px -1px hsl(var(--foreground) / 0.06);
+    /* Gradients */
+    --gradient-primary: linear-gradient(135deg, hsl(175 45% 42%), hsl(170 50% 35%));
+    --gradient-subtle: linear-gradient(135deg, hsl(185 35% 97%), hsl(195 30% 94%));
+    --gradient-medical: linear-gradient(135deg, hsl(165 40% 85%), hsl(175 45% 42%));
+    --gradient-corporate: linear-gradient(135deg, hsl(178 55% 25%), hsl(175 45% 42%));
 
-    /* Animations and transitions */
+    /* Shadows */
+    --shadow-elegant: 0 20px 25px -5px hsl(175 45% 42% / 0.08), 0 10px 10px -5px hsl(175 45% 42% / 0.04);
+    --shadow-glow: 0 0 30px hsl(175 45% 42% / 0.2);
+    --shadow-soft: 0 4px 6px -1px hsl(210 50% 15% / 0.06), 0 2px 4px -1px hsl(210 50% 15% / 0.04);
+
     --transition-smooth: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
     --transition-bounce: all 0.3s cubic-bezier(0.68, -0.55, 0.265, 1.55);
   }
 
   .dark {
-    --background: 2 6 23;
-    --foreground: 248 250 252;
-    --card: 15 23 42;
-    --card-foreground: 248 250 252;
-    --popover: 15 23 42;
-    --popover-foreground: 248 250 252;
-    --primary: 129 140 248;
-    --primary-foreground: 15 23 42;
-    --primary-glow: 167 139 250;
-    --secondary: 30 41 59;
-    --secondary-foreground: 248 250 252;
-    --muted: 30 41 59;
-    --muted-foreground: 148 163 184;
-    --accent: 30 41 59;
-    --accent-foreground: 248 250 252;
-    --destructive: 220 38 38;
-    --destructive-foreground: 248 250 252;
-    --border: 30 41 59;
-    --input: 30 41 59;
-    --ring: 129 140 248;
+    --background: 210 45% 8%;
+    --foreground: 185 20% 95%;
+    --card: 210 40% 12%;
+    --card-foreground: 185 20% 95%;
+    --popover: 210 40% 12%;
+    --popover-foreground: 185 20% 95%;
+    --primary: 175 45% 50%;
+    --primary-foreground: 210 45% 8%;
+    --primary-glow: 170 50% 45%;
+    --secondary: 210 30% 18%;
+    --secondary-foreground: 185 20% 95%;
+    --muted: 210 30% 18%;
+    --muted-foreground: 195 15% 60%;
+    --accent: 210 30% 18%;
+    --accent-foreground: 185 20% 95%;
+    --destructive: 0 63% 31%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 210 30% 20%;
+    --input: 210 30% 20%;
+    --ring: 175 45% 50%;
 
-    /* Dark mode gradients */
-    --gradient-primary: linear-gradient(135deg, hsl(var(--primary)), hsl(var(--primary-glow)));
-    --gradient-subtle: linear-gradient(135deg, hsl(var(--background)), hsl(var(--accent)));
-    --gradient-medical: linear-gradient(135deg, hsl(34 197 94), hsl(59 130 246));
-    --gradient-corporate: linear-gradient(135deg, hsl(99 102 241), hsl(var(--primary)));
+    --sidebar-background: 210 45% 6%;
+    --sidebar-foreground: 185 20% 90%;
+    --sidebar-primary: 175 45% 50%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 210 30% 15%;
+    --sidebar-accent-foreground: 185 20% 90%;
+    --sidebar-border: 210 30% 15%;
+    --sidebar-ring: 175 45% 50%;
 
-    --shadow-elegant: 0 20px 25px -5px hsl(0 0 0 / 0.4), 0 10px 10px -5px hsl(0 0 0 / 0.2);
-    --shadow-glow: 0 0 40px hsl(var(--primary-glow) / 0.4);
-    --shadow-soft: 0 4px 6px -1px hsl(0 0 0 / 0.3), 0 2px 4px -1px hsl(0 0 0 / 0.2);
+    --gradient-primary: linear-gradient(135deg, hsl(175 45% 50%), hsl(170 50% 45%));
+    --gradient-subtle: linear-gradient(135deg, hsl(210 45% 8%), hsl(210 30% 12%));
+    --gradient-medical: linear-gradient(135deg, hsl(165 30% 30%), hsl(175 45% 50%));
+    --gradient-corporate: linear-gradient(135deg, hsl(178 40% 18%), hsl(175 45% 50%));
+
+    --shadow-elegant: 0 20px 25px -5px hsl(0 0% 0% / 0.3), 0 10px 10px -5px hsl(0 0% 0% / 0.15);
+    --shadow-glow: 0 0 30px hsl(175 45% 50% / 0.25);
+    --shadow-soft: 0 4px 6px -1px hsl(0 0% 0% / 0.2), 0 2px 4px -1px hsl(0 0% 0% / 0.15);
   }
 }
 
@@ -95,15 +112,13 @@
     text-align: start;
   }
 
-  /* RTL-specific styles */
   html[dir="rtl"] {
     font-family: 'Tajawal', 'Cairo', Arial, sans-serif;
   }
 
-  /* Custom scroll bar for RTL */
   ::-webkit-scrollbar {
-    width: 8px;
-    height: 8px;
+    width: 6px;
+    height: 6px;
   }
 
   ::-webkit-scrollbar-track {
@@ -118,7 +133,6 @@
     @apply bg-muted-foreground/50;
   }
 
-  /* Modern animation utilities */
   .animate-fade-up {
     animation: fadeUp 0.6s cubic-bezier(0.4, 0, 0.2, 1) forwards;
   }
@@ -132,37 +146,20 @@
   }
 
   @keyframes fadeUp {
-    from {
-      opacity: 0;
-      transform: translateY(30px);
-    }
-    to {
-      opacity: 1;
-      transform: translateY(0);
-    }
+    from { opacity: 0; transform: translateY(30px); }
+    to { opacity: 1; transform: translateY(0); }
   }
 
   @keyframes fadeIn {
-    from {
-      opacity: 0;
-    }
-    to {
-      opacity: 1;
-    }
+    from { opacity: 0; }
+    to { opacity: 1; }
   }
 
   @keyframes scaleIn {
-    from {
-      opacity: 0;
-      transform: scale(0.9);
-    }
-    to {
-      opacity: 1;
-      transform: scale(1);
-    }
+    from { opacity: 0; transform: scale(0.9); }
+    to { opacity: 1; transform: scale(1); }
   }
 
-  /* Gradient text utility */
   .text-gradient {
     background: var(--gradient-primary);
     -webkit-background-clip: text;
@@ -170,152 +167,42 @@
     background-clip: text;
   }
 
-  /* Glass morphism effect */
   .glass {
-    background: rgba(255, 255, 255, 0.1);
-    backdrop-filter: blur(10px);
-    border: 1px solid rgba(255, 255, 255, 0.2);
+    background: hsl(0 0% 100% / 0.7);
+    backdrop-filter: blur(12px);
+    border: 1px solid hsl(195 25% 88% / 0.5);
   }
 
-  /* Neomorphism effects */
+  .dark .glass {
+    background: hsl(210 40% 12% / 0.6);
+    border: 1px solid hsl(210 30% 20% / 0.5);
+  }
+
   .neomorphism {
     background: hsl(var(--background));
     box-shadow: 
-      20px 20px 40px hsl(var(--foreground) / 0.1),
-      -20px -20px 40px hsl(255 255 255 / 0.8);
+      8px 8px 16px hsl(var(--foreground) / 0.06),
+      -8px -8px 16px hsl(0 0% 100% / 0.8);
   }
 
   .neomorphism-inset {
     background: hsl(var(--background));
     box-shadow:
-      inset 10px 10px 20px hsl(var(--foreground) / 0.1),
-      inset -10px -10px 20px hsl(255 255 255 / 0.8);
+      inset 4px 4px 8px hsl(var(--foreground) / 0.06),
+      inset -4px -4px 8px hsl(0 0% 100% / 0.8);
   }
 
-  /* Force date inputs to show dd/mm/yyyy format */
   input[type="date"] {
-    /* Set locale to British English for dd/mm/yyyy format */
     -webkit-locale: "en-GB";
     locale: "en-GB";
   }
 
   input[type="date"]::-webkit-datetime-edit-fields-wrapper {
-    /* Try to force dd/mm/yyyy display order */
     unicode-bidi: bidi-override;
     direction: ltr;
   }
 
-  input[type="date"]::-webkit-datetime-edit-day-field {
-    order: 1;
-  }
-
-  input[type="date"]::-webkit-datetime-edit-month-field {
-    order: 2;
-  }
-
-  input[type="date"]::-webkit-datetime-edit-year-field {
-    order: 3;
-  }
-}
-
-/* Definition of the design system. All colors, gradients, fonts, etc should be defined here. 
-All colors MUST be HSL.
-*/
-
-@layer base {
-  :root {
-    --background: 0 0% 100%;
-    --foreground: 222.2 84% 4.9%;
-
-    --card: 0 0% 100%;
-    --card-foreground: 222.2 84% 4.9%;
-
-    --popover: 0 0% 100%;
-    --popover-foreground: 222.2 84% 4.9%;
-
-    --primary: 222.2 47.4% 11.2%;
-    --primary-foreground: 210 40% 98%;
-
-    --secondary: 210 40% 96.1%;
-    --secondary-foreground: 222.2 47.4% 11.2%;
-
-    --muted: 210 40% 96.1%;
-    --muted-foreground: 215.4 16.3% 46.9%;
-
-    --accent: 210 40% 96.1%;
-    --accent-foreground: 222.2 47.4% 11.2%;
-
-    --destructive: 0 84.2% 60.2%;
-    --destructive-foreground: 210 40% 98%;
-
-    --border: 214.3 31.8% 91.4%;
-    --input: 214.3 31.8% 91.4%;
-    --ring: 222.2 84% 4.9%;
-
-    --radius: 0.5rem;
-
-    --sidebar-background: 0 0% 98%;
-
-    --sidebar-foreground: 240 5.3% 26.1%;
-
-    --sidebar-primary: 240 5.9% 10%;
-
-    --sidebar-primary-foreground: 0 0% 98%;
-
-    --sidebar-accent: 240 4.8% 95.9%;
-
-    --sidebar-accent-foreground: 240 5.9% 10%;
-
-    --sidebar-border: 220 13% 91%;
-
-    --sidebar-ring: 217.2 91.2% 59.8%;
-  }
-
-  .dark {
-    --background: 222.2 84% 4.9%;
-    --foreground: 210 40% 98%;
-
-    --card: 222.2 84% 4.9%;
-    --card-foreground: 210 40% 98%;
-
-    --popover: 222.2 84% 4.9%;
-    --popover-foreground: 210 40% 98%;
-
-    --primary: 210 40% 98%;
-    --primary-foreground: 222.2 47.4% 11.2%;
-
-    --secondary: 217.2 32.6% 17.5%;
-    --secondary-foreground: 210 40% 98%;
-
-    --muted: 217.2 32.6% 17.5%;
-    --muted-foreground: 215 20.2% 65.1%;
-
-    --accent: 217.2 32.6% 17.5%;
-    --accent-foreground: 210 40% 98%;
-
-    --destructive: 0 62.8% 30.6%;
-    --destructive-foreground: 210 40% 98%;
-
-    --border: 217.2 32.6% 17.5%;
-    --input: 217.2 32.6% 17.5%;
-    --ring: 212.7 26.8% 83.9%;
-    --sidebar-background: 240 5.9% 10%;
-    --sidebar-foreground: 240 4.8% 95.9%;
-    --sidebar-primary: 224.3 76.3% 48%;
-    --sidebar-primary-foreground: 0 0% 100%;
-    --sidebar-accent: 240 3.7% 15.9%;
-    --sidebar-accent-foreground: 240 4.8% 95.9%;
-    --sidebar-border: 240 3.7% 15.9%;
-    --sidebar-ring: 217.2 91.2% 59.8%;
-  }
-}
-
-@layer base {
-  * {
-    @apply border-border;
-  }
-
-  body {
-    @apply bg-background text-foreground;
-  }
+  input[type="date"]::-webkit-datetime-edit-day-field { order: 1; }
+  input[type="date"]::-webkit-datetime-edit-month-field { order: 2; }
+  input[type="date"]::-webkit-datetime-edit-year-field { order: 3; }
 }

@@ -15,11 +15,10 @@ export function Layout({ children }: LayoutProps) {
 
   return (
     <SidebarProvider defaultOpen={true}>
-      <div className="min-h-screen flex w-full bg-gradient-subtle" dir={language === 'ar' ? 'rtl' : 'ltr'} >
+      <div className="min-h-screen flex w-full bg-background" dir={language === 'ar' ? 'rtl' : 'ltr'}>
         <AppSidebar />
         <div className="flex-1 flex flex-col min-w-0">
-          {/* Header with trigger for all screen sizes */}
-          <header className="h-14 flex items-center justify-between border-b border-border/50 bg-card/80 backdrop-blur-sm px-4">
+          <header className="h-14 flex items-center justify-between border-b border-border bg-card px-4">
             <h1 className="text-lg font-semibold text-foreground text-center flex-1 lg:text-start lg:flex-none">{t('header.title')}</h1>
             <div className="flex items-center gap-2">
               <ThemeToggle />
@@ -29,8 +28,6 @@ export function Layout({ children }: LayoutProps) {
               </SidebarTrigger>
             </div>
           </header>
-
-          {/* Main content */}
           <main className="flex-1 overflow-auto">
             {children}
           </main>
