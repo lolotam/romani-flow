@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { useTheme } from '@/contexts/ThemeProvider';
 import { motion } from 'framer-motion';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Button } from '@/components/ui/button';
@@ -31,8 +32,8 @@ import BackupSettings from '@/components/settings/BackupSettings';
 export default function Settings() {
   const { t, language, isRTL } = useLanguage();
   const { toast } = useToast();
+  const { theme, toggleTheme } = useTheme();
   const [activeTab, setActiveTab] = useState('email');
-  const [darkMode, setDarkMode] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
 
   // Data state
@@ -70,9 +71,6 @@ export default function Settings() {
 
   useEffect(() => {
     fetchData();
-    const isDark = localStorage.getItem('darkMode') === 'true';
-    setDarkMode(isDark);
-    if (isDark) document.documentElement.classList.add('dark');
 
     const savedDeletedReminders = localStorage.getItem('romani_deleted_reminders');
     if (savedDeletedReminders) {
@@ -120,13 +118,10 @@ export default function Settings() {
     });
   };
 
-  // Dark mode
+  // Dark mode — delegate to ThemeProvider
   const toggleDarkMode = () => {
-    const newDarkMode = !darkMode;
-    setDarkMode(newDarkMode);
-    localStorage.setItem('darkMode', newDarkMode.toString());
-    if (newDarkMode) { document.documentElement.classList.add('dark'); } else { document.documentElement.classList.remove('dark'); }
-    toast({ title: t('settings.settingsToasts.themeChanged'), description: t('settings.settingsToasts.themeChangedDesc', { status: newDarkMode ? t('settings.settingsToasts.enabled') : t('settings.settingsToasts.disabled') }) });
+    toggleTheme();
+    toast({ title: t('settings.settingsToasts.themeChanged'), description: t('settings.settingsToasts.themeChangedDesc', { status: theme === 'light' ? t('settings.settingsToasts.enabled') : t('settings.settingsToasts.disabled') }) });
   };
 
   // CRUD helpers
@@ -333,7 +328,7 @@ export default function Settings() {
             </TabsContent>
 
             <TabsContent value="appearance">
-              <AppearanceSettings darkMode={darkMode} onToggleDarkMode={toggleDarkMode} />
+              <AppearanceSettings darkMode={theme === 'dark'} onToggleDarkMode={toggleDarkMode} />
             </TabsContent>
 
             <TabsContent value="companies">

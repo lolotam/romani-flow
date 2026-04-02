@@ -124,11 +124,119 @@ export default function Employees() {
   };
 
   const handleAddEmployee = async () => {
-    console.log('Add employee function');
+    if (!formData.name.trim() || !formData.company_id) {
+      toast({
+        title: t('employees.messages.error'),
+        description: t('employees.messages.requiredFields') || 'Name and company are required',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    try {
+      const { data, error } = await jsonDatabase.insert('employees', {
+        name: formData.name,
+        email: formData.email || undefined,
+        mobile_no: formData.mobile_no || undefined,
+        position: formData.position || undefined,
+        hire_date: formData.hire_date || undefined,
+        birth_date: formData.birth_date || undefined,
+        civil_id_no: formData.civil_id_no || undefined,
+        residency_expiry_date: formData.residency_expiry_date || undefined,
+        driving_license: formData.driving_license,
+        driving_license_expiry_date: formData.driving_license ? formData.driving_license_expiry_date || undefined : undefined,
+        company_id: formData.company_id,
+        is_active: formData.is_active,
+      });
+
+      if (error) throw error;
+
+      // Add to local state with company info
+      const company = companies.find(c => c.id === formData.company_id);
+      const newEmployee: Employee = {
+        ...(data![0] as Employee),
+        companies: company ? { name: company.name, name_ar: company.name_ar } : undefined,
+        document_count: 0,
+      };
+      setEmployees(prev => [...prev, newEmployee]);
+
+      toast({
+        title: t('employees.messages.addSuccess') || 'Success',
+        description: formData.name,
+      });
+
+      setIsAddDialogOpen(false);
+      setFormData({
+        name: '', email: '', mobile_no: '', position: '', hire_date: '',
+        birth_date: '', civil_id_no: '', residency_expiry_date: '',
+        driving_license: false, driving_license_expiry_date: '',
+        company_id: '', is_active: true,
+      });
+    } catch (error) {
+      console.error('Error adding employee:', error);
+      toast({
+        title: t('employees.messages.error'),
+        description: t('employees.messages.addError') || 'Failed to add employee',
+        variant: 'destructive',
+      });
+    }
   };
 
   const handleEditEmployee = async () => {
-    console.log('Edit employee function');
+    if (!selectedEmployee || !formData.name.trim() || !formData.company_id) {
+      toast({
+        title: t('employees.messages.error'),
+        description: t('employees.messages.requiredFields') || 'Name and company are required',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    try {
+      const { data, error } = await jsonDatabase.update('employees', selectedEmployee.id, {
+        name: formData.name,
+        email: formData.email || undefined,
+        mobile_no: formData.mobile_no || undefined,
+        position: formData.position || undefined,
+        hire_date: formData.hire_date || undefined,
+        birth_date: formData.birth_date || undefined,
+        civil_id_no: formData.civil_id_no || undefined,
+        residency_expiry_date: formData.residency_expiry_date || undefined,
+        driving_license: formData.driving_license,
+        driving_license_expiry_date: formData.driving_license ? formData.driving_license_expiry_date || undefined : undefined,
+        company_id: formData.company_id,
+        is_active: formData.is_active,
+      });
+
+      if (error) throw error;
+
+      // Update local state
+      const company = companies.find(c => c.id === formData.company_id);
+      setEmployees(prev => prev.map(emp =>
+        emp.id === selectedEmployee.id
+          ? {
+              ...emp,
+              ...data,
+              companies: company ? { name: company.name, name_ar: company.name_ar } : emp.companies,
+            }
+          : emp
+      ));
+
+      toast({
+        title: t('employees.messages.editSuccess') || 'Success',
+        description: formData.name,
+      });
+
+      setIsEditDialogOpen(false);
+      setSelectedEmployee(null);
+    } catch (error) {
+      console.error('Error updating employee:', error);
+      toast({
+        title: t('employees.messages.error'),
+        description: t('employees.messages.editError') || 'Failed to update employee',
+        variant: 'destructive',
+      });
+    }
   };
 
   const handleViewEmployee = (employee: Employee) => {

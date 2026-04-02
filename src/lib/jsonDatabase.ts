@@ -67,13 +67,6 @@ export interface Document {
   updated_at: string;
 }
 
-export interface AdminUser {
-  id: string;
-  username: string;
-  password_hash: string;
-  created_at: string;
-  updated_at: string;
-}
 
 // Database structure
 interface Database {
@@ -83,7 +76,6 @@ interface Database {
   positions: Record<string, Position>;
   employees: Record<string, Employee>;
   documents: Record<string, Document>;
-  admin_users: Record<string, AdminUser>;
   indexes: {
     employees_by_company: Record<string, string[]>;
     documents_by_employee: Record<string, string[]>;
@@ -135,7 +127,7 @@ function loadDatabase(): Database {
     positions: {},
     employees: {},
     documents: {},
-    admin_users: {},
+    
     indexes: {
       employees_by_company: {},
       documents_by_employee: {},
