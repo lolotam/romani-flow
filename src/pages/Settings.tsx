@@ -15,7 +15,6 @@ import {
   getExpiringDocuments,
   sendExpiryNotification,
   checkAndSendNotifications,
-  EmailNotificationSettings,
   ExpiryData
 } from '@/lib/emailService';
 import { Mail, Moon, Building2, FileText, UserCog, Shield, Database } from 'lucide-react';
