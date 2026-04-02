@@ -131,12 +131,6 @@ export default function Dashboard() {
         const employeesCount = actualEmployees.length;
         const companiesCount = companies?.length || 0;
 
-        // DEBUG: Log all counts for verification
-        console.log('📈 DEBUG - Final counts:', {
-          documents: documentsCount,
-          employees: employeesCount,
-          companies: companiesCount
-        });
 
         // Calculate expiring and expired documents based on actual expiry dates
         let expiringCount = 0;
