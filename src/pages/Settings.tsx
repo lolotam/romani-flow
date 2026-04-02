@@ -58,15 +58,10 @@ export default function Settings() {
 
   // Email state
   const [emailSettings, setEmailSettings] = useState<EmailSettingsData>({
-    smtp_server: import.meta.env.VITE_SMTP_SERVER || 'smtp.gmail.com',
-    smtp_port: parseInt(import.meta.env.VITE_SMTP_PORT) || 587,
-    smtp_username: import.meta.env.VITE_SMTP_USERNAME || '',
-    smtp_password: import.meta.env.VITE_SMTP_PASSWORD || '',
-    email_sender: import.meta.env.VITE_EMAIL_SENDER || '',
-    email_receiver: import.meta.env.VITE_EMAIL_RECEIVER || '',
+    resend_from_email: '',
+    email_receiver: '',
     enable_notifications: true,
-    weekly_schedule: true,
-    monthly_schedule: true
+    daily_schedule: true
   });
   const [expiryData, setExpiryData] = useState<ExpiryData>({ employees: [], documents: [] });
   const [isCheckingExpiry, setIsCheckingExpiry] = useState(false);
