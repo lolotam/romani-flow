@@ -53,12 +53,11 @@ export default function Login() {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-subtle flex items-center justify-center p-4 relative overflow-hidden">
-      {/* Background decorative elements */}
+    <div className="min-h-screen bg-background flex items-center justify-center p-4 relative overflow-hidden">
       <div className="absolute inset-0 overflow-hidden">
-        <div className="absolute -top-40 -right-40 w-80 h-80 bg-gradient-primary rounded-full opacity-20 blur-3xl animate-pulse-glow"></div>
-        <div className="absolute -bottom-40 -left-40 w-80 h-80 bg-gradient-medical rounded-full opacity-20 blur-3xl animate-pulse-glow"></div>
-        <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 w-96 h-96 bg-gradient-corporate rounded-full opacity-10 blur-3xl"></div>
+        <div className="absolute -top-40 -right-40 w-80 h-80 bg-primary rounded-full opacity-10 blur-3xl"></div>
+        <div className="absolute -bottom-40 -left-40 w-80 h-80 bg-[hsl(var(--medical))] rounded-full opacity-15 blur-3xl"></div>
+        <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 w-96 h-96 bg-[hsl(var(--corporate))] rounded-full opacity-10 blur-3xl"></div>
       </div>
 
       <div className="absolute top-4 right-4 z-50 flex items-center gap-2 rtl:left-4 rtl:right-auto">
@@ -72,13 +71,13 @@ export default function Login() {
         transition={{ duration: 0.6 }}
         className="w-full max-w-md relative z-10"
       >
-        <Card className="shadow-elegant backdrop-blur-sm bg-card/80 border-border/50">
+        <Card className="shadow-elegant bg-card border-border">
           <CardHeader className="text-center space-y-4">
             <motion.div
               initial={{ scale: 0 }}
               animate={{ scale: 1 }}
               transition={{ delay: 0.2, type: "spring", stiffness: 200 }}
-              className="mx-auto w-16 h-16 bg-gradient-primary rounded-2xl flex items-center justify-center shadow-glow"
+              className="mx-auto w-16 h-16 bg-primary rounded-2xl flex items-center justify-center shadow-glow"
             >
               <div className="flex items-center space-x-1">
                 <Shield className="w-6 h-6 text-primary-foreground" />

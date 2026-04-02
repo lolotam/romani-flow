@@ -481,43 +481,6 @@ export default function Dashboard() {
           ))}
         </div>
 
-        {/* Debug Section - Force Refresh */}
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.3 }}
-          className="mb-4"
-        >
-          <Card className="border-blue-200 bg-blue-50/50">
-            <CardContent className="p-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <h4 className="text-sm font-semibold text-blue-800">
-                    {t('dashboard.debug.title')}
-                  </h4>
-                  <p className="text-xs text-blue-600">
-                    {t('dashboard.debug.description')}
-                  </p>
-                </div>
-                <Button
-                  onClick={forceRefresh}
-                  variant="outline"
-                  size="sm"
-                  className="border-blue-300 text-blue-700 hover:bg-blue-100"
-                >
-                  {t('dashboard.debug.forceRefresh')}
-                </Button>
-              </div>
-              <div className="mt-2 text-xs text-blue-600">
-                {t('dashboard.debug.currentCounts', {
-                  documents: stats.totalDocuments,
-                  employees: stats.totalEmployees,
-                  companies: stats.totalCompanies
-                })}
-              </div>
-            </CardContent>
-          </Card>
-        </motion.div>
 
         {/* Alerts Section */}
         {(stats.expiringDocuments > 0 || stats.expiredDocuments > 0) && (

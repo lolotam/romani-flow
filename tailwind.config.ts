@@ -19,9 +19,9 @@ export default {
 		},
 		extend: {
 			fontFamily: {
-				'sans': ['Tajawal', 'Cairo', 'Arial', 'sans-serif'],
-				'display': ['Cairo', 'Tajawal', 'Arial', 'sans-serif'],
-				'body': ['Tajawal', 'Cairo', 'Arial', 'sans-serif'],
+				'sans': ['Inter', 'Tajawal', 'Cairo', 'Arial', 'sans-serif'],
+				'display': ['Cairo', 'Inter', 'Tajawal', 'Arial', 'sans-serif'],
+				'body': ['Tajawal', 'Inter', 'Cairo', 'Arial', 'sans-serif'],
 			},
 			colors: {
 				border: 'hsl(var(--border))',

@@ -51,11 +51,11 @@ export function EmployeeCard({ employee, onViewDocuments, onViewProfile }: Emplo
   };
 
   return (
-    <Card className="group hover:shadow-elegant transition-all duration-300 cursor-pointer">
+    <Card className="group hover:shadow-elegant transition-all duration-300 cursor-pointer border-border">
       <CardHeader className="pb-3">
         <div className="flex items-start space-x-4">
           <Avatar className="h-12 w-12">
-            <AvatarFallback className="bg-primary/10 text-primary">
+            <AvatarFallback className="bg-primary text-primary-foreground font-semibold">
               {getInitials(employee.name)}
             </AvatarFallback>
           </Avatar>
@@ -73,7 +73,7 @@ export function EmployeeCard({ employee, onViewDocuments, onViewProfile }: Emplo
                     e.stopPropagation();
                     onViewDocuments(employee.id);
                   }}
-                  className="h-6 px-2 text-xs bg-blue-50 hover:bg-blue-100 border-blue-200 text-blue-700"
+                  className="h-6 px-2 text-xs bg-accent hover:bg-primary/10 border-border text-foreground"
                   title={`${employee.document_count || 0} ${t('employees.table.documents')}`}
                 >
                   <FileText className="h-3 w-3 mr-1" />
@@ -120,7 +120,7 @@ export function EmployeeCard({ employee, onViewDocuments, onViewProfile }: Emplo
           </div>
         )}
         
-        <div className="flex items-center justify-between pt-3 border-t">
+        <div className="flex items-center justify-between pt-3 border-t border-border">
           <Button
             variant="ghost"
             size="sm"
