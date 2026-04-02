@@ -71,9 +71,6 @@ export default function Settings() {
 
   useEffect(() => {
     fetchData();
-    const isDark = localStorage.getItem('darkMode') === 'true';
-    setDarkMode(isDark);
-    if (isDark) document.documentElement.classList.add('dark');
 
     const savedDeletedReminders = localStorage.getItem('romani_deleted_reminders');
     if (savedDeletedReminders) {
