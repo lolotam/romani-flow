@@ -10,7 +10,6 @@ import {
   Users,
   Building2,
   AlertTriangle,
-  TrendingUp,
   Calendar,
   Plus,
   Download,
@@ -25,34 +24,8 @@ import { useAuth } from '@/hooks/useAuth';
 import { useToast } from '@/hooks/use-toast';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { Layout } from '@/components/Layout';
-
-interface DashboardStats {
-  totalDocuments: number;
-  totalEmployees: number;
-  totalCompanies: number;
-  expiringDocuments: number;
-  expiredDocuments: number;
-}
-
-interface RecentActivity {
-  id: string;
-  type: 'employee_added' | 'document_added' | 'document_updated';
-  description: string;
-  date: string;
-  user: string;
-}
-
-interface ExpiringItem {
-  id: string;
-  title: string;
-  type: 'employee' | 'company';
-  entityName: string;
-  expiryDate: string;
-  daysLeft: number;
-  status: 'expired' | 'critical' | 'warning';
-  isPinned?: boolean;
-  isDeleted?: boolean;
-}
+import { useNavigate } from 'react-router-dom';
+import type { DashboardStats, RecentActivity, ExpiringItem } from '@/types';
 
 export default function Dashboard() {
   const [stats, setStats] = useState<DashboardStats>({
