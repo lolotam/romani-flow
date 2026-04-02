@@ -552,7 +552,8 @@ export default function EmployeeDocuments() {
           </div>
         </CardContent>
       </Card>
-    );
+      );
+    };
 
     if (isLoading) {
       return (

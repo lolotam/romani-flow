@@ -847,7 +847,45 @@ export default function Documents() {
               </DialogDescription>
             </DialogHeader>
             {selectedDocument && (
-              <div className="space-y-4">
+              <div className="space-y-6">
+                {/* File Preview Section */}
+                <div className="border rounded-lg p-4 bg-muted/30">
+                  <Label className="text-sm font-medium text-muted-foreground mb-2 block">معاينة الملف</Label>
+                  {(() => {
+                    const filePath = selectedDocument.file_path;
+                    if (!filePath) {
+                      return (
+                        <div className="text-center py-8 text-muted-foreground">
+                          <FileText className="h-12 w-12 mx-auto mb-2 opacity-50" />
+                          <p>لا يوجد ملف مرفق</p>
+                        </div>
+                      );
+                    }
+                    if (filePath.startsWith('data:image')) {
+                      return (
+                        <div className="flex justify-center">
+                          <img src={filePath} alt={selectedDocument.title} className="max-w-full max-h-96 object-contain rounded border" />
+                        </div>
+                      );
+                    }
+                    if (filePath.startsWith('data:application/pdf')) {
+                      return (
+                        <div className="text-center">
+                          <iframe src={filePath} className="w-full h-96 border rounded" title={selectedDocument.title} />
+                          <p className="text-sm text-muted-foreground mt-2">ملف PDF - اضغط على تحميل لعرضه بطريقة أفضل</p>
+                        </div>
+                      );
+                    }
+                    return (
+                      <div className="text-center py-8 text-muted-foreground">
+                        <FileText className="h-12 w-12 mx-auto mb-2 opacity-50" />
+                        <p>معاينة الملف غير متوفرة</p>
+                        <p className="text-xs">{selectedDocument.file_name || ''}</p>
+                      </div>
+                    );
+                  })()}
+                </div>
+
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div>
                     <Label className="text-sm font-medium text-muted-foreground">العنوان</Label>
