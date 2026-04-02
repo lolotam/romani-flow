@@ -77,7 +77,7 @@ export default function Login() {
               initial={{ scale: 0 }}
               animate={{ scale: 1 }}
               transition={{ delay: 0.2, type: "spring", stiffness: 200 }}
-              className="mx-auto w-16 h-16 bg-gradient-primary rounded-2xl flex items-center justify-center shadow-glow"
+              className="mx-auto w-16 h-16 bg-primary rounded-2xl flex items-center justify-center shadow-glow"
             >
               <div className="flex items-center space-x-1">
                 <Shield className="w-6 h-6 text-primary-foreground" />
