@@ -414,11 +414,27 @@ export default function Documents() {
     doc
   }: {
     doc: Document;
-  }) => <Card className="group hover:shadow-elegant transition-all duration-300 relative">
+  }) => {
+    const isImage = doc.file_path?.startsWith('data:image');
+    const isPdf = doc.file_path?.startsWith('data:application/pdf');
+    
+    return <Card className="group hover:shadow-elegant transition-all duration-300 relative overflow-hidden">
       <div className="absolute top-3 left-3 z-10">
         <Checkbox checked={selectedDocuments.includes(doc.id)} onCheckedChange={() => toggleDocumentSelection(doc.id)} className="bg-background border-2" />
       </div>
       
+      {/* Thumbnail Preview */}
+      <div className="relative w-full h-32 bg-muted flex items-center justify-center overflow-hidden">
+        {isImage ? (
+          <img src={doc.file_path!} alt={doc.title} className="w-full h-full object-cover" />
+        ) : (
+          <div className="flex flex-col items-center text-muted-foreground">
+            <FileText className="h-10 w-10 mb-1 opacity-50" />
+            <span className="text-xs">{isPdf ? 'PDF' : t('documents.card.noPreview') || 'No Preview'}</span>
+          </div>
+        )}
+      </div>
+
       <CardHeader className="pb-3">
         <div className="flex items-start justify-between">
           <div className="flex-1">
