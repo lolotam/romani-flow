@@ -328,7 +328,7 @@ export default function Settings() {
             </TabsContent>
 
             <TabsContent value="appearance">
-              <AppearanceSettings darkMode={darkMode} onToggleDarkMode={toggleDarkMode} />
+              <AppearanceSettings darkMode={theme === 'dark'} onToggleDarkMode={toggleDarkMode} />
             </TabsContent>
 
             <TabsContent value="companies">

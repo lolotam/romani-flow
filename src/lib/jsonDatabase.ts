@@ -127,7 +127,7 @@ function loadDatabase(): Database {
     positions: {},
     employees: {},
     documents: {},
-    admin_users: {},
+    
     indexes: {
       employees_by_company: {},
       documents_by_employee: {},
