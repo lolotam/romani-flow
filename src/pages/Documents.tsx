@@ -503,6 +503,7 @@ export default function Documents() {
         </div>
       </CardContent>
     </Card>;
+  };
   const CompanySection = ({
     title,
     docs,
