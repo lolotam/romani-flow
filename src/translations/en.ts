@@ -564,7 +564,8 @@ export const en = {
       viewDocument: 'View Document',
       editDocument: 'Edit Document',
       downloadDocument: 'Download Document',
-      deleteDocument: 'Delete Document'
+      deleteDocument: 'Delete Document',
+      noPreview: 'No Preview'
     },
 
     // Company section
