@@ -547,7 +547,8 @@ export const ar = {
       viewDocument: 'عرض الوثيقة',
       editDocument: 'تعديل الوثيقة',
       downloadDocument: 'تحميل الوثيقة',
-      deleteDocument: 'حذف الوثيقة'
+      deleteDocument: 'حذف الوثيقة',
+      noPreview: 'لا توجد معاينة'
     },
 
     // Company section
