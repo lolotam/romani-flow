@@ -1,78 +1,53 @@
 
 
-# Plan: Fix Build Errors, Replace Auth, and Split Settings
+# Document Preview with Image Placeholder & Download Button
 
-## Overview
-Three tasks: (1) fix duplicate property build errors in translation files, (2) replace hardcoded admin credentials with Supabase Auth, (3) split the 1777-line Settings.tsx into smaller components.
+## What needs to change
 
----
+Currently, the "View Document" dialog in both `Documents.tsx` and `EmployeeDocuments.tsx` has different levels of file preview support. The `EmployeeDocuments.tsx` view dialog already handles image/PDF preview with placeholders, but `Documents.tsx` view dialog has **no file preview at all** — it only shows metadata. Additionally, the document cards themselves don't show any image thumbnail/placeholder.
 
-## Task 1: Fix Translation File Duplicate Properties
+## Plan
 
-**Problem**: Both `ar.ts` and `en.ts` have duplicate property names within the same object literals (TS1117 errors at ~16 locations total).
+### 1. Add File Preview Section to Documents.tsx View Dialog
+**File**: `src/pages/Documents.tsx` (lines 832-904)
 
-**Approach**: Rewrite both translation files completely, preserving all translation content but ensuring every property name is unique within its parent object. The structure will remain identical (same keys used by `t()` calls throughout the app), just with duplicates removed.
+Add a file preview section before the metadata grid (matching what EmployeeDocuments.tsx already has at lines 824-891):
+- If file is an image (base64 `data:image`), render `<img>` preview
+- If file is a PDF (base64 `data:application/pdf`), render `<iframe>` preview
+- If file path exists but isn't base64, show a placeholder icon with "file unavailable" message
+- If no file at all, show a generic document placeholder icon
 
-**Files modified**:
-- `src/translations/ar.ts` — full rewrite, ~853 lines
-- `src/translations/en.ts` — full rewrite, ~869 lines
+### 2. Add Image Thumbnail to Document Cards
+**File**: `src/pages/Documents.tsx` — `DocumentCard` component (lines 413-489)
+**File**: `src/pages/EmployeeDocuments.tsx` — document card area
 
----
+Add a thumbnail preview area at the top of each document card:
+- For image documents with base64 data: show a small thumbnail
+- For PDFs or other files: show a styled placeholder with a `FileText` icon
+- Use `aspect-ratio` container for consistent card sizing
 
-## Task 2: Replace Hardcoded Auth with Supabase Auth
+### 3. Fix Download Button Functionality
+**File**: `src/pages/Documents.tsx` — `handleDownloadDocument` (lines 360-412)
 
-**Current state**: `useAuth.tsx` has hardcoded `admin` / `@Xx123456789xX@` credentials stored in plaintext, with a localStorage token for session persistence.
+The download function already works for base64 files. Ensure it handles all cases:
+- Base64 data URLs: create an `<a>` tag with `href` pointing to the data URL and trigger download
+- Proper `file_name` fallback when `file_name` is missing (use title + extension from MIME type)
 
-**New approach**: Use Supabase Auth (`supabase.auth.signInWithPassword`, `signOut`, `onAuthStateChange`, `getSession`).
+Also add a working download button in the Documents.tsx view dialog (already present at line 889-895, just verify `handleDownloadDocument` handles the `selectedDocument` correctly).
 
-**Files modified**:
-- `src/hooks/useAuth.tsx` — Replace with Supabase Auth calls:
-  - `login()` calls `supabase.auth.signInWithPassword({ email, password })`
-  - `logout()` calls `supabase.auth.signOut()`
-  - `useEffect` sets up `onAuthStateChange` listener (set up BEFORE calling `getSession`)
-  - Export `user` and `session` from context
-- `src/pages/Login.tsx` — Change "username" field to "email" field, update form labels
-- `src/components/ProtectedRoute.tsx` — No changes needed (already uses `isAuthenticated` / `isLoading`)
+### 4. Ensure EmployeeDocuments.tsx View Dialog Download Works
+**File**: `src/pages/EmployeeDocuments.tsx` (lines 936-943)
 
-**Migration note**: The existing admin user needs to be created in Supabase Auth (via dashboard or signup). No profiles table needed since this is a single-admin system.
+The download button at line 938 already calls `handleDownloadDocument(selectedDocument)` — verify the function handles null `file_path` gracefully with a toast error.
 
----
+## Technical Details
 
-## Task 3: Split Settings.tsx into Components
+- Documents store files as base64 in `file_path` field (e.g., `data:image/png;base64,...` or `data:application/pdf;base64,...`)
+- File type detection uses both `file_name` extension and `file_path` prefix
+- Placeholder image: use the existing `FileText` icon from lucide-react styled in a muted container
+- No new dependencies needed
 
-**Current state**: `Settings.tsx` is 1777 lines with 7 tab sections, all CRUD logic, and all edit dialogs in one file.
-
-**New structure**:
-
-```text
-src/components/settings/
-├── EmailSettings.tsx        (~250 lines) — SMTP config + expiry monitoring
-├── AppearanceSettings.tsx   (~50 lines)  — Dark mode toggle
-├── CompaniesSettings.tsx    (~150 lines) — Company CRUD + edit dialog
-├── PositionsSettings.tsx    (~150 lines) — Position CRUD + edit dialog
-├── DocumentTypesSettings.tsx(~150 lines) — Doc type CRUD + edit dialog
-├── MinistriesSettings.tsx   (~150 lines) — Ministry CRUD + edit dialog
-├── BackupSettings.tsx       (~150 lines) — Export/import/erase
-└── types.ts                 (~30 lines)  — Shared interfaces
-```
-
-**Settings.tsx** becomes a thin orchestrator (~200 lines):
-- Keeps top-level state (`companies`, `documentTypes`, etc.)
-- Keeps `fetchData()` function
-- Passes state and handlers as props to each tab component
-- Renders the `Tabs` layout with each `TabsContent` delegating to the sub-component
-
-**Shared interfaces** (`types.ts`): `EmailSettings`, `Company`, `DocumentType`, `Ministry`, `Position` interfaces extracted from Settings.tsx lines 45-81.
-
----
-
-## Implementation Order
-1. Fix translation duplicates (unblocks build)
-2. Replace auth with Supabase Auth
-3. Split Settings.tsx into components
-
-## Technical Notes
-- The `login` function signature changes from `(username, password)` to `(email, password)` — Login.tsx form already has an email-style input
-- Hardcoded SMTP credentials on lines 101-106 of Settings.tsx will remain as env var fallbacks for now (separate security concern, not blocking)
-- All `t()` translation keys remain unchanged, so no other files need updating for translations
+## Files Modified
+1. `src/pages/Documents.tsx` — Add preview section to view dialog + thumbnail to cards
+2. `src/pages/EmployeeDocuments.tsx` — Add thumbnail to document cards (view dialog already has preview)
 
