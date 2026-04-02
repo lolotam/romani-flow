@@ -153,8 +153,8 @@ export default function Employees() {
 
       // Add to local state with company info
       const company = companies.find(c => c.id === formData.company_id);
-      const newEmployee = {
-        ...data![0],
+      const newEmployee: Employee = {
+        ...(data![0] as Employee),
         companies: company ? { name: company.name, name_ar: company.name_ar } : undefined,
         document_count: 0,
       };
