@@ -32,8 +32,8 @@ import BackupSettings from '@/components/settings/BackupSettings';
 export default function Settings() {
   const { t, language, isRTL } = useLanguage();
   const { toast } = useToast();
+  const { theme, toggleTheme } = useTheme();
   const [activeTab, setActiveTab] = useState('email');
-  const [darkMode, setDarkMode] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
 
   // Data state
