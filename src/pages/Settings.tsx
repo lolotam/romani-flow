@@ -118,13 +118,10 @@ export default function Settings() {
     });
   };
 
-  // Dark mode
+  // Dark mode — delegate to ThemeProvider
   const toggleDarkMode = () => {
-    const newDarkMode = !darkMode;
-    setDarkMode(newDarkMode);
-    localStorage.setItem('darkMode', newDarkMode.toString());
-    if (newDarkMode) { document.documentElement.classList.add('dark'); } else { document.documentElement.classList.remove('dark'); }
-    toast({ title: t('settings.settingsToasts.themeChanged'), description: t('settings.settingsToasts.themeChangedDesc', { status: newDarkMode ? t('settings.settingsToasts.enabled') : t('settings.settingsToasts.disabled') }) });
+    toggleTheme();
+    toast({ title: t('settings.settingsToasts.themeChanged'), description: t('settings.settingsToasts.themeChangedDesc', { status: theme === 'light' ? t('settings.settingsToasts.enabled') : t('settings.settingsToasts.disabled') }) });
   };
 
   // CRUD helpers

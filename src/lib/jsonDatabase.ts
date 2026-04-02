@@ -76,7 +76,6 @@ interface Database {
   positions: Record<string, Position>;
   employees: Record<string, Employee>;
   documents: Record<string, Document>;
-  admin_users: Record<string, AdminUser>;
   indexes: {
     employees_by_company: Record<string, string[]>;
     documents_by_employee: Record<string, string[]>;
