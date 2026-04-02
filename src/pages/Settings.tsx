@@ -259,8 +259,8 @@ export default function Settings() {
   const handleSendTestEmail = async () => {
     setIsSendingEmail(true);
     try {
-      const notificationSettings: EmailNotificationSettings = { enabled: emailSettings.enable_notifications, monthlyReminder: emailSettings.monthly_schedule, weeklyReminder: emailSettings.weekly_schedule, expiredNotification: true, emailRecipient: emailSettings.email_receiver };
-      const result = await sendExpiryNotification(expiryData, notificationSettings);
+      const settings = { enabled: emailSettings.enable_notifications, dailyReminder: emailSettings.daily_schedule, expiredNotification: true, emailRecipient: emailSettings.email_receiver, senderEmail: emailSettings.resend_from_email };
+      const result = await sendExpiryNotification(expiryData, settings);
       if (result.success) {
         const currentTime = new Date().toLocaleString('ar-EG');
         localStorage.setItem('lastEmailSent', currentTime);
