@@ -71,7 +71,7 @@ export default function Login() {
         transition={{ duration: 0.6 }}
         className="w-full max-w-md relative z-10"
       >
-        <Card className="shadow-elegant backdrop-blur-sm bg-card/80 border-border/50">
+        <Card className="shadow-elegant bg-card border-border">
           <CardHeader className="text-center space-y-4">
             <motion.div
               initial={{ scale: 0 }}
