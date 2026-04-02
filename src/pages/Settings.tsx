@@ -275,8 +275,8 @@ export default function Settings() {
   };
 
   const handleAutoNotifications = async () => {
-    const notificationSettings: EmailNotificationSettings = { enabled: emailSettings.enable_notifications, monthlyReminder: emailSettings.monthly_schedule, weeklyReminder: emailSettings.weekly_schedule, expiredNotification: true, emailRecipient: emailSettings.email_receiver };
-    await checkAndSendNotifications(employees, documents, notificationSettings);
+    const settings = { enabled: emailSettings.enable_notifications, dailyReminder: emailSettings.daily_schedule, expiredNotification: true, emailRecipient: emailSettings.email_receiver, senderEmail: emailSettings.resend_from_email };
+    await checkAndSendNotifications(employees, documents, settings);
   };
 
   const deleteReminderItem = (id: string, type: 'employee' | 'document') => {
