@@ -43,15 +43,7 @@ export default function Dashboard() {
   const { logout } = useAuth();
   const { toast } = useToast();
   const { t, language, isRTL } = useLanguage();
-
-  // Force refresh function to clear all cache
-  const forceRefresh = () => {
-    setIsLoading(true);
-    // Clear any localStorage cache
-    localStorage.clear();
-    // Force page reload
-    window.location.reload();
-  };
+  const navigate = useNavigate();
 
   // Pin/Unpin reminder item
   const togglePinItem = (itemId: string) => {
