@@ -91,9 +91,7 @@ export default function Dashboard() {
   useEffect(() => {
     const fetchStats = async () => {
       try {
-        // Force refresh by adding timestamp to avoid caching
-        const timestamp = Date.now();
-        console.log('🔄 Fetching fresh data at:', new Date().toISOString());
+        // Fetch fresh data
 
         // Fetch all documents to calculate stats with cache busting
         const { data: documents } = await jsonDatabase
