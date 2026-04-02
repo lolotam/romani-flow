@@ -1,80 +1,118 @@
 
 
-# Frontend Redesign — Teal/Cyan Medical Color Palette
+# Full App Bug Audit & Refactoring Plan
 
-## Extracted Color Palette from Reference Image
+## Bugs Found
 
-The reference image uses a clean medical/health teal-cyan palette:
+### Bug 1: `handleAddEmployee` and `handleEditEmployee` are stubs
+**File**: `src/pages/Employees.tsx` (lines 126-132)
+Both functions only `console.log` — clicking "Add Employee" or "Edit Employee" does nothing. These need full implementations that call `jsonDatabase.insert('employees', ...)` and `jsonDatabase.update('employees', ...)`.
 
-```text
-Primary Teal:     HSL(175, 45%, 42%)  — #3BA99E (dominant buttons, headers)
-Dark Teal:        HSL(178, 55%, 25%)  — #1C6B66 (sidebar, headings)
-Light Ice Blue:   HSL(195, 45%, 92%)  — #D8EDF2 (backgrounds, cards)
-Pale Cyan:        HSL(185, 35%, 96%)  — #EDF6F8 (subtle backgrounds)
-Accent Mint:      HSL(165, 40%, 85%)  — #BDE8DD (badges, highlights)
-White:            #FFFFFF             (card surfaces)
-Dark Navy:        HSL(210, 50%, 15%)  — #132A3E (text)
-```
+### Bug 2: `forceRefresh` clears ALL localStorage
+**File**: `src/pages/Dashboard.tsx` (line 78)
+`localStorage.clear()` wipes the entire JSON database (`romani_json_database`), email settings, pinned reminders — effectively erasing all user data. Should only clear cache-related keys, not the database.
 
-## What Changes (Frontend Only)
+### Bug 3: Quick actions use `window.location.href` instead of React Router
+**File**: `src/pages/Dashboard.tsx` (lines 402-406)
+Causes full page reloads instead of SPA navigation. Should use `navigate()` from `useNavigate`.
 
-### 1. CSS Variables (`src/index.css`)
-- Replace the entire `:root` color system with the teal palette
-- Replace the `.dark` theme with a complementary dark teal scheme
-- Update gradients to use teal-to-cyan instead of indigo-to-purple
-- Update shadow variables to use teal tints
-- Remove the duplicate second `:root` block (lines 225-311) — consolidate into one clean block
+### Bug 4: Dark mode managed in two places
+`Settings.tsx` manages dark mode via `localStorage.setItem('darkMode', ...)` and `document.documentElement.classList`, while `ThemeProvider` context likely manages it separately. This can cause state conflicts.
 
-### 2. Tailwind Config (`tailwind.config.ts`)
-- No structural changes needed (it references CSS variables)
-- Update font stack: add Inter for LTR alongside Tajawal/Cairo for Arabic
+### Bug 5: Debug `console.log` statements left in production code
+**File**: `src/pages/Dashboard.tsx` (lines 131, 172-176)
+Debug logs like `console.log('🔄 Fetching fresh data...')` and `console.log('📈 DEBUG - Final counts:...')` should be removed.
 
-### 3. Login Page (`src/pages/Login.tsx`)
-- Update gradient orbs to teal/cyan/mint instead of primary/medical/corporate
-- Style the login card with a subtle teal border accent
-- Update the icon container to teal gradient
+### Bug 6: Duplicate interface definitions across files
+`Document`, `Employee`, `Company`, `DocumentType`, `Ministry` interfaces are redefined locally in `Documents.tsx`, `Employees.tsx`, `EmployeeDocuments.tsx`, `EmployeeProfile.tsx`, and `Settings.tsx` — instead of importing from `jsonDatabase.ts` which already exports them.
 
-### 4. Landing Page (`src/pages/Index.tsx`)
-- Update feature cards to use glass-teal styling
-- Update gradient backgrounds to teal palette
-- Refine the hero section with cleaner spacing
+### Bug 7: `AdminUser` type with `password_hash` in jsonDatabase.ts
+**File**: `src/lib/jsonDatabase.ts` (lines 70-76)
+Legacy type from the old hardcoded auth system. No longer needed since auth is now via Supabase.
 
-### 5. Layout & Sidebar (`src/components/Layout.tsx`, `src/components/AppSidebar.tsx`)
-- Update header: clean white with subtle teal bottom border
-- Sidebar: dark teal background with white text (matches reference's professional look)
-- Active nav item: mint/light-teal highlight with teal text
-- Sidebar header: teal gradient brand area
+---
 
-### 6. Dashboard (`src/pages/Dashboard.tsx`)
-- Stat cards: clean white cards with teal icon accents and subtle left-border color coding
-- Remove the debug/force-refresh section (not professional)
-- Quick action buttons: teal-outlined style
-- Expiry table: teal header row, clean alternating rows
+## Refactoring Plan
 
-### 7. Employee Card (`src/components/EmployeeCard.tsx`)
-- Avatar fallback: teal background with white text
-- Document count badge: teal instead of blue
-- Hover state: subtle teal shadow
+### Phase 1: Fix Critical Bugs (immediate)
 
-### 8. Global Component Touches
-- Buttons (`src/components/ui/button.tsx`): primary variant picks up new teal from CSS vars automatically
-- Badges, status indicators: will inherit new palette from CSS vars
-- No changes to data logic, API calls, database layer, or Edge Functions
+**1.1 — Fix `forceRefresh` to not destroy data**
+- Change `localStorage.clear()` to only remove cache keys (pinned, deleted reminders) — NOT `romani_json_database`
 
-## Files Modified
-1. `src/index.css` — Full color system rewrite (consolidated, no duplicates)
-2. `tailwind.config.ts` — Minor font update
-3. `src/pages/Login.tsx` — Visual styling classes only
-4. `src/pages/Index.tsx` — Visual styling classes only
-5. `src/pages/Dashboard.tsx` — Card styling, remove debug section
-6. `src/components/Layout.tsx` — Header styling
-7. `src/components/AppSidebar.tsx` — Sidebar color scheme
-8. `src/components/EmployeeCard.tsx` — Card accent colors
+**1.2 — Implement `handleAddEmployee` and `handleEditEmployee`**
+- Wire up the add/edit dialog forms to actually call `jsonDatabase.insert` and `jsonDatabase.update`
+- Add proper validation and toast feedback
 
-## What Does NOT Change
-- All backend logic, Supabase queries, Edge Functions
-- All translation files
-- All routing, authentication, data flow
-- Settings, Documents, EmployeeDocuments pages (they inherit new colors from CSS vars)
-- Package dependencies
+**1.3 — Fix quick actions to use React Router navigation**
+- Replace `window.location.href = '/...'` with `navigate('/...')`
+
+### Phase 2: Code Quality Cleanup
+
+**2.1 — Remove debug console.logs**
+- Remove all debug/emoji console.log statements from Dashboard.tsx
+
+**2.2 — Centralize shared interfaces**
+- Create `src/types/index.ts` exporting all shared interfaces (re-export from `jsonDatabase.ts`)
+- Update Documents.tsx, Employees.tsx, EmployeeDocuments.tsx, EmployeeProfile.tsx to import from central types
+- Remove duplicate local interface definitions
+
+**2.3 — Remove legacy `AdminUser` type**
+- Remove from `jsonDatabase.ts` and the `admin_users` table from the Database interface
+
+**2.4 — Fix dark mode conflict**
+- Remove manual dark mode toggle from Settings.tsx
+- Ensure AppearanceSettings uses the ThemeProvider context exclusively
+
+### Phase 3: Large File Splitting
+
+**3.1 — Split Dashboard.tsx (732 lines)**
+- Extract `DashboardStats` cards → `src/components/dashboard/StatsGrid.tsx`
+- Extract reminders table → `src/components/dashboard/RemindersTable.tsx`
+- Extract recent activities → `src/components/dashboard/RecentActivities.tsx`
+- Extract quick actions → `src/components/dashboard/QuickActions.tsx`
+
+**3.2 — Split Employees.tsx (1200 lines)**
+- Extract add/edit employee form → `src/components/employees/EmployeeForm.tsx`
+- Extract employee table → `src/components/employees/EmployeeTable.tsx`
+- Extract view employee dialog → `src/components/employees/EmployeeViewDialog.tsx`
+
+**3.3 — Split Documents.tsx (1032 lines)**
+- Extract document card grid → `src/components/documents/DocumentGrid.tsx`
+- Extract view document dialog → `src/components/documents/DocumentViewDialog.tsx`
+- Extract employee section → `src/components/documents/EmployeeSection.tsx`
+
+**3.4 — Split EmployeeDocuments.tsx (997 lines)**
+- Extract document list/grid → `src/components/documents/EmployeeDocList.tsx`
+- Extract upload dialog → `src/components/documents/UploadDialog.tsx`
+
+---
+
+## Implementation Order
+1. Fix `forceRefresh` data destruction bug (critical)
+2. Implement employee add/edit stubs (critical)
+3. Fix quick action navigation
+4. Remove debug logs
+5. Centralize interfaces into `src/types/index.ts`
+6. Remove AdminUser legacy type
+7. Split Dashboard.tsx into components
+8. Split Employees.tsx into components
+9. Split Documents.tsx into components
+10. Split EmployeeDocuments.tsx into components
+
+## Files Modified/Created
+- `src/pages/Dashboard.tsx` — Bug fixes + split into components
+- `src/pages/Employees.tsx` — Implement stubs + split
+- `src/pages/Documents.tsx` — Split into components
+- `src/pages/EmployeeDocuments.tsx` — Split into components
+- `src/types/index.ts` — NEW shared types
+- `src/components/dashboard/StatsGrid.tsx` — NEW
+- `src/components/dashboard/RemindersTable.tsx` — NEW
+- `src/components/dashboard/RecentActivities.tsx` — NEW
+- `src/components/dashboard/QuickActions.tsx` — NEW
+- `src/components/employees/EmployeeForm.tsx` — NEW
+- `src/components/employees/EmployeeTable.tsx` — NEW
+- `src/components/employees/EmployeeViewDialog.tsx` — NEW
+- `src/components/documents/DocumentGrid.tsx` — NEW
+- `src/components/documents/DocumentViewDialog.tsx` — NEW
+- `src/lib/jsonDatabase.ts` — Remove AdminUser
 
