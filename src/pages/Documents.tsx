@@ -414,11 +414,27 @@ export default function Documents() {
     doc
   }: {
     doc: Document;
-  }) => <Card className="group hover:shadow-elegant transition-all duration-300 relative">
+  }) => {
+    const isImage = doc.file_path?.startsWith('data:image');
+    const isPdf = doc.file_path?.startsWith('data:application/pdf');
+    
+    return <Card className="group hover:shadow-elegant transition-all duration-300 relative overflow-hidden">
       <div className="absolute top-3 left-3 z-10">
         <Checkbox checked={selectedDocuments.includes(doc.id)} onCheckedChange={() => toggleDocumentSelection(doc.id)} className="bg-background border-2" />
       </div>
       
+      {/* Thumbnail Preview */}
+      <div className="relative w-full h-32 bg-muted flex items-center justify-center overflow-hidden">
+        {isImage ? (
+          <img src={doc.file_path!} alt={doc.title} className="w-full h-full object-cover" />
+        ) : (
+          <div className="flex flex-col items-center text-muted-foreground">
+            <FileText className="h-10 w-10 mb-1 opacity-50" />
+            <span className="text-xs">{isPdf ? 'PDF' : t('documents.card.noPreview') || 'No Preview'}</span>
+          </div>
+        )}
+      </div>
+
       <CardHeader className="pb-3">
         <div className="flex items-start justify-between">
           <div className="flex-1">
@@ -487,6 +503,7 @@ export default function Documents() {
         </div>
       </CardContent>
     </Card>;
+  };
   const CompanySection = ({
     title,
     docs,
@@ -830,7 +847,45 @@ export default function Documents() {
               </DialogDescription>
             </DialogHeader>
             {selectedDocument && (
-              <div className="space-y-4">
+              <div className="space-y-6">
+                {/* File Preview Section */}
+                <div className="border rounded-lg p-4 bg-muted/30">
+                  <Label className="text-sm font-medium text-muted-foreground mb-2 block">معاينة الملف</Label>
+                  {(() => {
+                    const filePath = selectedDocument.file_path;
+                    if (!filePath) {
+                      return (
+                        <div className="text-center py-8 text-muted-foreground">
+                          <FileText className="h-12 w-12 mx-auto mb-2 opacity-50" />
+                          <p>لا يوجد ملف مرفق</p>
+                        </div>
+                      );
+                    }
+                    if (filePath.startsWith('data:image')) {
+                      return (
+                        <div className="flex justify-center">
+                          <img src={filePath} alt={selectedDocument.title} className="max-w-full max-h-96 object-contain rounded border" />
+                        </div>
+                      );
+                    }
+                    if (filePath.startsWith('data:application/pdf')) {
+                      return (
+                        <div className="text-center">
+                          <iframe src={filePath} className="w-full h-96 border rounded" title={selectedDocument.title} />
+                          <p className="text-sm text-muted-foreground mt-2">ملف PDF - اضغط على تحميل لعرضه بطريقة أفضل</p>
+                        </div>
+                      );
+                    }
+                    return (
+                      <div className="text-center py-8 text-muted-foreground">
+                        <FileText className="h-12 w-12 mx-auto mb-2 opacity-50" />
+                        <p>معاينة الملف غير متوفرة</p>
+                        <p className="text-xs">{selectedDocument.file_name || ''}</p>
+                      </div>
+                    );
+                  })()}
+                </div>
+
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div>
                     <Label className="text-sm font-medium text-muted-foreground">العنوان</Label>
