@@ -15,7 +15,6 @@ import {
   getExpiringDocuments,
   sendExpiryNotification,
   checkAndSendNotifications,
-  EmailNotificationSettings,
   ExpiryData
 } from '@/lib/emailService';
 import { Mail, Moon, Building2, FileText, UserCog, Shield, Database } from 'lucide-react';
@@ -58,15 +57,10 @@ export default function Settings() {
 
   // Email state
   const [emailSettings, setEmailSettings] = useState<EmailSettingsData>({
-    smtp_server: import.meta.env.VITE_SMTP_SERVER || 'smtp.gmail.com',
-    smtp_port: parseInt(import.meta.env.VITE_SMTP_PORT) || 587,
-    smtp_username: import.meta.env.VITE_SMTP_USERNAME || '',
-    smtp_password: import.meta.env.VITE_SMTP_PASSWORD || '',
-    email_sender: import.meta.env.VITE_EMAIL_SENDER || '',
-    email_receiver: import.meta.env.VITE_EMAIL_RECEIVER || '',
+    resend_from_email: '',
+    email_receiver: '',
     enable_notifications: true,
-    weekly_schedule: true,
-    monthly_schedule: true
+    daily_schedule: true
   });
   const [expiryData, setExpiryData] = useState<ExpiryData>({ employees: [], documents: [] });
   const [isCheckingExpiry, setIsCheckingExpiry] = useState(false);
@@ -265,8 +259,8 @@ export default function Settings() {
   const handleSendTestEmail = async () => {
     setIsSendingEmail(true);
     try {
-      const notificationSettings: EmailNotificationSettings = { enabled: emailSettings.enable_notifications, monthlyReminder: emailSettings.monthly_schedule, weeklyReminder: emailSettings.weekly_schedule, expiredNotification: true, emailRecipient: emailSettings.email_receiver };
-      const result = await sendExpiryNotification(expiryData, notificationSettings);
+      const settings = { enabled: emailSettings.enable_notifications, dailyReminder: emailSettings.daily_schedule, expiredNotification: true, emailRecipient: emailSettings.email_receiver, senderEmail: emailSettings.resend_from_email };
+      const result = await sendExpiryNotification(expiryData, settings);
       if (result.success) {
         const currentTime = new Date().toLocaleString('ar-EG');
         localStorage.setItem('lastEmailSent', currentTime);
@@ -281,8 +275,8 @@ export default function Settings() {
   };
 
   const handleAutoNotifications = async () => {
-    const notificationSettings: EmailNotificationSettings = { enabled: emailSettings.enable_notifications, monthlyReminder: emailSettings.monthly_schedule, weeklyReminder: emailSettings.weekly_schedule, expiredNotification: true, emailRecipient: emailSettings.email_receiver };
-    await checkAndSendNotifications(employees, documents, notificationSettings);
+    const settings = { enabled: emailSettings.enable_notifications, dailyReminder: emailSettings.daily_schedule, expiredNotification: true, emailRecipient: emailSettings.email_receiver, senderEmail: emailSettings.resend_from_email };
+    await checkAndSendNotifications(employees, documents, settings);
   };
 
   const deleteReminderItem = (id: string, type: 'employee' | 'document') => {

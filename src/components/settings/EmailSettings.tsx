@@ -6,7 +6,7 @@ import { Switch } from '@/components/ui/switch';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { Mail, Clock, RefreshCw, Trash2 } from 'lucide-react';
 import type { EmailSettingsData } from './types';
-import { Employee, Document } from '@/lib/jsonDatabase';
+import { Employee } from '@/lib/jsonDatabase';
 import { ExpiryData } from '@/lib/emailService';
 
 interface EmailSettingsProps {
@@ -34,7 +34,7 @@ export default function EmailSettingsComponent({
 
   return (
     <div className="space-y-6">
-      {/* SMTP Config */}
+      {/* Resend Email Config */}
       <Card className="shadow-elegant">
         <CardHeader>
           <CardTitle className="flex items-center space-x-2">
@@ -46,33 +46,15 @@ export default function EmailSettingsComponent({
         <CardContent className="space-y-4">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
-              <Label htmlFor="smtp_server">{t('settings.email.smtpServer')}</Label>
-              <Input id="smtp_server" value={emailSettings.smtp_server}
-                onChange={(e) => onEmailSettingsChange({ ...emailSettings, smtp_server: e.target.value })} />
-            </div>
-            <div>
-              <Label htmlFor="smtp_port">{t('settings.email.smtpPort')}</Label>
-              <Input id="smtp_port" type="number" value={emailSettings.smtp_port}
-                onChange={(e) => onEmailSettingsChange({ ...emailSettings, smtp_port: parseInt(e.target.value) })} />
-            </div>
-            <div>
-              <Label htmlFor="smtp_username">{t('settings.email.smtpUsername')}</Label>
-              <Input id="smtp_username" value={emailSettings.smtp_username}
-                onChange={(e) => onEmailSettingsChange({ ...emailSettings, smtp_username: e.target.value })} />
-            </div>
-            <div>
-              <Label htmlFor="smtp_password">{t('settings.email.smtpPassword')}</Label>
-              <Input id="smtp_password" type="password" value={emailSettings.smtp_password}
-                onChange={(e) => onEmailSettingsChange({ ...emailSettings, smtp_password: e.target.value })} />
-            </div>
-            <div>
-              <Label htmlFor="email_sender">{t('settings.email.emailSender')}</Label>
-              <Input id="email_sender" type="email" value={emailSettings.email_sender}
-                onChange={(e) => onEmailSettingsChange({ ...emailSettings, email_sender: e.target.value })} />
+              <Label htmlFor="resend_from_email">{t('settings.email.emailSender')}</Label>
+              <Input id="resend_from_email" type="email" value={emailSettings.resend_from_email}
+                placeholder="ROMANI Reports <onboarding@resend.dev>"
+                onChange={(e) => onEmailSettingsChange({ ...emailSettings, resend_from_email: e.target.value })} />
             </div>
             <div>
               <Label htmlFor="email_receiver">{t('settings.email.emailReceiver')}</Label>
               <Input id="email_receiver" type="email" value={emailSettings.email_receiver}
+                placeholder="admin@company.com"
                 onChange={(e) => onEmailSettingsChange({ ...emailSettings, email_receiver: e.target.value })} />
             </div>
           </div>
@@ -84,14 +66,9 @@ export default function EmailSettingsComponent({
                 onCheckedChange={(checked) => onEmailSettingsChange({ ...emailSettings, enable_notifications: checked })} />
             </div>
             <div className="flex items-center justify-between">
-              <Label htmlFor="weekly_schedule">{t('settings.email.weeklySchedule')}</Label>
-              <Switch id="weekly_schedule" checked={emailSettings.weekly_schedule}
-                onCheckedChange={(checked) => onEmailSettingsChange({ ...emailSettings, weekly_schedule: checked })} />
-            </div>
-            <div className="flex items-center justify-between">
-              <Label htmlFor="monthly_schedule">{t('settings.email.monthlySchedule')}</Label>
-              <Switch id="monthly_schedule" checked={emailSettings.monthly_schedule}
-                onCheckedChange={(checked) => onEmailSettingsChange({ ...emailSettings, monthly_schedule: checked })} />
+              <Label htmlFor="daily_schedule">{t('settings.email.dailySchedule') || 'تقرير يومي تلقائي (8 صباحاً)'}</Label>
+              <Switch id="daily_schedule" checked={emailSettings.daily_schedule}
+                onCheckedChange={(checked) => onEmailSettingsChange({ ...emailSettings, daily_schedule: checked })} />
             </div>
           </div>
 
@@ -272,16 +249,14 @@ export default function EmailSettingsComponent({
             </div>
           )}
 
-          {/* Email Config Note */}
+          {/* Info Note */}
           <div className="p-4 bg-blue-50 dark:bg-blue-900/20 rounded-lg border border-blue-200 dark:border-blue-800">
             <h4 className="font-medium text-blue-800 dark:text-blue-200 mb-2">{t('settings.email.emailConfigNote')}</h4>
             <ul className="text-sm text-blue-700 dark:text-blue-300 space-y-1">
-              <li>{t('settings.email.emailConfigNotes.verifySmtp')}</li>
-              <li>{t('settings.email.emailConfigNotes.autoAlertsWhen')}</li>
-              <li className="mr-4">{t('settings.email.emailConfigNotes.monthBeforeExpiry')}</li>
-              <li className="mr-4">{t('settings.email.emailConfigNotes.weekBeforeExpiry')}</li>
-              <li className="mr-4">{t('settings.email.emailConfigNotes.actualExpiry')}</li>
-              <li>{t('settings.email.emailConfigNotes.immediateReport')}</li>
+              <li>• يتم إرسال التقارير عبر خدمة Resend</li>
+              <li>• التقرير اليومي التلقائي يُرسل الساعة 8 صباحاً</li>
+              <li>• يشمل التقرير الوثائق والإقامات المنتهية أو القريبة من الانتهاء (خلال 30 يوم)</li>
+              <li>• يمكنك إرسال تقرير فوري في أي وقت بالضغط على "إرسال تقرير فوري"</li>
             </ul>
           </div>
         </CardContent>

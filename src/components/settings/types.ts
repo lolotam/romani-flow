@@ -1,13 +1,8 @@
 export interface EmailSettingsData {
-  smtp_server: string;
-  smtp_port: number;
-  smtp_username: string;
-  smtp_password: string;
-  email_sender: string;
+  resend_from_email: string;
   email_receiver: string;
   enable_notifications: boolean;
-  weekly_schedule: boolean;
-  monthly_schedule: boolean;
+  daily_schedule: boolean;
 }
 
 export interface Company {
