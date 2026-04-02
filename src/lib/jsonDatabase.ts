@@ -67,13 +67,6 @@ export interface Document {
   updated_at: string;
 }
 
-export interface AdminUser {
-  id: string;
-  username: string;
-  password_hash: string;
-  created_at: string;
-  updated_at: string;
-}
 
 // Database structure
 interface Database {
