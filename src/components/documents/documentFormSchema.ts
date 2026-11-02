@@ -53,7 +53,7 @@ export interface DocumentFormProps {
   onSuccess: () => void;
   documentTypes: Array<{ id: string; name: string; name_ar: string }>;
   companies: Array<{ id: string; name: string; name_ar: string }>;
-  employees: Array<{ id: string; name: string; company_id: string }>;
+  employees: Array<{ id: string; name: string; company_id?: string | null }>;
   ministries: Array<{ id: string; name: string; name_ar: string }>;
   preselectedCompanyId?: string;
   preselectedEmployeeId?: string;
