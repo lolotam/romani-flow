@@ -203,8 +203,11 @@ export function createFilesRouter(
       const stored = await storage.save(file.buffer, file.originalname, file.mimetype);
       const previousPath = employee.photo_path as string | undefined;
 
-      db.prepare('UPDATE employees SET photo_path = ?, updated_at = ? WHERE id = ?').run(
+      db.prepare(
+        'UPDATE employees SET photo_path = ?, photo_mime_type = ?, updated_at = ? WHERE id = ?',
+      ).run(
         stored.relativePath,
+        stored.mimeType,
         new Date().toISOString(),
         employeeId,
       );
@@ -235,7 +238,7 @@ export function createFilesRouter(
       }
 
       const buffer = await storage.read(photoPath);
-      res.setHeader('Content-Type', (employee?.mime_type as string | undefined) ?? 'image/jpeg');
+      res.setHeader('Content-Type', (employee?.photo_mime_type as string | undefined) ?? 'image/jpeg');
       res.setHeader('Content-Disposition', 'inline');
       res.setHeader('Content-Length', buffer.byteLength);
       res.send(buffer);
@@ -257,7 +260,9 @@ export function createFilesRouter(
       }
 
       const photoPath = employee.photo_path as string | undefined;
-      db.prepare('UPDATE employees SET photo_path = NULL, updated_at = ? WHERE id = ?').run(
+      db.prepare(
+        'UPDATE employees SET photo_path = NULL, photo_mime_type = NULL, updated_at = ? WHERE id = ?',
+      ).run(
         new Date().toISOString(),
         employeeId,
       );
