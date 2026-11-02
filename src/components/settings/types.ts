@@ -1,10 +1,3 @@
-export interface EmailSettingsData {
-  resend_from_email: string;
-  email_receiver: string;
-  enable_notifications: boolean;
-  daily_schedule: boolean;
-}
-
 export interface Company {
   id: string;
   name: string;
