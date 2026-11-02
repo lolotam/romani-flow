@@ -28,6 +28,7 @@ export function createBackupRouter(db: Db, documents: DocumentService): Router {
 
   router.get(
     '/export',
+    requireAdmin,
     asyncHandler(async (_req, res) => {
       const data: Record<string, unknown[]> = {};
 

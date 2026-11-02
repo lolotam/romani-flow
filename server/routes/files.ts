@@ -2,6 +2,7 @@ import { Router } from 'express';
 import multer from 'multer';
 import type { AppConfig } from '../config.js';
 import type { Db } from '../db/connection.js';
+import { requireAdmin } from '../middleware/auth.js';
 import { asyncHandler } from '../middleware/errorHandler.js';
 import { findRow } from '../repositories/base.js';
 import type { DocumentService } from '../services/documentService.js';
@@ -68,6 +69,7 @@ export function createFilesRouter(
 
   router.post(
     '/upload',
+    requireAdmin,
     upload.any(),
     asyncHandler(async (req, res) => {
       const files = (req.files as Express.Multer.File[] | undefined) ?? [];
@@ -175,6 +177,7 @@ export function createFilesRouter(
   // Employee photo: staged, claimed, and served through the same protected path.
   router.put(
     '/employees/:employeeId/photo',
+    requireAdmin,
     photoUpload.any(),
     asyncHandler(async (req, res) => {
       const employeeId = String(req.params.employeeId);
@@ -241,6 +244,7 @@ export function createFilesRouter(
 
   router.delete(
     '/employees/:employeeId/photo',
+    requireAdmin,
     asyncHandler(async (req, res) => {
       const employeeId = String(req.params.employeeId);
       const employee = findRow(db, 'employees', employeeId, []);

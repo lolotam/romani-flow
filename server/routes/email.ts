@@ -80,6 +80,7 @@ export function createEmailRouter(
 
   router.post(
     '/test',
+    requireAdmin,
     asyncHandler(async (req, res) => {
       const { valid, invalid } = parseAddressList(req.body?.to);
       const recipients = valid.length > 0 ? valid : getStringList(db, 'email.recipients');
