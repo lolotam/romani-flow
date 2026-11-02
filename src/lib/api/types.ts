@@ -1,8 +1,8 @@
 /**
  * Entity types shared by the API client and the UI.
  *
- * These used to live in `src/lib/jsonDatabase.ts`. They now describe the shape
- * the **server** returns, so the browser and the database agree on one contract.
+ * These describe the shape the server returns, so the browser and the database
+ * agree on one contract.
  */
 
 export type DocumentStatus = 'valid' | 'expiring_soon' | 'expired';

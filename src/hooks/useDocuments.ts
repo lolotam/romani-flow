@@ -3,7 +3,7 @@ import { api } from '@/lib/api';
 import type { Company, DocumentType, DocumentWithRelations, EmployeeWithRelations, Ministry } from '@/lib/api';
 import { calculateDocumentStatus } from '@/lib/statusUtils';
 
-export function useDocuments(employeeId?: string) {
+export function useDocuments(employeeId?: string, companyId?: string) {
   const [documents, setDocuments] = useState<DocumentWithRelations[]>([]);
   const [companies, setCompanies] = useState<Company[]>([]);
   const [employees, setEmployees] = useState<EmployeeWithRelations[]>([]);
@@ -26,6 +26,7 @@ export function useDocuments(employeeId?: string) {
         documentQuery.eq('employee_id', employeeId);
         employeeQuery.eq('id', employeeId);
       }
+      if (companyId) documentQuery.eq('company_id', companyId);
       const results = await Promise.all([
         documentQuery.execute(),
         api.from<Company>('companies').select('*').order('name', 'asc').execute(),
@@ -48,7 +49,7 @@ export function useDocuments(employeeId?: string) {
     } finally {
       if (currentRequest === requestId.current) setIsLoading(false);
     }
-  }, [employeeId]);
+  }, [employeeId, companyId]);
 
   useEffect(() => {
     void reload();
