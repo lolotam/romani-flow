@@ -117,16 +117,14 @@ whether SMTP is configured.
 
 ---
 
-## Seeded administrators
+## First administrators
 
-| Email | Password |
-|---|---|
-| `dr.vet.waleedtam@gmail.com` | `@Xx123456789xX@` |
-| `Room_samer20105@yahoo.com` | `@Xx123456789xX@` |
-
-The seed creates these accounts on the first boot and never overwrites an
-existing one. **Change the password before putting the app in front of anybody
-else.**
+There is no built-in account and no default password. On the first start of an
+empty database the server creates the administrators named in
+`ADMIN_SEED_EMAILS` (comma-separated) with the password in
+`ADMIN_SEED_PASSWORD` (at least 12 characters). Both live only in the
+environment of the server. Without them no administrator is created and the
+server logs a warning. The seed never overwrites an existing account.
 
 ---
 

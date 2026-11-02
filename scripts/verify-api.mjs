@@ -11,8 +11,8 @@
  *
  * Environment:
  *   API_URL      base url of the running server (default http://127.0.0.1:3199)
- *   ADMIN_EMAIL  the seeded administrator (default dr.vet.waleedtam@gmail.com)
- *   ADMIN_PASS   its password (default @Xx123456789xX@)
+ *   ADMIN_EMAIL  an administrator of the server under test (required)
+ *   ADMIN_PASS   its password (required; never commit it)
  */
 
 import fs from 'node:fs';
@@ -20,8 +20,13 @@ import os from 'node:os';
 import path from 'node:path';
 
 const BASE = (process.argv[2] ?? process.env.API_URL ?? 'http://127.0.0.1:3199').replace(/\/$/, '');
-const EMAIL = process.env.ADMIN_EMAIL ?? 'dr.vet.waleedtam@gmail.com';
-const PASSWORD = process.env.ADMIN_PASS ?? '@Xx123456789xX@';
+const EMAIL = process.env.ADMIN_EMAIL;
+const PASSWORD = process.env.ADMIN_PASS;
+
+if (!EMAIL || !PASSWORD) {
+  console.error('ADMIN_EMAIL and ADMIN_PASS are required (an administrator of the server under test).');
+  process.exit(2);
+}
 
 let passed = 0;
 const failures = [];

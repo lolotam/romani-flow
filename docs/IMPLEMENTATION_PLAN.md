@@ -28,7 +28,7 @@
 | 6 | Settings UI (email / cron / SMTP) + translations | 2, 4, 5 |
 | 7 | Large-file refactor (the 500-line cleanup) | 2 |
 | 8 | Docker/Dokploy: image, compose, volume mount, docs | 3, 4 |
-| 9 | Seed 2 admins, end-to-end verification, cleanup | all |
+| 9 | Seed the administrators (from the environment), end-to-end verification, cleanup | all |
 
 ---
 
@@ -249,7 +249,7 @@
 ## Phase 9 — Seed, verification, cleanup
 
 ### T9.1 Seed
-- [ ] `server/db/seed.ts` — import `data/seed.json` (20 employees, 3 documents, catalogs) when tables are empty; insert the 2 admins with bcrypt hashes; idempotent.
+- [ ] `server/db/seed.ts` — import `data/seed.json` (20 employees, 3 documents, catalogs) when tables are empty; insert the administrators named in `ADMIN_SEED_EMAILS` (password from `ADMIN_SEED_PASSWORD`, no default) with bcrypt hashes; idempotent.
 - [ ] Verify the 20-employee dataset actually loads (the old browser seed only had 3).
 
 ### T9.2 Verification

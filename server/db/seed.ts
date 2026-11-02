@@ -26,7 +26,8 @@ const SEED_MARKER_KEY = 'system.seed_version';
 export interface SeedOptions {
   seedFile: string;
   adminEmails: string[];
-  adminPassword: string;
+  /** Null when ADMIN_SEED_PASSWORD is not set: no account is created then. */
+  adminPassword: string | null;
 }
 
 export interface SeedResult {
@@ -35,6 +36,7 @@ export interface SeedResult {
   adminsSkipped: string[];
   seedApplied: boolean;
   seedSkippedReason?: string;
+  adminSeedSkippedReason?: string;
 }
 
 function countRows(db: Db, table: string): number {
@@ -174,7 +176,15 @@ export async function seedDatabase(db: Db, options: SeedOptions): Promise<SeedRe
     ensureSetting(db, definition.key);
   }
 
-  // Admin accounts — never overwritten once they exist.
+  // Admin accounts — never overwritten once they exist. The password comes only
+  // from the environment; without it (or without any e-mail) nothing is created.
+  const adminPassword = options.adminPassword;
+  if (options.adminEmails.length === 0 || !adminPassword) {
+    result.adminSeedSkippedReason =
+      'ADMIN_SEED_EMAILS and ADMIN_SEED_PASSWORD are not both set; no administrator was created';
+    return result;
+  }
+
   for (const email of options.adminEmails) {
     if (findAdminByEmail(db, email)) {
       result.adminsSkipped.push(email);
@@ -184,7 +194,7 @@ export async function seedDatabase(db: Db, options: SeedOptions): Promise<SeedRe
     await createAdmin(db, {
       email,
       name: displayNameFromEmail(email),
-      password: options.adminPassword,
+      password: adminPassword,
       role: 'admin',
     });
     result.adminsCreated.push(email);

@@ -35,17 +35,13 @@ export interface AppConfig {
   maxEmailMessageBytes: number;
   allowedFileTypes: string[];
   adminSeedEmails: string[];
-  adminSeedPassword: string;
+  /** From ADMIN_SEED_PASSWORD only. There is deliberately no default value. */
+  adminSeedPassword: string | null;
   cronEnabled: boolean;
   cronSchedule: string;
 }
 
-const DEFAULT_ADMIN_EMAILS = [
-  'dr.vet.waleedtam@gmail.com',
-  'Room_samer20105@yahoo.com',
-];
-
-const DEFAULT_ADMIN_PASSWORD = '@Xx123456789xX@';
+const MIN_ADMIN_PASSWORD_LENGTH = 12;
 
 const DEFAULT_ALLOWED_TYPES = [
   'application/pdf',
@@ -189,8 +185,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     // third to the raw attachment size.
     maxEmailMessageBytes: readInt(env, 'MAX_EMAIL_MESSAGE_MB', 24) * 1024 * 1024,
     allowedFileTypes: readList(env, 'ALLOWED_FILE_TYPES', DEFAULT_ALLOWED_TYPES),
-    adminSeedEmails: readList(env, 'ADMIN_SEED_EMAILS', DEFAULT_ADMIN_EMAILS),
-    adminSeedPassword: readString(env, 'ADMIN_SEED_PASSWORD', DEFAULT_ADMIN_PASSWORD),
+    adminSeedEmails: readList(env, 'ADMIN_SEED_EMAILS', []),
+    adminSeedPassword: readOptionalString(env, 'ADMIN_SEED_PASSWORD'),
     cronEnabled: readBool(env, 'CRON_ENABLED', true),
     cronSchedule: readString(env, 'CRON_SCHEDULE', '0 8 * * *'),
   };
@@ -214,6 +210,12 @@ export function validateConfig(config: AppConfig): void {
   }
   if (!config.adminSeedEmails.every((email) => email.includes('@'))) {
     problems.push('ADMIN_SEED_EMAILS must be a comma-separated list of valid email addresses.');
+  }
+  if (config.adminSeedEmails.length > 0 && !config.adminSeedPassword) {
+    problems.push('ADMIN_SEED_PASSWORD is required when ADMIN_SEED_EMAILS is set (there is no default password).');
+  }
+  if (config.adminSeedPassword && config.adminSeedPassword.length < MIN_ADMIN_PASSWORD_LENGTH) {
+    problems.push(`ADMIN_SEED_PASSWORD must be at least ${MIN_ADMIN_PASSWORD_LENGTH} characters long.`);
   }
 
   if (problems.length > 0) {

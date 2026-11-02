@@ -33,6 +33,9 @@ try {
   if (result.adminsCreated.length > 0) {
     console.log(`Created admin account(s): ${result.adminsCreated.join(', ')}`);
   }
+  if (result.adminSeedSkippedReason) {
+    console.log(`No administrator was created: ${result.adminSeedSkippedReason}.`);
+  }
   if (result.adminsSkipped.length > 0) {
     console.log(`Admin account(s) already present: ${result.adminsSkipped.join(', ')}`);
   }

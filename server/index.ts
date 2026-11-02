@@ -92,6 +92,15 @@ async function main(): Promise<void> {
   if (seed.seedSkippedReason) {
     console.log(`[server] seed skipped: ${seed.seedSkippedReason}`);
   }
+  if (seed.adminSeedSkippedReason) {
+    const admins = (db.prepare('SELECT COUNT(*) AS total FROM admin_users').get() as { total: number }).total;
+    if (admins === 0) {
+      console.error(
+        `[server] WARNING: no administrator exists and none can be created: ${seed.adminSeedSkippedReason}. ` +
+          'Set ADMIN_SEED_EMAILS and ADMIN_SEED_PASSWORD and restart.',
+      );
+    }
+  }
 
   const staticDir = path.join(projectRoot, 'dist');
   const app = createApp({ config, db, mailer, cron, storage, documents, staticDir });

@@ -230,23 +230,18 @@ The three seeded documents point at files that lived in the dead Supabase storag
 - All `/api/*` routes except `/api/auth/login` and `/api/health` require a valid session.
 - **Role model.** There is none today — `src/components/ProtectedRoute.tsx:9-25` grants full access to any authenticated user, and the data layer is entirely unauthenticated. A minimal model is added: every `admin_users` row has a `role` (`admin` | `viewer`), `requireAuth` guards every `/api` route, and `requireAdmin` guards mutations and settings. The client only ever creates `admin` users, so the distinction is groundwork rather than a UI feature.
 
-### 5.2 Seeded admins
+### 5.2 First administrators
 
-| Email | Password | Role |
-|---|---|---|
-| `dr.vet.waleedtam@gmail.com` | `@Xx123456789xX@` | admin |
-| `Room_samer20105@yahoo.com` | `@Xx123456789xX@` | admin |
-
-Both are inserted by the seed script with bcrypt hashes generated at seed time. The seed is **idempotent**: existing admins are left untouched, missing ones are inserted, and `ADMIN_SEED_EMAILS` / `ADMIN_SEED_PASSWORD` env vars allow overriding the defaults at boot.
+There are **no built-in accounts and no default password** (decision 2026-11-02). `ADMIN_SEED_EMAILS` (comma-separated) and `ADMIN_SEED_PASSWORD` (at least 12 characters) come only from the environment. On boot the seed inserts a missing administrator with a bcrypt hash generated at seed time; existing admins are left untouched. If either variable is missing, no account is created and the server logs a warning when the database has no administrator.
 
 ### 5.3 What is removed
 - `src/integrations/supabase/client.ts` and `types.ts` — deleted.
 - `src/hooks/useAuth.tsx` — rewritten against the new API.
-- The hardcoded credential check in the old `useAuth` (`username === 'admin' && password === '@Xx123456789xX@'`) — gone.
+- The hardcoded credential check in the old `useAuth` — gone.
 - `public/data/database.json` — no longer used by the client (kept in the repo as the source for the seed import).
 - `src/hooks/useCompanies.ts` — **dead code**, no importers. Deleted rather than migrated, because it would otherwise break silently when the module it imports is replaced.
 - `src/pages/CompanyEmployees.tsx` — **dead page**, not routed in `src/App.tsx`. Deleted.
-- The legacy `admin_users` seed row (`username: "Admin"`, `public/data/database.json:237-244`) — **not** carried into SQLite. The table is re-created with the email-based schema and the two admins above.
+- The legacy `admin_users` seed row (`username: "Admin"`, `public/data/database.json:237-244`) — **not** carried into SQLite. The table is re-created with the email-based schema and the administrators come only from the environment (§5.2).
 
 ## 6. API design
 
@@ -625,8 +620,8 @@ nginx is no longer needed as a separate container — the Node process serves th
 | `SMTP_USER` | for mail | `samirfayez03@gmail.com` | |
 | `SMTP_PASS` | for mail | — | Gmail **app password**, set in Dokploy env |
 | `SMTP_FROM` | for mail | `ROMANI Flow <samirfayez03@gmail.com>` | |
-| `ADMIN_SEED_EMAILS` | no | the two admins | comma-separated |
-| `ADMIN_SEED_PASSWORD` | no | `@Xx123456789xX@` | |
+| `ADMIN_SEED_EMAILS` | first start | — | comma-separated administrator addresses |
+| `ADMIN_SEED_PASSWORD` | first start | — | at least 12 characters, no default |
 | `MAX_UPLOAD_MB` | no | `25` | |
 | `MAX_EMAIL_ATTACHMENT_MB` | no | `20` | |
 | `NODE_ENV` | no | `production` | |
@@ -678,8 +673,8 @@ services:
 ## 15. Acceptance criteria
 
 1. `npm run build` succeeds; no new file exceeds 500 lines; `npm run lint` is clean.
-2. Server boots on a fresh volume, applies migrations, seeds 2 admins + the full 20-employee dataset.
-3. Login as `dr.vet.waleedtam@gmail.com` and `Room_samer20105@yahoo.com` works; the wrong password is rejected.
+2. Server boots on a fresh volume, applies migrations, seeds the administrators named in the environment + the full 20-employee dataset.
+3. Login as a seeded administrator works; the wrong password is rejected.
 4. All pages list real data from SQLite; creating/editing/deleting an employee or document persists across a server restart.
 5. Uploading a file stores it under `${UPLOADS_DIR}` on disk (outside the container in Docker) and it can be previewed and downloaded.
 6. "Send expiry report now" delivers an HTML + text email to all configured recipients via SMTP; the run appears in `email_log`.

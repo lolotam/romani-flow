@@ -139,7 +139,7 @@ Deploy and watch the logs. A healthy first boot prints:
 [server] data dir    : /data
 [server] applied migrations: 001_init.sql, 002_indexes.sql, 003_expiry_notifications.sql, 004_pending_uploads.sql
 [server] imported seed data: companies=2, ministries=5, document_types=8, positions=6, employees=20, documents=3
-[server] created admin accounts: dr.vet.waleedtam@gmail.com, Room_samer20105@yahoo.com
+[server] created admin accounts: <the addresses you put in ADMIN_SEED_EMAILS>
 [server] listening on http://0.0.0.0:3000
 ```
 
@@ -150,15 +150,13 @@ curl -fsS https://romani.curemed.iq/api/health
 # {"status":"healthy","database":"ok","smtp":true,"timestamp":"…"}
 ```
 
-Sign in at the domain with either seeded account:
+Sign in at the domain with one of the addresses you set in `ADMIN_SEED_EMAILS`
+and the password you set in `ADMIN_SEED_PASSWORD` (at least 12 characters). Both
+exist only in the Dokploy environment; there is no default account or password.
 
-| Email | Password |
-|---|---|
-| `dr.vet.waleedtam@gmail.com` | `@Xx123456789xX@` |
-| `Room_samer20105@yahoo.com` | `@Xx123456789xX@` |
-
-> Change these passwords from the server after the first login if the accounts
-> are shared. The seed never overwrites an existing account.
+> The seed never overwrites an existing account. If the log shows
+> `no administrator exists`, one of the two variables is missing: set it and
+> redeploy.
 
 ---
 

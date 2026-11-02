@@ -37,7 +37,7 @@ This branch replaces all of it with a Node API that owns its own SQLite database
 ### Changed: the SPA
 
 - `src/lib/api/**` replaces `src/lib/jsonDatabase.ts` with the **same fluent surface** (`from().select().eq()…`), so the pages changed very little.
-- `useAuth` now talks to the API; the hardcoded `admin / @Xx123456789xX@` check is gone.
+- `useAuth` now talks to the API; the hardcoded credential check is gone.
 - The two broken upload paths are gone: one stored base64 in a row, the other stored a path to a file that was never written.
 - Settings gained the reminder intervals, the recipient lists, the scheduler panel, the SMTP status and the send log.
 - The i18n files were split by domain, and the two duplicate-key bugs the build reported are fixed.

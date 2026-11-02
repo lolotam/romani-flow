@@ -26,6 +26,10 @@ services:
       SMTP_USER: ${SMTP_USER:-samirfayez03@gmail.com}
       SMTP_PASS: ${SMTP_PASS:?set the Gmail app password in the environment}
       SMTP_FROM: ${SMTP_FROM:-ROMANI Flow <samirfayez03@gmail.com>}
+      # First administrator(s). The password lives only in the environment and
+      # has no default; both are needed on the first start of an empty database.
+      ADMIN_SEED_EMAILS: ${ADMIN_SEED_EMAILS:-}
+      ADMIN_SEED_PASSWORD: ${ADMIN_SEED_PASSWORD:-}
       # Limits
       MAX_UPLOAD_MB: ${MAX_UPLOAD_MB:-25}
       MAX_EMAIL_ATTACHMENT_MB: ${MAX_EMAIL_ATTACHMENT_MB:-20}
