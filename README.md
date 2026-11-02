@@ -71,7 +71,7 @@ Docker image stays small and the build never depends on a toolchain.
 ```bash
 npm install
 cp .env.example .env      # fill in JWT_SECRET, SMTP_USER, SMTP_PASS and SMTP_FROM
-# For local development, also set NODE_ENV=development, DATA_DIR=./data
+# For local development, remove NODE_ENV (server defaults to development), set DATA_DIR=./data
 # and UPLOADS_DIR=./data/uploads in .env (the sample targets production).
 npm run db:migrate
 npm run db:seed
