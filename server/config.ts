@@ -159,8 +159,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   const uploadsDir = path.resolve(readString(env, 'UPLOADS_DIR', path.join(dataDir, 'uploads')));
   const dbPath = path.resolve(readString(env, 'DB_PATH', path.join(dataDir, 'romani.db')));
 
-  const smtpUser = readFirst(env, SMTP_USER_KEYS, 'samirfayez03@gmail.com');
-  const smtpFrom = readFirst(env, SMTP_FROM_KEYS, `ROMANI Flow <${smtpUser}>`);
+  // No default sender: mail stays "not configured" until SMTP_USER is set.
+  const smtpUser = readFirst(env, SMTP_USER_KEYS, '');
+  const smtpFrom = readFirst(env, SMTP_FROM_KEYS, smtpUser ? `ROMANI Flow <${smtpUser}>` : '');
 
   return {
     env: nodeEnv,

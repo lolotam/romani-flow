@@ -105,8 +105,9 @@ ones:
 | `DATA_DIR` | no | `/data` | the persistent volume |
 | `UPLOADS_DIR` | no | `${DATA_DIR}/uploads` | the file bucket |
 | `SMTP_HOST` / `SMTP_PORT` / `SMTP_SECURE` | for mail | Gmail defaults | the SMTP server |
-| `SMTP_USER` | for mail | `samirfayez03@gmail.com` | the sender account |
-| `SMTP_PASS` | for mail | — | the Gmail **app password** |
+| `SMTP_USER` | **yes** (compose) | — | the sender account |
+| `SMTP_PASS` | **yes** (compose) | — | the Gmail **app password** |
+| `SMTP_FROM` | **yes** (compose) | — | the sender shown to recipients, e.g. `ROMANI Flow <sender@example.com>` |
 | `TZ` | no | `Asia/Kuwait` | the timezone the daily job runs in |
 | `MAX_UPLOAD_MB` | no | `25` | the upload size cap |
 | `MAX_EMAIL_ATTACHMENT_MB` | no | `20` | the attachment cap, kept under Gmail's 25 MB ceiling |

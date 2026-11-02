@@ -397,7 +397,7 @@ The container's data dir is `/data`; `UPLOADS_DIR` then resolves to `/data/uploa
 - **nodemailer** with a reusable SMTP transport.
 - Configuration resolution order: **environment first** (`SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE`, `SMTP_USER`, `SMTP_PASS`, `SMTP_FROM`), then the `settings` table for **non-secret** keys only.
 - **The SMTP password is never written to the database and never returned by the API.** The Settings UI shows "configured / not configured" and offers a *test send*. The operator supplies the password through Dokploy env vars, exactly as planned.
-- Sender defaults to `samirfayez03@gmail.com` with a Gmail app password.
+- There is no default sender: `SMTP_USER`, `SMTP_PASS` and `SMTP_FROM` must be provided (a Gmail app password for Gmail).
 
 ### 8.2 Settings (all editable in the UI)
 
@@ -617,9 +617,9 @@ nginx is no longer needed as a separate container — the Node process serves th
 | `SMTP_HOST` | for mail | `smtp.gmail.com` | |
 | `SMTP_PORT` | for mail | `587` | |
 | `SMTP_SECURE` | for mail | `false` | `true` for port 465 |
-| `SMTP_USER` | for mail | `samirfayez03@gmail.com` | |
+| `SMTP_USER` | for mail | — | sender account, no default |
 | `SMTP_PASS` | for mail | — | Gmail **app password**, set in Dokploy env |
-| `SMTP_FROM` | for mail | `ROMANI Flow <samirfayez03@gmail.com>` | |
+| `SMTP_FROM` | for mail | — | sender address, no default |
 | `ADMIN_SEED_EMAILS` | first start | — | comma-separated administrator addresses |
 | `ADMIN_SEED_PASSWORD` | first start | — | at least 12 characters, no default |
 | `MAX_UPLOAD_MB` | no | `25` | |
