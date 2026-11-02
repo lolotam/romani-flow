@@ -1,8 +1,10 @@
 ﻿import assert from 'node:assert/strict';
 import test from 'node:test';
+import { randomBytes } from 'node:crypto';
 import { loadConfig, validateConfig, isSmtpConfigured } from '../server/config.ts';
-const base = { JWT_SECRET: 'test-secret-'.repeat(4), NODE_ENV: 'test' };
-const mail = { SMTP_HOST: 'localhost', SMTP_USER: 'sender@example.com', SMTP_PASS: 'test-only', SMTP_FROM: 'ROMANI Flow <sender@example.com>' };
+// Ephemeral test values only; never credentials for an external service.
+const base = { JWT_SECRET: randomBytes(32).toString('hex'), NODE_ENV: 'test' };
+const mail = { SMTP_HOST: 'localhost', SMTP_USER: 'sender@example.com', SMTP_PASS: randomBytes(16).toString('hex'), SMTP_FROM: 'ROMANI Flow <sender@example.com>' };
 test('absent SMTP permits startup and remains unconfigured', () => {
   const config = loadConfig(base);
   assert.doesNotThrow(() => validateConfig(config));

@@ -71,6 +71,8 @@ Docker image stays small and the build never depends on a toolchain.
 ```bash
 npm install
 cp .env.example .env      # fill in JWT_SECRET, SMTP_USER, SMTP_PASS and SMTP_FROM
+# For local development, also set NODE_ENV=development, DATA_DIR=./data
+# and UPLOADS_DIR=./data/uploads in .env (the sample targets production).
 npm run db:migrate
 npm run db:seed
 npm run server:dev        # API on http://localhost:3000
@@ -114,8 +116,11 @@ ones:
 
 When any SMTP host, user, password or sender is set, `SMTP_USER`, `SMTP_PASS`
 and `SMTP_FROM` are required at startup, including outside Compose. The host
-defaults to Gmail when credentials are supplied. To disable mail, leave all four
-empty; startup logs one "mail not configured" warning. No sender is derived.
+defaults to Gmail when credentials are supplied. For direct Node startup, disable
+mail by leaving all four empty; startup logs one "mail not configured" warning.
+Compose always requires SMTP credentials and does not support this opt-out.
+No sender is derived. Before upgrading an existing deployment, explicitly set
+`SMTP_FROM` (or a supported alias); incomplete SMTP configuration prevents boot.
 
 The SMTP password is read from the environment **only**. It is never written to
 the database and never returned by the API — the Settings screen only shows
