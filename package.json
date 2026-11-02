@@ -15,6 +15,7 @@
     "db:seed": "tsx server/scripts/seed.ts",
     "check:sizes": "node scripts/check-file-sizes.mjs",
     "verify:api": "node scripts/verify-api.mjs",
+    "test:config": "node --import tsx --test scripts/verify-config.test.mjs",
     "lint": "eslint . && npm run check:sizes",
     "preview": "vite preview"
   },

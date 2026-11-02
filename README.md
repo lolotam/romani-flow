@@ -70,7 +70,7 @@ Docker image stays small and the build never depends on a toolchain.
 
 ```bash
 npm install
-cp .env.example .env      # fill in JWT_SECRET and the SMTP password
+cp .env.example .env      # fill in JWT_SECRET, SMTP_USER, SMTP_PASS and SMTP_FROM
 npm run db:migrate
 npm run db:seed
 npm run server:dev        # API on http://localhost:3000
@@ -105,12 +105,17 @@ ones:
 | `DATA_DIR` | no | `/data` | the persistent volume |
 | `UPLOADS_DIR` | no | `${DATA_DIR}/uploads` | the file bucket |
 | `SMTP_HOST` / `SMTP_PORT` / `SMTP_SECURE` | for mail | Gmail defaults | the SMTP server |
-| `SMTP_USER` | **yes** (compose) | — | the sender account |
-| `SMTP_PASS` | **yes** (compose) | — | the Gmail **app password** |
-| `SMTP_FROM` | **yes** (compose) | — | the sender shown to recipients, e.g. `ROMANI Flow <sender@example.com>` |
+| `SMTP_USER` | **yes** (for mail) | — | the sender account |
+| `SMTP_PASS` | **yes** (for mail) | — | the Gmail **app password** |
+| `SMTP_FROM` | **yes** (for mail) | — | the sender shown to recipients, e.g. `ROMANI Flow <sender@example.com>` |
 | `TZ` | no | `Asia/Kuwait` | the timezone the daily job runs in |
 | `MAX_UPLOAD_MB` | no | `25` | the upload size cap |
 | `MAX_EMAIL_ATTACHMENT_MB` | no | `20` | the attachment cap, kept under Gmail's 25 MB ceiling |
+
+When any SMTP host, user, password or sender is set, `SMTP_USER`, `SMTP_PASS`
+and `SMTP_FROM` are required at startup, including outside Compose. The host
+defaults to Gmail when credentials are supplied. To disable mail, leave all four
+empty; startup logs one "mail not configured" warning. No sender is derived.
 
 The SMTP password is read from the environment **only**. It is never written to
 the database and never returned by the API — the Settings screen only shows

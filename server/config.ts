@@ -159,9 +159,10 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   const uploadsDir = path.resolve(readString(env, 'UPLOADS_DIR', path.join(dataDir, 'uploads')));
   const dbPath = path.resolve(readString(env, 'DB_PATH', path.join(dataDir, 'romani.db')));
 
-  // No default sender: mail stays "not configured" until SMTP_USER is set.
+  // No default sender. An entirely absent SMTP configuration disables mail.
   const smtpUser = readFirst(env, SMTP_USER_KEYS, '');
-  const smtpFrom = readFirst(env, SMTP_FROM_KEYS, smtpUser ? `ROMANI Flow <${smtpUser}>` : '');
+  const smtpFrom = readFirst(env, SMTP_FROM_KEYS, '');
+  const smtpPass = readFirstOptional(env, SMTP_PASS_KEYS);
 
   return {
     env: nodeEnv,
@@ -173,11 +174,11 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     jwtTtlSeconds: readInt(env, 'JWT_TTL_SECONDS', 12 * 60 * 60),
     cookieName: readString(env, 'SESSION_COOKIE_NAME', 'romani_session'),
     smtp: {
-      host: readFirst(env, SMTP_HOST_KEYS, 'smtp.gmail.com'),
+      host: readFirst(env, SMTP_HOST_KEYS, smtpUser || smtpPass || smtpFrom ? 'smtp.gmail.com' : ''),
       port: readFirstInt(env, SMTP_PORT_KEYS, 587),
       secure: readFirstBool(env, SMTP_SECURE_KEYS, false),
       user: smtpUser,
-      pass: readFirstOptional(env, SMTP_PASS_KEYS),
+      pass: smtpPass,
       from: smtpFrom,
     },
     maxUploadBytes: readInt(env, 'MAX_UPLOAD_MB', 25) * 1024 * 1024,
@@ -199,6 +200,15 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
  */
 export function validateConfig(config: AppConfig): void {
   const problems: string[] = [];
+  if (config.smtp.host || config.smtp.user || config.smtp.pass || config.smtp.from) {
+    for (const [key, value] of Object.entries({
+      SMTP_USER: config.smtp.user,
+      SMTP_PASS: config.smtp.pass,
+      SMTP_FROM: config.smtp.from,
+    })) {
+      if (!value) problems.push(`${key} is required when SMTP is configured (no default).`);
+    }
+  }
 
   if (config.env === 'production' && !config.jwtSecret) {
     problems.push('JWT_SECRET is required in production (set it in the Dokploy environment).');
@@ -225,5 +235,5 @@ export function validateConfig(config: AppConfig): void {
 }
 
 export function isSmtpConfigured(config: AppConfig): boolean {
-  return Boolean(config.smtp.host && config.smtp.user && config.smtp.pass);
+  return Boolean(config.smtp.host && config.smtp.user && config.smtp.pass && config.smtp.from);
 }
