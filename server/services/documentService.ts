@@ -161,7 +161,8 @@ export class DocumentService {
       if (uploadId) this.claimUpload(uploadId);
       this.db.exec('COMMIT');
 
-      if (previousPath && storageFields?.file_path !== previousPath) {
+      // Only a replacement upload retires the old file; a data-only update keeps it.
+      if (previousPath && storageFields && storageFields.file_path !== previousPath) {
         await this.removeStoredFile(previousPath);
       }
       return row;
