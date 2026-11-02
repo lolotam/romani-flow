@@ -9,18 +9,11 @@ import { Textarea } from '@/components/ui/textarea';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { useToast } from '@/hooks/use-toast';
 import { useLanguage } from '@/contexts/LanguageContext';
-import { jsonDatabase, Employee, Document } from '@/lib/jsonDatabase';
+import { api, endpoints } from '@/lib/api';
 import { Layout } from '@/components/Layout';
-import {
-  getExpiringEmployees,
-  getExpiringDocuments,
-  sendExpiryNotification,
-  checkAndSendNotifications,
-  ExpiryData
-} from '@/lib/emailService';
 import { Mail, Moon, Building2, FileText, UserCog, Shield, Database } from 'lucide-react';
 
-import type { EmailSettingsData, Company, DocumentType, Ministry, Position } from '@/components/settings/types';
+import type { Company, DocumentType, Ministry, Position } from '@/components/settings/types';
 import EmailSettingsComponent from '@/components/settings/EmailSettings';
 import AppearanceSettings from '@/components/settings/AppearanceSettings';
 import CompaniesSettings from '@/components/settings/CompaniesSettings';
@@ -30,7 +23,7 @@ import MinistriesSettings from '@/components/settings/MinistriesSettings';
 import BackupSettings from '@/components/settings/BackupSettings';
 
 export default function Settings() {
-  const { t, language, isRTL } = useLanguage();
+  const { t } = useLanguage();
   const { toast } = useToast();
   const { theme, toggleTheme } = useTheme();
   const [activeTab, setActiveTab] = useState('email');
@@ -41,8 +34,6 @@ export default function Settings() {
   const [documentTypes, setDocumentTypes] = useState<DocumentType[]>([]);
   const [ministries, setMinistries] = useState<Ministry[]>([]);
   const [positions, setPositions] = useState<Position[]>([]);
-  const [employees, setEmployees] = useState<Employee[]>([]);
-  const [documents, setDocuments] = useState<Document[]>([]);
 
   // Form state
   const [newCompany, setNewCompany] = useState({ name: '', name_ar: '', description: '' });
@@ -56,66 +47,28 @@ export default function Settings() {
   const [editingMinistry, setEditingMinistry] = useState<Ministry | null>(null);
   const [editingPosition, setEditingPosition] = useState<Position | null>(null);
 
-  // Email state
-  const [emailSettings, setEmailSettings] = useState<EmailSettingsData>({
-    resend_from_email: '',
-    email_receiver: '',
-    enable_notifications: true,
-    daily_schedule: true
-  });
-  const [expiryData, setExpiryData] = useState<ExpiryData>({ employees: [], documents: [] });
-  const [isCheckingExpiry, setIsCheckingExpiry] = useState(false);
-  const [isSendingEmail, setIsSendingEmail] = useState(false);
-  const [lastEmailSent, setLastEmailSent] = useState<string | null>(null);
-  const [deletedReminders, setDeletedReminders] = useState<{ id: string, type: 'employee' | 'document' }[]>([]);
-
   useEffect(() => {
-    fetchData();
-
-    const savedDeletedReminders = localStorage.getItem('romani_deleted_reminders');
-    if (savedDeletedReminders) {
-      try { setDeletedReminders(JSON.parse(savedDeletedReminders)); } catch (e) { /* ignore */ }
-    }
+    void fetchData();
   }, []);
 
   const fetchData = async () => {
     try {
-      const [companiesResult, docTypesResult, ministriesResult, positionsResult, employeesResult, documentsResult] = await Promise.all([
-        jsonDatabase.from('companies').select('*').order('name', 'asc').execute(),
-        jsonDatabase.from('document_types').select('*').order('name_ar', 'asc').execute(),
-        jsonDatabase.from('ministries').select('*').order('name_ar', 'asc').execute(),
-        jsonDatabase.from('positions').select('*').order('name_ar', 'asc').execute(),
-        jsonDatabase.from('employees').select('*').execute(),
-        jsonDatabase.from('documents').select('*').execute()
+      const [companiesResult, docTypesResult, ministriesResult, positionsResult] = await Promise.all([
+        api.from<Company>('companies').select('*').order('name', 'asc').execute(),
+        api.from<DocumentType>('document_types').select('*').order('name_ar', 'asc').execute(),
+        api.from<Ministry>('ministries').select('*').order('name_ar', 'asc').execute(),
+        api.from<Position>('positions').select('*').order('name_ar', 'asc').execute(),
       ]);
 
       setCompanies(companiesResult.data || []);
       setDocumentTypes(docTypesResult.data || []);
       setMinistries(ministriesResult.data || []);
       setPositions(positionsResult.data || []);
-      setEmployees(employeesResult.data || []);
-      setDocuments(documentsResult.data || []);
-
-      const lastSent = localStorage.getItem('lastEmailSent');
-      setLastEmailSent(lastSent);
-      checkExpiringItems(employeesResult.data || [], documentsResult.data || []);
     } catch (error) {
       console.error('Error fetching data:', error);
     } finally {
       setIsLoading(false);
     }
-  };
-
-  const checkExpiringItems = (employeeData: Employee[], documentData: Document[]) => {
-    const expiringEmployees = getExpiringEmployees(employeeData);
-    const expiringDocuments = getExpiringDocuments(documentData, employeeData);
-    const savedDeleted = localStorage.getItem('romani_deleted_reminders');
-    let currentDeleted: { id: string, type: 'employee' | 'document' }[] = [];
-    if (savedDeleted) { try { currentDeleted = JSON.parse(savedDeleted); } catch (e) { /* ignore */ } }
-    setExpiryData({
-      employees: expiringEmployees.filter(emp => !currentDeleted.some(d => d.id === emp.id && d.type === 'employee')),
-      documents: expiringDocuments.filter(doc => !currentDeleted.some(d => d.id === doc.id && d.type === 'document'))
-    });
   };
 
   // Dark mode — delegate to ThemeProvider
@@ -148,140 +101,87 @@ export default function Settings() {
   // Companies
   const addCompany = () => {
     if (!validateRequired(newCompany.name, newCompany.name_ar)) return;
-    crudAction(async () => { const { error } = await jsonDatabase.insert('companies', [{ name: newCompany.name, name_ar: newCompany.name_ar, description: newCompany.description }]); if (error) throw error; }, 'companyAdded', 'companyAddError', () => setNewCompany({ name: '', name_ar: '', description: '' }));
+    crudAction(async () => { const { error } = await api.insert('companies', [{ name: newCompany.name, name_ar: newCompany.name_ar, description: newCompany.description }]); if (error) throw error; }, 'companyAdded', 'companyAddError', () => setNewCompany({ name: '', name_ar: '', description: '' }));
   };
   const updateCompany = () => {
     if (!editingCompany || !validateRequired(editingCompany.name, editingCompany.name_ar)) return;
-    crudAction(async () => { const { error } = await jsonDatabase.update('companies', editingCompany.id, { name: editingCompany.name, name_ar: editingCompany.name_ar, description: editingCompany.description }); if (error) throw error; }, 'companyUpdated', 'companyUpdateError', () => setEditingCompany(null));
+    crudAction(async () => { const { error } = await api.update('companies', editingCompany.id, { name: editingCompany.name, name_ar: editingCompany.name_ar, description: editingCompany.description }); if (error) throw error; }, 'companyUpdated', 'companyUpdateError', () => setEditingCompany(null));
   };
   const deleteCompany = (company: Company) => {
     if (!confirm(t('settings.settingsToasts.companyDeleteConfirm', { name: company.name_ar }))) return;
-    crudAction(async () => { const { error } = await jsonDatabase.delete('companies', company.id); if (error) throw error; }, 'companyDeleted', 'companyDeleteError');
+    crudAction(async () => { const { error } = await api.delete('companies', company.id); if (error) throw error; }, 'companyDeleted', 'companyDeleteError');
   };
 
   // Document Types
   const addDocumentType = () => {
     if (!validateRequired(newDocType.name, newDocType.name_ar)) return;
-    crudAction(async () => { const { error } = await jsonDatabase.insert('document_types', [newDocType]); if (error) throw error; }, 'documentTypeAdded', 'documentTypeAddError', () => setNewDocType({ name: '', name_ar: '' }));
+    crudAction(async () => { const { error } = await api.insert('document_types', [newDocType]); if (error) throw error; }, 'documentTypeAdded', 'documentTypeAddError', () => setNewDocType({ name: '', name_ar: '' }));
   };
   const updateDocumentType = () => {
     if (!editingDocType || !validateRequired(editingDocType.name, editingDocType.name_ar)) return;
-    crudAction(async () => { const { error } = await jsonDatabase.update('document_types', editingDocType.id, { name: editingDocType.name, name_ar: editingDocType.name_ar }); if (error) throw error; }, 'documentTypeUpdated', 'documentTypeUpdateError', () => setEditingDocType(null));
+    crudAction(async () => { const { error } = await api.update('document_types', editingDocType.id, { name: editingDocType.name, name_ar: editingDocType.name_ar }); if (error) throw error; }, 'documentTypeUpdated', 'documentTypeUpdateError', () => setEditingDocType(null));
   };
   const deleteDocumentType = (docType: DocumentType) => {
     if (!confirm(t('settings.settingsToasts.documentTypeDeleteConfirm', { name: docType.name_ar }))) return;
-    crudAction(async () => { const { error } = await jsonDatabase.delete('document_types', docType.id); if (error) throw error; }, 'documentTypeDeleted', 'documentTypeDeleteError');
+    crudAction(async () => { const { error } = await api.delete('document_types', docType.id); if (error) throw error; }, 'documentTypeDeleted', 'documentTypeDeleteError');
   };
 
   // Ministries
   const addMinistry = () => {
     if (!validateRequired(newMinistry.name, newMinistry.name_ar)) return;
-    crudAction(async () => { const { error } = await jsonDatabase.insert('ministries', [newMinistry]); if (error) throw error; }, 'ministryAdded', 'ministryAddError', () => setNewMinistry({ name: '', name_ar: '' }));
+    crudAction(async () => { const { error } = await api.insert('ministries', [newMinistry]); if (error) throw error; }, 'ministryAdded', 'ministryAddError', () => setNewMinistry({ name: '', name_ar: '' }));
   };
   const updateMinistry = () => {
     if (!editingMinistry || !validateRequired(editingMinistry.name, editingMinistry.name_ar)) return;
-    crudAction(async () => { const { error } = await jsonDatabase.update('ministries', editingMinistry.id, { name: editingMinistry.name, name_ar: editingMinistry.name_ar }); if (error) throw error; }, 'ministryUpdated', 'ministryUpdateError', () => setEditingMinistry(null));
+    crudAction(async () => { const { error } = await api.update('ministries', editingMinistry.id, { name: editingMinistry.name, name_ar: editingMinistry.name_ar }); if (error) throw error; }, 'ministryUpdated', 'ministryUpdateError', () => setEditingMinistry(null));
   };
   const deleteMinistry = (ministry: Ministry) => {
     if (!confirm(t('settings.settingsToasts.ministryDeleteConfirm', { name: ministry.name_ar }))) return;
-    crudAction(async () => { const { error } = await jsonDatabase.delete('ministries', ministry.id); if (error) throw error; }, 'ministryDeleted', 'ministryDeleteError');
+    crudAction(async () => { const { error } = await api.delete('ministries', ministry.id); if (error) throw error; }, 'ministryDeleted', 'ministryDeleteError');
   };
 
   // Positions
   const addPosition = () => {
     if (!validateRequired(newPosition.name, newPosition.name_ar, newPosition.value)) return;
-    crudAction(async () => { const { error } = await jsonDatabase.insert('positions', [newPosition]); if (error) throw error; }, 'positionAdded', 'positionAddError', () => setNewPosition({ name: '', name_ar: '', value: '' }));
+    crudAction(async () => { const { error } = await api.insert('positions', [newPosition]); if (error) throw error; }, 'positionAdded', 'positionAddError', () => setNewPosition({ name: '', name_ar: '', value: '' }));
   };
   const updatePosition = () => {
     if (!editingPosition || !validateRequired(editingPosition.name, editingPosition.name_ar, editingPosition.value)) return;
-    crudAction(async () => { const { error } = await jsonDatabase.update('positions', editingPosition.id, { name: editingPosition.name, name_ar: editingPosition.name_ar, value: editingPosition.value }); if (error) throw error; }, 'positionUpdated', 'positionUpdateError', () => setEditingPosition(null));
+    crudAction(async () => { const { error } = await api.update('positions', editingPosition.id, { name: editingPosition.name, name_ar: editingPosition.name_ar, value: editingPosition.value }); if (error) throw error; }, 'positionUpdated', 'positionUpdateError', () => setEditingPosition(null));
   };
   const deletePosition = (position: Position) => {
     if (!confirm(t('settings.settingsToasts.positionDeleteConfirm', { name: position.name_ar }))) return;
-    crudAction(async () => { const { error } = await jsonDatabase.delete('positions', position.id); if (error) throw error; }, 'positionDeleted', 'positionDeleteError');
+    crudAction(async () => { const { error } = await api.delete('positions', position.id); if (error) throw error; }, 'positionDeleted', 'positionDeleteError');
   };
 
   // Backup
   const exportBackup = async () => {
-    try {
-      const [documentsResult, employeesResult, companiesResult, docTypesResult, ministriesResult] = await Promise.all([
-        jsonDatabase.from('documents').select('*').execute(),
-        jsonDatabase.from('employees').select('*').execute(),
-        jsonDatabase.from('companies').select('*').execute(),
-        jsonDatabase.from('document_types').select('*').execute(),
-        jsonDatabase.from('ministries').select('*').execute()
-      ]);
-      const backup = { timestamp: new Date().toISOString(), version: '1.0', data: { documents: documentsResult.data || [], employees: employeesResult.data || [], companies: companiesResult.data || [], document_types: docTypesResult.data || [], ministries: ministriesResult.data || [] } };
-      const blob = new Blob([JSON.stringify(backup, null, 2)], { type: 'application/json' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `romani-backup-${new Date().toISOString().split('T')[0]}.json`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
-      toast({ title: t('settings.settingsToasts.backupExported'), description: t('settings.settingsToasts.backupExportedDesc') });
-    } catch (error) {
+    const { data, error } = await endpoints.backup.export();
+    if (error || !data) {
       toast({ title: t('settings.settingsToasts.error'), description: t('settings.settingsToasts.backupExportError'), variant: 'destructive' });
+      return;
     }
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `romani-backup-${new Date().toISOString().split('T')[0]}.json`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    toast({ title: t('settings.settingsToasts.backupExported'), description: t('settings.settingsToasts.backupExportedDesc') });
   };
 
-  const handleEraseAllData = (confirmText: string) => {
+  const handleEraseAllData = async (confirmText: string) => {
     if (confirmText !== 'DELETE ALL') return;
-    localStorage.removeItem('romani_json_database');
-    localStorage.removeItem('romani_deleted_reminders');
+    const { error } = await endpoints.backup.erase();
+    if (error) {
+      toast({ title: t('settings.settingsToasts.error'), description: error.message, variant: 'destructive' });
+      return;
+    }
     toast({ title: t('settings.settingsToasts.success'), description: t('settings.backup.eraseSuccess') });
     setTimeout(() => window.location.reload(), 1000);
-  };
-
-  // Email
-  const saveEmailSettings = () => {
-    localStorage.setItem('emailSettings', JSON.stringify(emailSettings));
-    toast({ title: t('settings.settingsToasts.success'), description: t('settings.settingsToasts.emailSettingsSaved') });
-  };
-
-  const handleCheckExpiry = async () => {
-    setIsCheckingExpiry(true);
-    try {
-      await fetchData();
-      toast({ title: t('settings.settingsToasts.checkCompleted'), description: t('settings.settingsToasts.checkCompletedDesc', { employees: expiryData.employees.length, documents: expiryData.documents.length }) });
-    } catch (error) {
-      toast({ title: t('settings.settingsToasts.error'), description: t('settings.settingsToasts.checkError'), variant: 'destructive' });
-    } finally { setIsCheckingExpiry(false); }
-  };
-
-  const handleSendTestEmail = async () => {
-    setIsSendingEmail(true);
-    try {
-      const settings = { enabled: emailSettings.enable_notifications, dailyReminder: emailSettings.daily_schedule, expiredNotification: true, emailRecipient: emailSettings.email_receiver, senderEmail: emailSettings.resend_from_email };
-      const result = await sendExpiryNotification(expiryData, settings);
-      if (result.success) {
-        const currentTime = new Date().toLocaleString('ar-EG');
-        localStorage.setItem('lastEmailSent', currentTime);
-        setLastEmailSent(currentTime);
-        toast({ title: t('settings.settingsToasts.emailSent'), description: result.message });
-      } else {
-        toast({ title: t('settings.settingsToasts.emailSendError'), description: result.message, variant: 'destructive' });
-      }
-    } catch (error) {
-      toast({ title: t('settings.settingsToasts.error'), description: t('settings.settingsToasts.emailError', { error }), variant: 'destructive' });
-    } finally { setIsSendingEmail(false); }
-  };
-
-  const handleAutoNotifications = async () => {
-    const settings = { enabled: emailSettings.enable_notifications, dailyReminder: emailSettings.daily_schedule, expiredNotification: true, emailRecipient: emailSettings.email_receiver, senderEmail: emailSettings.resend_from_email };
-    await checkAndSendNotifications(employees, documents, settings);
-  };
-
-  const deleteReminderItem = (id: string, type: 'employee' | 'document') => {
-    const newDeleted = [...deletedReminders, { id, type }];
-    setDeletedReminders(newDeleted);
-    localStorage.setItem('romani_deleted_reminders', JSON.stringify(newDeleted));
-    setExpiryData(prev => ({
-      employees: type === 'employee' ? prev.employees.filter(e => e.id !== id) : prev.employees,
-      documents: type === 'document' ? prev.documents.filter(d => d.id !== id) : prev.documents
-    }));
   };
 
   if (isLoading) {
@@ -317,14 +217,7 @@ export default function Settings() {
             </TabsList>
 
             <TabsContent value="email">
-              <EmailSettingsComponent
-                emailSettings={emailSettings} onEmailSettingsChange={setEmailSettings}
-                onSave={saveEmailSettings} onTestEmail={handleSendTestEmail}
-                onCheckExpiry={handleCheckExpiry} onSendReport={handleSendTestEmail}
-                onAutoNotifications={handleAutoNotifications} onDeleteReminder={deleteReminderItem}
-                isCheckingExpiry={isCheckingExpiry} isSendingEmail={isSendingEmail}
-                lastEmailSent={lastEmailSent} employees={employees} expiryData={expiryData}
-              />
+              <EmailSettingsComponent />
             </TabsContent>
 
             <TabsContent value="appearance">

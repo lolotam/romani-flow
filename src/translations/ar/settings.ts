@@ -1,0 +1,243 @@
+// Settings Page
+export const settings = {
+  title: 'الإعدادات',
+  subtitle: 'إدارة إعدادات النظام والتكوينات',
+
+  // Tabs
+  tabs: {
+    email: 'البريد',
+    appearance: 'المظهر',
+    companies: 'الشركات',
+    positions: 'المناصب',
+    documents: 'أنواع الوثائق',
+    ministries: 'الوزارات',
+    backup: 'النسخ الاحتياطي'
+  },
+
+  // Email Settings
+  email: {
+    title: 'إعدادات البريد الإلكتروني',
+    description: 'تكوين خدمة البريد الإلكتروني لإرسال الإشعارات',
+    serviceId: 'معرف الخدمة',
+    templateId: 'معرف القالب',
+    userId: 'معرف المستخدم',
+    testEmail: 'اختبر البريد الإلكتروني',
+    testSuccess: 'تم إرسال البريد الإلكتروني بنجاح',
+    testError: 'فشل في إرسال البريد الإلكتروني',
+    save: 'حفظ الإعدادات',
+    smtpServer: 'خادم SMTP',
+    smtpPort: 'منفذ SMTP',
+    smtpUsername: 'اسم المستخدم',
+    smtpPassword: 'كلمة المرور',
+    emailSender: 'المرسل',
+    emailReceiver: 'المستقبل',
+    enableNotifications: 'تفعيل الإشعارات',
+    weeklySchedule: 'تذكير أسبوعي',
+    monthlySchedule: 'تذكير شهري',
+    saveEmailSettings: 'حفظ إعدادات البريد الإلكتروني',
+    testEmailButton: 'اختبار الإيميل',
+    monitoringTitle: 'مراقبة انتهاء الصلاحية والتنبيهات التلقائية',
+    monitoringDescription: 'مراقبة تلقائية لانتهاء صلاحية الإقامات والوثائق مع إرسال تنبيهات عبر البريد الإلكتروني',
+    totalEmployees: 'إجمالي الموظفين',
+    registeredEmployee: 'موظف مسجل',
+    expiringResidencies: 'إقامات تنتهي قريباً',
+    expiringDocuments: 'وثائق تنتهي قريباً',
+    withinMonth: 'خلال شهر',
+    noFileChosen: 'لم يتم اختيار ملف',
+    checkExpiry: 'فحص انتهاء الصلاحية',
+    checkingExpiry: 'جاري الفحص...',
+    sendImmediateReport: 'إرسال تقرير فوري',
+    sendingReport: 'جاري الإرسال...',
+    enableAutoAlerts: 'تشغيل التنبيهات التلقائية',
+    lastEmailSent: 'آخر إيميل تم إرساله:',
+    expiryDetails: 'تفاصيل انتهاء الصلاحية',
+    expiringResidenciesList: 'الإقامات التي تنتهي صلاحيتها',
+    expiringDocumentsList: 'الوثائق التي تنتهي صلاحيتها',
+    employeeName: 'اسم الموظف',
+    documentName: 'اسم الوثيقة',
+    employee: 'الموظف',
+    residencyExpiryDate: 'تاريخ انتهاء الإقامة',
+    expiryDate: 'تاريخ الانتهاء',
+    timeRemaining: 'المدة المتبقية',
+    status: 'الحالة',
+    dayExpired: 'يوم (منتهية)',
+    day: 'يوم',
+    expired: 'منتهية',
+    danger: 'خطر',
+    warning: 'تحذير',
+    actions: 'الإجراءات',
+    moreItemsInReport: 'وعرض {count} إقامة أخرى في التقرير الكامل',
+    moreDocumentsInReport: 'وعرض {count} وثيقة أخرى في التقرير الكامل',
+    emailConfigNote: 'ملاحظة مهمة حول إعدادات البريد الإلكتروني',
+    emailConfigNotes: {
+      verifySmtp: '• تأكد من صحة إعدادات SMTP قبل تفعيل الإشعارات التلقائية',
+      autoAlertsWhen: '• يتم إرسال التنبيهات التلقائية عند:',
+      monthBeforeExpiry: '- بقاء شهر على انتهاء الصلاحية',
+      weekBeforeExpiry: '- بقاء أسبوع على انتهاء الصلاحية',
+      actualExpiry: '- انتهاء الصلاحية فعلياً',
+      immediateReport: '• يمكن إرسال تقرير فوري في أي وقت باستخدام زر "إرسال تقرير فوري"'
+    }
+  },
+
+  // Appearance Settings
+  appearance: {
+    title: 'إعدادات المظهر',
+    description: 'تخصيص مظهر النظام والثيم المفضل',
+    darkMode: 'الوضع المظلم',
+    darkModeDescription: 'تفعيل أو إلغاء تفعيل الوضع المظلم'
+  },
+
+  // Backup Settings (first instance removed - using the one at line ~460)
+
+  // Companies Management
+  companies: {
+    title: 'إدارة الشركات',
+    description: 'إضافة وإدارة الشركات في النظام',
+    addNew: 'إضافة شركة جديدة',
+    name: 'اسم الشركة',
+    nameArabic: 'الاسم بالعربية',
+    nameEnglish: 'الاسم بالإنجليزية',
+    currentCompanies: 'الشركات الحالية',
+    employeeCount: '{{count}} موظف',
+    nameArabicPlaceholder: 'أدخل اسم الشركة بالعربية',
+    nameEnglishPlaceholder: 'أدخل اسم الشركة بالإنجليزية',
+    descriptionPlaceholder: 'أدخل وصف الشركة',
+    currentCompaniesCount: 'الشركات الحالية ({{count}})'
+  },
+
+  // Positions Management
+  positions: {
+    title: 'إدارة المناصب',
+    description: 'إضافة وإدارة مناصب الموظفين في النظام',
+    addNew: 'إضافة منصب جديد',
+    name: 'الاسم',
+    nameArabic: 'الاسم بالعربية',
+    nameEnglish: 'الاسم بالإنجليزية',
+    value: 'القيمة',
+    valuePlaceholder: 'قيمة المنصب',
+    currentPositions: 'المناصب الحالية',
+    editTitle: 'تعديل المنصب',
+    editDescription: 'تعديل بيانات المنصب',
+    nameArabicPlaceholder: 'أدخل اسم المنصب بالعربية',
+    nameEnglishPlaceholder: 'أدخل اسم المنصب بالإنجليزية',
+    currentPositionsCount: 'المناصب الحالية ({{count}})'
+  },
+
+  // Document Types Management
+  documentTypes: {
+    title: 'إدارة أنواع الوثائق',
+    description: 'إضافة وإدارة أنواع الوثائق في النظام',
+    addNew: 'إضافة نوع وثيقة جديد',
+    name: 'الاسم',
+    nameArabic: 'الاسم بالعربية',
+    nameEnglish: 'الاسم بالإنجليزية',
+    currentTypes: 'الأنواع الحالية',
+    editTitle: 'تعديل نوع الوثيقة',
+    editDescription: 'تعديل بيانات نوع الوثيقة',
+    nameEnglishPlaceholder: 'نوع الوثيقة',
+    nameArabicPlaceholder: 'نوع الوثيقة',
+    currentTypesCount: 'أنواع الوثائق الحالية ({{count}})'
+  },
+
+  // Ministries Management
+  ministries: {
+    title: 'إدارة الوزارات',
+    description: 'إضافة وإدارة الوزارات في النظام',
+    addNew: 'إضافة وزارة جديدة',
+    name: 'الاسم',
+    nameArabic: 'الاسم بالعربية',
+    nameEnglish: 'الاسم بالإنجليزية',
+    currentMinistries: 'الوزارات الحالية',
+    editTitle: 'تعديل الوزارة',
+    editDescription: 'تعديل بيانات الوزارة',
+    nameEnglishPlaceholder: 'اسم الوزارة',
+    nameArabicPlaceholder: 'اسم الوزارة',
+    currentMinistriesCount: 'الوزارات الحالية ({{count}})'
+  },
+
+  // Backup Settings
+  backup: {
+    title: 'النسخ الاحتياطي',
+    description: 'إدارة النسخ الاحتياطي واستعادة البيانات',
+    createBackup: 'إنشاء نسخة احتياطية',
+    restoreBackup: 'استعادة نسخة احتياطية',
+    downloadBackup: 'تحميل النسخة الاحتياطية',
+    backupCreated: 'تم إنشاء النسخة الاحتياطية بنجاح',
+    backupRestored: 'تم استعادة البيانات بنجاح',
+    confirmRestore: 'هل أنت متأكد من استعادة البيانات؟ سيتم استبدال البيانات الحالية.',
+    selectFile: 'اختر ملف النسخة الاحتياطية'
+  },
+
+  // Common Actions
+  actions: {
+    add: 'إضافة',
+    edit: 'تعديل',
+    delete: 'حذف',
+    save: 'حفظ',
+    cancel: 'إلغاء',
+    saveChanges: 'حفظ التغييرات',
+    confirmDelete: 'هل أنت متأكد من الحذف؟'
+  },
+
+  // Messages
+  messages: {
+    addSuccess: 'تم الإضافة بنجاح',
+    updateSuccess: 'تم التحديث بنجاح',
+    deleteSuccess: 'تم الحذف بنجاح',
+    saveSuccess: 'تم حفظ الإعدادات بنجاح',
+    addError: 'فشل في الإضافة',
+    updateError: 'فشل في التحديث',
+    deleteError: 'فشل في الحذف',
+    saveError: 'فشل في حفظ الإعدادات',
+    requiredFields: 'يرجى إدخال جميع البيانات المطلوبة'
+  },
+
+  // Settings Page Toast Messages
+  settingsToasts: {
+    themeChanged: 'تم التغيير',
+    themeChangedDesc: 'تم {status} الوضع المظلم',
+    enabled: 'تفعيل',
+    disabled: 'إلغاء',
+    error: 'خطأ',
+    success: 'تم بنجاح',
+    requiredFields: 'يرجى إدخال جميع البيانات المطلوبة',
+    companyAdded: 'تم إضافة الشركة الجديدة',
+    companyAddError: 'فشل في إضافة الشركة',
+    companyUpdated: 'تم تحديث الشركة',
+    companyUpdateError: 'فشل في تحديث الشركة',
+    companyDeleted: 'تم حذف الشركة',
+    companyDeleteError: 'فشل في حذف الشركة',
+    companyDeleteConfirm: 'هل أنت متأكد من حذف شركة "{name}"؟',
+    documentTypeAdded: 'تم إضافة نوع الوثيقة الجديد',
+    documentTypeAddError: 'فشل في إضافة نوع الوثيقة',
+    documentTypeUpdated: 'تم تحديث نوع الوثيقة',
+    documentTypeUpdateError: 'فشل في تحديث نوع الوثيقة',
+    documentTypeDeleted: 'تم حذف نوع الوثيقة',
+    documentTypeDeleteError: 'فشل في حذف نوع الوثيقة',
+    documentTypeDeleteConfirm: 'هل أنت متأكد من حذف نوع الوثيقة "{name}"؟',
+    ministryAdded: 'تم إضافة الوزارة الجديدة',
+    ministryAddError: 'فشل في إضافة الوزارة',
+    ministryUpdated: 'تم تحديث الوزارة',
+    ministryUpdateError: 'فشل في تحديث الوزارة',
+    ministryDeleted: 'تم حذف الوزارة',
+    ministryDeleteError: 'فشل في حذف الوزارة',
+    ministryDeleteConfirm: 'هل أنت متأكد من حذف الوزارة "{name}"؟',
+    positionAdded: 'تم إضافة المنصب الجديد',
+    positionAddError: 'فشل في إضافة المنصب',
+    positionUpdated: 'تم تحديث المنصب',
+    positionUpdateError: 'فشل في تحديث المنصب',
+    positionDeleted: 'تم حذف المنصب',
+    positionDeleteError: 'فشل في حذف المنصب',
+    positionDeleteConfirm: 'هل أنت متأكد من حذف المنصب "{name}"؟',
+    backupExported: 'تم التصدير',
+    backupExportedDesc: 'تم تصدير النسخة الاحتياطية بنجاح',
+    backupExportError: 'فشل في تصدير النسخة الاحتياطية',
+    emailSettingsSaved: 'تم حفظ إعدادات البريد الإلكتروني',
+    checkCompleted: 'تم الفحص',
+    checkCompletedDesc: 'تم العثور على {employees} إقامة و {documents} وثيقة تنتهي صلاحيتها قريباً',
+    checkError: 'فشل في فحص انتهاء الصلاحية',
+    emailSent: 'تم الإرسال',
+    emailSendError: 'فشل الإرسال',
+    emailError: 'خطأ في إرسال الإيميل: {error}'
+  }
+};

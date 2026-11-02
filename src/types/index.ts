@@ -1,80 +1,32 @@
-// Centralized shared types — re-exported from jsonDatabase and extended
+// Centralized shared types — re-exported from the API client and extended
 export type {
   DocumentStatus,
   Company,
   Ministry,
   DocumentType,
   Position,
+  PositionType,
   Employee,
   Document,
-} from '@/lib/jsonDatabase';
+} from '@/lib/api/types';
+
+import type {
+  EmployeeWithRelations as ApiEmployeeWithRelations,
+  DocumentWithRelations as ApiDocumentWithRelations,
+} from '@/lib/api/types';
+
+/** Expiry state of a date, derived in the browser from the expiry date. */
+export type ExpiryStatus = 'expired' | 'less_than_week' | 'less_than_month' | 'valid';
 
 // Extended interfaces with relationship data (used in pages)
-export interface EmployeeWithRelations {
-  id: string;
-  name: string;
-  email?: string;
-  mobile_no?: string;
-  phone?: string;
-  position?: string;
-  hire_date?: string;
-  birth_date?: string;
-  civil_id_no?: string;
-  residency_expiry_date?: string;
-  residency_status?: 'expired' | 'less_than_week' | 'less_than_month' | 'valid';
-  driving_license?: boolean;
-  driving_license_expiry_date?: string;
-  driving_license_status?: 'expired' | 'less_than_week' | 'less_than_month' | 'valid';
+export interface EmployeeWithRelations extends ApiEmployeeWithRelations {
+  /** Computed in the browser from the employee's documents — never persisted. */
   document_count?: number;
-  company_id: string;
-  created_at: string;
-  updated_at?: string;
-  is_active?: boolean;
-  photo?: string;
-  companies?: {
-    name: string;
-    name_ar: string;
-    description?: string;
-  };
+  residency_status?: ExpiryStatus;
+  driving_license_status?: ExpiryStatus;
 }
 
-export interface DocumentWithRelations {
-  id: string;
-  title: string;
-  file_name?: string;
-  file_path?: string;
-  status?: 'valid' | 'expiring_soon' | 'expired';
-  issue_date?: string;
-  expiry_date?: string;
-  notes?: string;
-  employee_id?: string;
-  company_id?: string;
-  document_type_id: string;
-  ministry_id?: string;
-  created_at: string;
-  updated_at: string;
-  employees?: {
-    name: string;
-    companies?: {
-      name: string;
-      name_ar: string;
-      description?: string;
-    };
-  };
-  companies?: {
-    name: string;
-    name_ar: string;
-    description?: string;
-  };
-  document_types?: {
-    name: string;
-    name_ar: string;
-  };
-  ministries?: {
-    name: string;
-    name_ar: string;
-  };
-}
+export type DocumentWithRelations = ApiDocumentWithRelations;
 
 export interface DashboardStats {
   totalDocuments: number;

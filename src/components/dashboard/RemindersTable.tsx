@@ -13,7 +13,7 @@ interface RemindersTableProps {
   onTogglePin: (id: string) => void;
   onDelete: (id: string) => void;
   language: string;
-  t: (key: string, params?: Record<string, any>) => string;
+  t: (key: string, params?: Record<string, string | number>) => string;
 }
 
 export function RemindersTable({

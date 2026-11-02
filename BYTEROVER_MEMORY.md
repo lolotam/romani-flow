@@ -117,7 +117,7 @@ onViewDocuments={(employeeId) => {
 
 ### 3. Authentication Issues
 **Issue**: Needed correct credentials for testing
-**Solution**: Used credentials `Admin`/`@Xx123456789xX@`
+**Solution**: Used the test administrator credentials (redacted; they are never stored in the repository)
 **Context**: Required for accessing system during Playwright testing
 
 ## Testing Strategy

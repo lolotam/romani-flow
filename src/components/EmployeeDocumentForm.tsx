@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -10,21 +10,15 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { Calendar } from '@/components/ui/calendar';
 import { format } from 'date-fns';
 import { cn } from '@/lib/utils';
-import { jsonDatabase } from '@/lib/jsonDatabase';
+import { api, type Document, type DocumentType, type Ministry } from '@/lib/api';
+import { useStagedDocumentUpload } from './documents/useStagedDocumentUpload';
 import { toast } from 'sonner';
 import { useLanguage } from '@/contexts/LanguageContext';
 
-interface DocumentType {
-  id: string;
-  name: string;
-  name_ar: string;
-}
-
-interface Ministry {
-  id: string;
-  name: string;
-  name_ar: string;
-}
+const emptyForm = {
+  title: '', document_type_id: '', ministry_id: '',
+  issue_date: null as Date | null, expiry_date: null as Date | null, notes: '',
+};
 
 interface EmployeeDocumentFormProps {
   isOpen: boolean;
@@ -44,133 +38,95 @@ export function EmployeeDocumentForm({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [documentTypes, setDocumentTypes] = useState<DocumentType[]>([]);
   const [ministries, setMinistries] = useState<Ministry[]>([]);
-  const { t } = useLanguage();
+  const { t, isRTL } = useLanguage();
+  const { stageFile, clearUpload } = useStagedDocumentUpload();
+  const submitting = useRef(false);
   
-  const [formData, setFormData] = useState({
-    title: '',
-    document_type_id: '',
-    ministry_id: '',
-    issue_date: null as Date | null,
-    expiry_date: null as Date | null,
-    notes: ''
-  });
+  const [formData, setFormData] = useState(emptyForm);
 
   useEffect(() => {
-    if (isOpen) {
-      fetchDocumentTypes();
-      fetchMinistries();
-      resetForm();
-    }
+    if (!isOpen) return;
+    let cancelled = false;
+    setFormData(emptyForm);
+    const loadOptions = async () => {
+      const types = await api.from<DocumentType>('document_types').select('*').order('name_ar', 'asc').execute();
+      if (cancelled) return;
+      if (types.error) console.error('Error fetching document types:', types.error);
+      else setDocumentTypes(types.data || []);
+      const ministries = await api.from<Ministry>('ministries').select('*').order('name_ar', 'asc').execute();
+      if (cancelled) return;
+      if (ministries.error) console.error('Error fetching ministries:', ministries.error);
+      else setMinistries(ministries.data || []);
+    };
+    void loadOptions();
+    return () => { cancelled = true; };
   }, [isOpen]);
 
   useEffect(() => {
-    if (uploadedFile) {
+    if (isOpen && uploadedFile) {
       setFormData(prev => ({
         ...prev,
-        title: uploadedFile.name.replace(/\.[^/.]+$/, '') // Remove file extension
+        title: uploadedFile.name.replace(/\.[^/.]+$/, ''), // Remove file extension
       }));
     }
-  }, [uploadedFile]);
-
-  const fetchDocumentTypes = async () => {
-    try {
-      const { data, error } = await jsonDatabase
-        .from('document_types')
-        .select('*')
-        .order('name_ar', 'asc')
-        .execute();
-
-      if (error) throw error;
-      setDocumentTypes(data || []);
-    } catch (error) {
-      console.error('Error fetching document types:', error);
-    }
-  };
-
-  const fetchMinistries = async () => {
-    try {
-      const { data, error } = await jsonDatabase
-        .from('ministries')
-        .select('*')
-        .order('name_ar', 'asc')
-        .execute();
-
-      if (error) throw error;
-      setMinistries(data || []);
-    } catch (error) {
-      console.error('Error fetching ministries:', error);
-    }
-  };
-
-  const resetForm = () => {
-    setFormData({
-      title: uploadedFile?.name?.replace(/\.[^/.]+$/, '') || '',
-      document_type_id: '',
-      ministry_id: '',
-      issue_date: null,
-      expiry_date: null,
-      notes: ''
-    });
-  };
+  }, [isOpen, uploadedFile]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (submitting.current) return;
     
     if (!formData.title || !formData.document_type_id) {
       toast.error(t('documents.employeeDocumentForm.requiredFieldsError'));
       return;
     }
 
+    submitting.current = true;
     setIsSubmitting(true);
     
     try {
-      let filePath = null;
+      const uploadId = uploadedFile
+        ? await stageFile(uploadedFile, t('documents.employeeDocumentForm.saveError'))
+        : undefined;
 
-      // Handle file path for local storage (simplified - no actual file upload)
-      if (uploadedFile) {
-        const fileExt = uploadedFile.name.split('.').pop();
-        const fileName = `${crypto.randomUUID()}.${fileExt}`;
-        filePath = `documents/${fileName}`;
-        // Note: In a real local implementation, you would save the file to local storage here
-      }
-
-      // Save document data to JSON database
-      const { error: dbError } = await jsonDatabase.insert('documents', [{
+      // Save metadata and claim the staged upload in one server transaction.
+      const { error: dbError } = await api.insert<Document>('documents', {
         title: formData.title,
         document_type_id: formData.document_type_id,
         employee_id: employeeId,
         company_id: null, // Employee document, not company
         ministry_id: formData.ministry_id || null,
-        issue_date: formData.issue_date?.toISOString().split('T')[0] || null,
-        expiry_date: formData.expiry_date?.toISOString().split('T')[0] || null,
+        issue_date: formData.issue_date ? format(formData.issue_date, 'yyyy-MM-dd') : null,
+        expiry_date: formData.expiry_date ? format(formData.expiry_date, 'yyyy-MM-dd') : null,
         notes: formData.notes || null,
-        file_name: uploadedFile?.name || null,
-        file_path: filePath
-      }]);
+        ...(uploadId ? { upload_id: uploadId } : {}),
+      });
 
       if (dbError) {
         throw new Error(`${t('documents.employeeDocumentForm.saveError')}: ${dbError.message}`);
       }
 
+      clearUpload();
       toast.success(t('documents.employeeDocumentForm.saveSuccess'));
       onSave();
       onClose();
-    } catch (error: any) {
+    } catch (error) {
       console.error('Error saving document:', error);
-      toast.error(error.message || t('documents.employeeDocumentForm.saveError'));
+      toast.error(error instanceof Error ? error.message : t('documents.employeeDocumentForm.saveError'));
     } finally {
+      submitting.current = false;
       setIsSubmitting(false);
     }
   };
 
   const handleClose = () => {
-    resetForm();
+    if (submitting.current) return;
+    setFormData(emptyForm);
     onClose();
   };
 
   return (
     <Dialog open={isOpen} onOpenChange={handleClose}>
-      <DialogContent className="sm:max-w-2xl max-h-[90vh] overflow-y-auto">
+      <DialogContent className="sm:max-w-2xl max-h-[90vh] overflow-y-auto" dir={isRTL ? 'rtl' : 'ltr'}>
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <FileText className="h-5 w-5" />
@@ -238,6 +194,7 @@ export function EmployeeDocumentForm({
               <Popover>
                 <PopoverTrigger asChild>
                   <Button
+                    type="button"
                     variant="outline"
                     className={cn(
                       "w-full justify-start text-left font-normal",
@@ -264,6 +221,7 @@ export function EmployeeDocumentForm({
               <Popover>
                 <PopoverTrigger asChild>
                   <Button
+                    type="button"
                     variant="outline"
                     className={cn(
                       "w-full justify-start text-left font-normal",

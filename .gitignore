@@ -53,6 +53,20 @@ temp/
 # Vite
 .vite/
 
+# Server build output
+server-dist/
+
+# Local runtime data (SQLite database and the file bucket)
+data/romani.db
+data/romani.db-wal
+data/romani.db-shm
+data/uploads/
+.tmp-test-data*/
+.tmp-*
+
+# Generated email preview (scripts/preview-expiry-email.mjs)
+preview/
+
 # Backup files
 *.backup
 *.bak

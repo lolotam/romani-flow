@@ -34,7 +34,7 @@ export function UploadDropzone({
   const { t } = useLanguage();
   const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([]);
 
-  const onDrop = useCallback((acceptedFiles: File[], rejectedFiles: any[]) => {
+  const onDrop = useCallback((acceptedFiles: File[], rejectedFiles: unknown[]) => {
     if (disabled) return;
 
     // Handle rejected files

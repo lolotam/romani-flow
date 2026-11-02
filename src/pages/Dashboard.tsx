@@ -1,7 +1,7 @@
 import { motion } from 'framer-motion';
 import { useEffect, useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { jsonDatabase } from '@/lib/jsonDatabase';
+import { endpoints } from '@/lib/api';
 import {
   FileText,
   Users,
@@ -11,34 +11,23 @@ import {
   Download,
   Settings,
 } from 'lucide-react';
-import { useAuth } from '@/hooks/useAuth';
 import { useToast } from '@/hooks/use-toast';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { Layout } from '@/components/Layout';
 import { useNavigate } from 'react-router-dom';
-import type { DashboardStats, RecentActivity, ExpiringItem } from '@/types';
+import { useDashboardData } from '@/hooks/useDashboardData';
 import { StatsGrid } from '@/components/dashboard/StatsGrid';
 import { QuickActions } from '@/components/dashboard/QuickActions';
 import { RecentActivities } from '@/components/dashboard/RecentActivities';
 import { RemindersTable } from '@/components/dashboard/RemindersTable';
 
 export default function Dashboard() {
-  const [stats, setStats] = useState<DashboardStats>({
-    totalDocuments: 0,
-    totalEmployees: 0,
-    totalCompanies: 0,
-    expiringDocuments: 0,
-    expiredDocuments: 0
-  });
-  const [recentActivities, setRecentActivities] = useState<RecentActivity[]>([]);
-  const [expiringItems, setExpiringItems] = useState<ExpiringItem[]>([]);
   const [pinnedItems, setPinnedItems] = useState<string[]>([]);
   const [deletedItems, setDeletedItems] = useState<string[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
-  const { logout } = useAuth();
   const { toast } = useToast();
-  const { t, language, isRTL } = useLanguage();
+  const { t, language } = useLanguage();
   const navigate = useNavigate();
+  const { stats, activities: recentActivities, expiringItems, isLoading } = useDashboardData(t);
 
   // Pin/Unpin reminder item
   const togglePinItem = (itemId: string) => {
@@ -74,153 +63,6 @@ export default function Dashboard() {
     if (savedDeleted) setDeletedItems(JSON.parse(savedDeleted));
   }, []);
 
-  useEffect(() => {
-    const fetchStats = async () => {
-      try {
-        const [{ data: documents }, { data: employees }, { data: companies }] = await Promise.all([
-          jsonDatabase.from('documents').select('*').execute(),
-          jsonDatabase.from('employees').select('*').execute(),
-          jsonDatabase.from('companies').select('*').execute(),
-        ]);
-
-        const validCompanies = new Set(companies?.map(c => c.id) || []);
-        const actualEmployees = employees?.filter(emp =>
-          !emp.company_id || validCompanies.has(emp.company_id)
-        ) || [];
-        const validEmployees = new Set(actualEmployees.map(e => e.id));
-        const actualDocuments = documents?.filter(doc => {
-          if (doc.employee_id && !validEmployees.has(doc.employee_id)) return false;
-          if (doc.company_id && !validCompanies.has(doc.company_id)) return false;
-          return true;
-        }) || [];
-
-        // Calculate expiring/expired
-        let expiringCount = 0;
-        let expiredCount = 0;
-        const today = new Date();
-
-        actualDocuments.forEach(doc => {
-          if (doc.expiry_date) {
-            const diffDays = Math.ceil((new Date(doc.expiry_date).getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
-            if (diffDays < 0) expiredCount++;
-            else if (diffDays <= 30) expiringCount++;
-          }
-        });
-
-        setStats({
-          totalDocuments: actualDocuments.length,
-          totalEmployees: actualEmployees.length,
-          totalCompanies: companies?.length || 0,
-          expiringDocuments: expiringCount,
-          expiredDocuments: expiredCount
-        });
-
-        // Recent activities
-        const activities: RecentActivity[] = [];
-        if (actualEmployees.length > 0) {
-          actualEmployees
-            .filter(emp => emp.created_at)
-            .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
-            .slice(0, 2)
-            .forEach(emp => {
-              activities.push({
-                id: `emp_${emp.id}`,
-                type: 'employee_added',
-                description: t('dashboard.recentActivities.employeeAdded', { name: emp.name }),
-                date: emp.created_at,
-                user: t('dashboard.recentActivities.admin')
-              });
-            });
-        }
-        if (actualDocuments.length > 0) {
-          actualDocuments
-            .filter(doc => doc.created_at)
-            .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
-            .slice(0, 3)
-            .forEach(doc => {
-              activities.push({
-                id: `doc_${doc.id}`,
-                type: 'document_added',
-                description: t('dashboard.recentActivities.documentAdded', { title: doc.title }),
-                date: doc.created_at,
-                user: t('dashboard.recentActivities.admin')
-              });
-            });
-        }
-        activities.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-        setRecentActivities(activities.slice(0, 5));
-
-        // Expiring items
-        const expiringItemsData: ExpiringItem[] = [];
-
-        actualEmployees.forEach(employee => {
-          if (employee.residency_expiry_date) {
-            const diffDays = Math.ceil((new Date(employee.residency_expiry_date).getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
-            if (diffDays <= 30) {
-              expiringItemsData.push({
-                id: employee.id,
-                title: t('dashboard.reminders.types.residency'),
-                type: 'employee',
-                entityName: employee.name,
-                expiryDate: employee.residency_expiry_date,
-                daysLeft: diffDays,
-                status: diffDays < 0 ? 'expired' : diffDays <= 7 ? 'critical' : 'warning'
-              });
-            }
-          }
-          if ((employee as any).driving_license && (employee as any).driving_license_expiry_date) {
-            const diffDays = Math.ceil((new Date((employee as any).driving_license_expiry_date).getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
-            if (diffDays <= 30) {
-              expiringItemsData.push({
-                id: `${employee.id}_license`,
-                title: t('dashboard.reminders.types.drivingLicense'),
-                type: 'employee',
-                entityName: employee.name,
-                expiryDate: (employee as any).driving_license_expiry_date,
-                daysLeft: diffDays,
-                status: diffDays < 0 ? 'expired' : diffDays <= 7 ? 'critical' : 'warning'
-              });
-            }
-          }
-        });
-
-        actualDocuments.forEach(doc => {
-          if (doc.expiry_date) {
-            const diffDays = Math.ceil((new Date(doc.expiry_date).getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
-            if (diffDays <= 30) {
-              let entityName = t('common.notSpecified');
-              if (doc.employee_id) {
-                const employee = employees?.find(emp => emp.id === doc.employee_id);
-                entityName = employee?.name || t('common.unknown');
-              } else if (doc.company_id) {
-                const company = companies?.find(comp => comp.id === doc.company_id);
-                entityName = company?.name || t('common.unknown');
-              }
-              expiringItemsData.push({
-                id: doc.id,
-                title: doc.title,
-                type: doc.employee_id ? 'employee' : 'company',
-                entityName,
-                expiryDate: doc.expiry_date,
-                daysLeft: diffDays,
-                status: diffDays < 0 ? 'expired' : diffDays <= 7 ? 'critical' : 'warning'
-              });
-            }
-          }
-        });
-
-        expiringItemsData.sort((a, b) => a.daysLeft - b.daysLeft);
-        setExpiringItems(expiringItemsData);
-      } catch (error) {
-        console.error('Error fetching stats:', error);
-      } finally {
-        setIsLoading(false);
-      }
-    };
-
-    fetchStats();
-  }, [t]);
-
   const statCards = [
     { title: t('dashboard.stats.totalDocuments'), value: stats.totalDocuments, icon: FileText, gradient: 'bg-gradient-primary', description: t('dashboard.stats.description.totalDocuments') },
     { title: t('dashboard.stats.totalEmployees'), value: stats.totalEmployees, icon: Users, gradient: 'bg-gradient-medical', description: t('dashboard.stats.description.totalEmployees') },
@@ -230,13 +72,12 @@ export default function Dashboard() {
 
   const exportAllData = async () => {
     try {
-      const [documentsResult, employeesResult, companiesResult] = await Promise.all([
-        jsonDatabase.from('documents').select('*').execute(),
-        jsonDatabase.from('employees').select('*').execute(),
-        jsonDatabase.from('companies').select('*').execute()
-      ]);
-      const csvData = { documents: documentsResult.data || [], employees: employeesResult.data || [], companies: companiesResult.data || [] };
-      const blob = new Blob([JSON.stringify(csvData, null, 2)], { type: 'application/json' });
+      const exported = await endpoints.backup.export();
+      if (exported.error) {
+        toast({ title: t('common.error'), description: exported.error.message });
+        return;
+      }
+      const blob = new Blob([JSON.stringify(exported.data, null, 2)], { type: 'application/json' });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
