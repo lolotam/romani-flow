@@ -3,7 +3,7 @@ import { api } from '@/lib/api';
 import type { Company, DocumentType, DocumentWithRelations, EmployeeWithRelations, Ministry } from '@/lib/api';
 import { calculateDocumentStatus } from '@/lib/statusUtils';
 
-export function useDocuments() {
+export function useDocuments(employeeId?: string) {
   const [documents, setDocuments] = useState<DocumentWithRelations[]>([]);
   const [companies, setCompanies] = useState<Company[]>([]);
   const [employees, setEmployees] = useState<EmployeeWithRelations[]>([]);
@@ -17,12 +17,19 @@ export function useDocuments() {
     const currentRequest = ++requestId.current;
     setError(null);
     try {
+      const documentQuery = api.from<DocumentWithRelations>('documents')
+        .select('*, employees (name, companies (name, name_ar)), companies (name, name_ar), document_types (name, name_ar), ministries (name, name_ar)')
+        .order('created_at', 'desc');
+      const employeeQuery = api.from<EmployeeWithRelations>('employees')
+        .select('*, companies (name, name_ar)').order('name', 'asc');
+      if (employeeId) {
+        documentQuery.eq('employee_id', employeeId);
+        employeeQuery.eq('id', employeeId);
+      }
       const results = await Promise.all([
-        api.from<DocumentWithRelations>('documents')
-          .select('*, employees (name, companies (name, name_ar)), companies (name, name_ar), document_types (name, name_ar), ministries (name, name_ar)')
-          .order('created_at', 'desc').execute(),
+        documentQuery.execute(),
         api.from<Company>('companies').select('*').order('name', 'asc').execute(),
-        api.from<EmployeeWithRelations>('employees').select('*, companies (name, name_ar)').order('name', 'asc').execute(),
+        employeeQuery.execute(),
         api.from<DocumentType>('document_types').select('*').order('name_ar', 'asc').execute(),
         api.from<Ministry>('ministries').select('*').order('name_ar', 'asc').execute(),
       ]);
@@ -41,7 +48,7 @@ export function useDocuments() {
     } finally {
       if (currentRequest === requestId.current) setIsLoading(false);
     }
-  }, []);
+  }, [employeeId]);
 
   useEffect(() => {
     void reload();
@@ -66,7 +73,7 @@ export function useDocuments() {
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedStatus, setSelectedStatus] = useState('all');
   const [selectedType, setSelectedType] = useState('all');
-  const [activeTab, setActiveTab] = useState('company');
+  const [activeTab, setActiveTab] = useState(employeeId ? 'employee' : 'company');
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
 

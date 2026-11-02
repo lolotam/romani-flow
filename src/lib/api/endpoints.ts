@@ -102,6 +102,10 @@ const files = {
   detach: (documentId: string) =>
     request<unknown>(`/api/documents/${encodeURIComponent(documentId)}/file`, { method: 'DELETE' }),
   photoUrl: (employeeId: string) => `/api/files/employees/${encodeURIComponent(employeeId)}/photo`,
+  uploadPhoto: (employeeId: string, photo: File) =>
+    uploadFiles<{ photo_path: string }>(`/api/files/employees/${encodeURIComponent(employeeId)}/photo`, [photo], {}, 'PUT'),
+  removePhoto: (employeeId: string) =>
+    request<unknown>(`/api/files/employees/${encodeURIComponent(employeeId)}/photo`, { method: 'DELETE' }),
 };
 
 const email = {

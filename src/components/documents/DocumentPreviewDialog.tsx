@@ -123,7 +123,7 @@ export function DocumentPreviewDialog({ document, onClose, handleDownloadDocumen
               )}
             </div>
             <div className="flex flex-wrap gap-2 pt-4">
-              <Button variant="outline" onClick={() => handleEmailDocument(document)}>
+              <Button variant="outline" disabled={!document.file_path} onClick={() => handleEmailDocument(document)}>
                 <Mail className="h-4 w-4 ml-2" />
                 {emailLabel}
               </Button>

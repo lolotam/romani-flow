@@ -22,11 +22,12 @@ export interface DocumentCardActions {
 interface DocumentCardProps extends DocumentCardActions {
   doc: DocumentWithRelations;
   selected: boolean;
+  showMinistry?: boolean;
 }
 
 export function DocumentCard({ doc, selected, handleViewDocument, handleEditDocument,
   handleDownloadDocument, handleDeleteDocument, handleEmailDocument, toggleDocumentSelection,
-  emailLabel, isDeleting }: DocumentCardProps) {
+  emailLabel, isDeleting, showMinistry = false }: DocumentCardProps) {
   const { t, language } = useLanguage();
   const isImage = !!doc.file_path && !!doc.mime_type?.startsWith('image/');
   const isPdf = doc.mime_type === 'application/pdf';
@@ -64,9 +65,10 @@ export function DocumentCard({ doc, selected, handleViewDocument, handleEditDocu
     <CardContent className="space-y-4">
       <div className="flex items-center justify-between">
         <StatusBadge status={calculateDocumentStatus(doc.expiry_date)} />
-        <Badge variant="outline" className="text-xs">
-          {doc.employee_id ? doc.employees?.name : doc.companies?.name}
-        </Badge>
+        {(!showMinistry || doc.ministries) && <Badge variant="outline" className="text-xs">
+          {showMinistry ? (language === 'ar' ? doc.ministries?.name_ar : doc.ministries?.name)
+            : doc.employee_id ? doc.employees?.name : doc.companies?.name}
+        </Badge>}
       </div>
       
       {doc.expiry_date && <div className="flex items-center text-sm text-muted-foreground">
@@ -103,7 +105,7 @@ export function DocumentCard({ doc, selected, handleViewDocument, handleEditDocu
           >
             <Download className="h-4 w-4" />
           </Button>
-          <Button variant="ghost" size="sm" className="h-8 w-8 p-0" onClick={() => handleEmailDocument(doc)} aria-label={emailLabel}>
+          <Button variant="ghost" size="sm" className="h-8 w-8 p-0" disabled={!doc.file_path} onClick={() => handleEmailDocument(doc)} aria-label={emailLabel}>
             <Mail className="h-4 w-4" />
           </Button>
           <Button 

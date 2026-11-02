@@ -3,7 +3,7 @@ import { api, endpoints, type DocumentWithRelations } from '@/lib/api';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { useToast } from '@/hooks/use-toast';
 
-export function useDocumentActions(removeDocuments: (ids: string[]) => void) {
+export function useDocumentActions(removeDocuments: (ids: string[]) => void, deleteConfirmation?: string) {
   const { t, language } = useLanguage();
   const { toast } = useToast();
   const deleting = useRef(false);
@@ -12,7 +12,7 @@ export function useDocumentActions(removeDocuments: (ids: string[]) => void) {
   const deleteDocuments = async (ids: string[]) => {
     if (deleting.current || ids.length === 0) return;
     const message = ids.length === 1
-      ? t('documents.messages.deleteConfirm')
+      ? deleteConfirmation ?? t('documents.messages.deleteConfirm')
       : t('documents.bulk.deleteConfirm', { count: ids.length });
     if (!window.confirm(message)) return;
 

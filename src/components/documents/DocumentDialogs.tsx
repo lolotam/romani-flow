@@ -10,22 +10,23 @@ interface DocumentUploadDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onFilesAccepted: (files: File[]) => void;
+  copy?: { trigger: string; title: string; description: string };
 }
 
-export function DocumentUploadDialog({ open, onOpenChange, onFilesAccepted }: DocumentUploadDialogProps) {
+export function DocumentUploadDialog({ open, onOpenChange, onFilesAccepted, copy }: DocumentUploadDialogProps) {
   const { t } = useLanguage();
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogTrigger asChild>
         <Button className="shadow-elegant hover:shadow-glow transition-all">
           <Upload className="h-4 w-4 ml-2" />
-          {t('documents.uploadDocuments')}
+          {copy?.trigger ?? t('documents.uploadDocuments')}
         </Button>
       </DialogTrigger>
       <DialogContent className="sm:max-w-2xl">
         <DialogHeader>
-          <DialogTitle>{t('documents.uploadNew')}</DialogTitle>
-          <DialogDescription>{t('documents.chooseFiles')}</DialogDescription>
+          <DialogTitle>{copy?.title ?? t('documents.uploadNew')}</DialogTitle>
+          <DialogDescription>{copy?.description ?? t('documents.chooseFiles')}</DialogDescription>
         </DialogHeader>
         <UploadDropzone onFilesAccepted={onFilesAccepted} maxFiles={1} maxFileSize={20 * 1024 * 1024} />
       </DialogContent>

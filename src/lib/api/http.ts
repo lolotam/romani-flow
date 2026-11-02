@@ -127,6 +127,7 @@ export async function uploadFiles<T>(
   path: string,
   files: File[],
   fields: Record<string, string> = {},
+  method: 'POST' | 'PUT' = 'POST',
 ): Promise<ApiEnvelope<T>> {
   const form = new FormData();
   for (const file of files) {
@@ -138,7 +139,7 @@ export async function uploadFiles<T>(
 
   try {
     const response = await fetch(path, {
-      method: 'POST',
+      method,
       credentials: 'same-origin',
       body: form,
     });
