@@ -124,8 +124,9 @@ Also clear every supported alias: `MAIL_HOST`, `EMAIL_HOST`, `SMTP_USERNAME`,
 `FROM_EMAIL` and `SMTP_FROM_ADDRESS`. Empty canonical variables do not override
 non-empty aliases.
 Compose always requires SMTP credentials and does not support this opt-out.
-No sender is derived. Before upgrading an existing deployment, explicitly set
-`SMTP_FROM` (or a supported alias); incomplete SMTP configuration prevents boot.
+No sender is derived. Before upgrading an existing Compose deployment, explicitly
+set canonical `SMTP_USER`, `SMTP_PASS`, and `SMTP_FROM`. Direct Node startup
+accepts the supported aliases listed above; incomplete SMTP configuration prevents boot.
 
 The SMTP password is read from the environment **only**. It is never written to
 the database and never returned by the API — the Settings screen only shows
