@@ -1,0 +1,123 @@
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { createApp } from './app.js';
+import { loadConfig, validateConfig } from './config.js';
+import { closeDatabase, openDatabase } from './db/connection.js';
+import { runMigrations } from './db/migrator.js';
+import { defaultSeedFile, seedDatabase } from './db/seed.js';
+import { CronService } from './services/cronService.js';
+import { DocumentService } from './services/documentService.js';
+import { Mailer } from './services/mailer.js';
+import { StorageService } from './services/storageService.js';
+
+/**
+ * Server bootstrap.
+ *
+ * Order matters: configuration is validated before anything is opened, the
+ * database is migrated before the seed runs, and the scheduler is armed only
+ * after everything else is ready.
+ */
+
+const here = path.dirname(fileURLToPath(import.meta.url));
+const projectRoot = process.env.PROJECT_ROOT
+  ? path.resolve(process.env.PROJECT_ROOT)
+  : path.resolve(here, '..');
+
+/**
+ * The volume marker.
+ *
+ * A writable `/data` directory proves nothing: the container creates it itself.
+ * The operator prepares a marker file on the host, so its absence means the
+ * volume was never mounted and the data would be lost with the container.
+ */
+const VOLUME_MARKER = '.romani-volume';
+
+function assertVolumeIsMounted(dataDir: string, isProduction: boolean): void {
+  if (!isProduction) return;
+
+  const marker = path.join(dataDir, VOLUME_MARKER);
+  if (!fs.existsSync(marker)) {
+    throw new Error(
+      `The persistent volume is not mounted.\n` +
+        `Expected the marker file "${marker}" to exist.\n` +
+        `Create it on the host and mount that directory into the container:\n` +
+        `  sudo touch /opt/romani/data/${VOLUME_MARKER}\n` +
+        `  # Dokploy: Mounts → bind ${VOLUME_MARKER} → /data`,
+    );
+  }
+}
+
+async function main(): Promise<void> {
+  const config = loadConfig();
+  validateConfig(config);
+
+  console.log('[server] starting ROMANI Flow API');
+  console.log(`[server] environment : ${config.env}`);
+  console.log(`[server] data dir    : ${config.dataDir}`);
+  console.log(`[server] uploads dir : ${config.uploadsDir}`);
+
+  fs.mkdirSync(config.dataDir, { recursive: true });
+  assertVolumeIsMounted(config.dataDir, config.env === 'production');
+
+  const db = openDatabase(config.dbPath);
+
+  const migrations = runMigrations(db, path.join(projectRoot, 'server', 'db', 'migrations'));
+  if (migrations.applied.length > 0) {
+    console.log(`[server] applied migrations: ${migrations.applied.join(', ')}`);
+  }
+
+  const storage = new StorageService(config.uploadsDir);
+  storage.ensureDirectories();
+
+  const mailer = new Mailer(config);
+  const cron = new CronService(db, mailer);
+  const documents = new DocumentService(db, storage);
+
+  const seed = await seedDatabase(db, {
+    seedFile: defaultSeedFile(projectRoot),
+    adminEmails: config.adminSeedEmails,
+    adminPassword: config.adminSeedPassword,
+  });
+
+  if (seed.adminsCreated.length > 0) {
+    console.log(`[server] created admin accounts: ${seed.adminsCreated.join(', ')}`);
+  }
+  const imported = Object.entries(seed.imported)
+    .filter(([, count]) => count > 0)
+    .map(([table, count]) => `${table}=${count}`);
+  if (imported.length > 0) {
+    console.log(`[server] imported seed data: ${imported.join(', ')}`);
+  }
+  if (seed.seedSkippedReason) {
+    console.log(`[server] seed skipped: ${seed.seedSkippedReason}`);
+  }
+
+  const staticDir = path.join(projectRoot, 'dist');
+  const app = createApp({ config, db, mailer, cron, storage, documents, staticDir });
+
+  cron.reschedule();
+
+  const server = app.listen(config.port, () => {
+    console.log(`[server] listening on http://0.0.0.0:${config.port}`);
+  });
+
+  const shutdown = (signal: string) => {
+    console.log(`[server] ${signal} received, shutting down`);
+    cron.stop();
+    server.close(() => {
+      closeDatabase(db);
+      process.exit(0);
+    });
+    // Do not hang forever if a connection refuses to close.
+    setTimeout(() => process.exit(0), 10_000).unref();
+  };
+
+  process.on('SIGTERM', () => shutdown('SIGTERM'));
+  process.on('SIGINT', () => shutdown('SIGINT'));
+}
+
+main().catch((error) => {
+  console.error('[server] failed to start:', error);
+  process.exit(1);
+});

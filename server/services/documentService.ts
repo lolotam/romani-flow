@@ -1,0 +1,283 @@
+import type { Db } from '../db/connection.js';
+import {
+  findRow,
+  insertRow,
+  RepositoryError,
+  updateRow,
+  type Row,
+} from '../repositories/base.js';
+import type { StorageService } from './storageService.js';
+
+/**
+ * Document file lifecycle.
+ *
+ * One service owns the pairing of a stored file and the record that references
+ * it. A new file is always written before the reference is swapped, and the old
+ * file is only removed after the database change succeeded — so a failure can
+ * never leave a record pointing at a deleted file.
+ */
+
+export interface StoredUpload {
+  uploadId: string;
+  fileName: string;
+  filePath: string;
+  fileSize: number;
+  mimeType: string;
+}
+
+/** The columns a document stores about its attachment. */
+export interface StorageFields {
+  file_name: string;
+  file_path: string;
+  file_size: number;
+  mime_type: string;
+}
+
+export class DocumentService {
+  constructor(
+    private readonly db: Db,
+    private readonly storage: StorageService,
+  ) {}
+
+  /** Records a freshly uploaded file so a record can claim it. */
+  registerUpload(upload: Omit<StoredUpload, 'uploadId'>): StoredUpload {
+    const uploadId = globalThis.crypto.randomUUID();
+
+    this.db.prepare(
+      `INSERT INTO pending_uploads (id, file_name, file_path, file_size, mime_type, created_at)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+    ).run(
+      uploadId,
+      upload.fileName,
+      upload.filePath,
+      upload.fileSize,
+      upload.mimeType,
+      new Date().toISOString(),
+    );
+
+    return { uploadId, ...upload };
+  }
+
+  /** Resolves an upload id to its staged file, if it has not been claimed yet. */
+  resolveUpload(uploadId: string): StoredUpload | null {
+    const row = this.db.prepare('SELECT * FROM pending_uploads WHERE id = ?').get(uploadId) as
+      | Row
+      | undefined;
+    if (!row) return null;
+
+    return {
+      uploadId: String(row.id),
+      fileName: String(row.file_name),
+      filePath: String(row.file_path),
+      fileSize: Number(row.file_size),
+      mimeType: String(row.mime_type),
+    };
+  }
+
+  /** Marks an upload as claimed so it cannot be used twice. */
+  claimUpload(uploadId: string): void {
+    this.db.prepare('DELETE FROM pending_uploads WHERE id = ?').run(uploadId);
+  }
+
+  /** The storage columns for a document, derived from an upload id. */
+  storageFields(uploadId: string): StorageFields | null {
+    const upload = this.resolveUpload(uploadId);
+    if (!upload) return null;
+
+    return {
+      file_name: upload.fileName,
+      file_path: upload.filePath,
+      file_size: upload.fileSize,
+      mime_type: upload.mimeType,
+    };
+  }
+
+  /**
+   * Creates a document and claims its staged upload in one transaction.
+   *
+   * If the row cannot be written — a foreign key violation, for example — the
+   * transaction rolls back and the upload stays pending, so the administrator
+   * can correct the data and retry with the same upload id.
+   */
+  createDocument(payload: Row, status: (expiry: string | null) => string): Row {
+    const fields: Row = { ...payload };
+    const uploadId = typeof fields.upload_id === 'string' ? fields.upload_id : null;
+    delete fields.upload_id;
+
+    this.db.exec('BEGIN');
+    try {
+      const storageFields: StorageFields | null = uploadId ? this.requireUpload(uploadId) : null;
+      const expiry = typeof fields.expiry_date === 'string' ? fields.expiry_date : null;
+
+      const row = insertRow(this.db, 'documents', {
+        ...fields,
+        ...(storageFields ?? {}),
+        status: status(expiry),
+      });
+
+      if (uploadId) this.claimUpload(uploadId);
+      this.db.exec('COMMIT');
+      return row;
+    } catch (error) {
+      this.db.exec('ROLLBACK');
+      throw error;
+    }
+  }
+
+  /**
+   * Updates a document and swaps its attachment in one transaction.
+   *
+   * The previous file is removed only after the commit, so a failure can never
+   * leave the record pointing at a file that was already deleted.
+   */
+  async updateDocument(
+    documentId: string,
+    payload: Row,
+    status: (expiry: string | null) => string,
+  ): Promise<Row | null> {
+    const fields: Row = { ...payload };
+    const uploadId = typeof fields.upload_id === 'string' ? fields.upload_id : null;
+    delete fields.upload_id;
+
+    const existing = findRow(this.db, 'documents', documentId, []);
+    if (!existing) return null;
+
+    const previousPath = existing.file_path as string | undefined;
+
+    this.db.exec('BEGIN');
+    try {
+      const storageFields: StorageFields | null = uploadId ? this.requireUpload(uploadId) : null;
+      const expiry =
+        'expiry_date' in fields
+          ? (typeof fields.expiry_date === 'string' ? fields.expiry_date : null)
+          : (existing.expiry_date as string | null);
+
+      const row = updateRow(this.db, 'documents', documentId, {
+        ...fields,
+        ...(storageFields ?? {}),
+        status: status(expiry),
+      });
+
+      if (uploadId) this.claimUpload(uploadId);
+      this.db.exec('COMMIT');
+
+      if (previousPath && storageFields?.file_path !== previousPath) {
+        await this.removeStoredFile(previousPath);
+      }
+      return row;
+    } catch (error) {
+      this.db.exec('ROLLBACK');
+      throw error;
+    }
+  }
+
+  /** Resolves an upload id, or fails loudly. */
+  private requireUpload(uploadId: string): StorageFields {
+    const fields = this.storageFields(uploadId);
+    if (!fields) {
+      throw new RepositoryError(
+        'The upload is unknown or has already been claimed.',
+        'invalid_upload',
+        400,
+      );
+    }
+    return fields;
+  }
+
+  /** Removes the file that belongs to a record. Never throws. */
+  async removeFile(record: Row | null): Promise<boolean> {
+    const filePath = record?.file_path as string | undefined;
+    if (!filePath) return false;
+
+    try {
+      return await this.storage.remove(filePath);
+    } catch (error) {
+      console.warn('[documents] the file could not be removed:', error);
+      return false;
+    }
+  }
+
+  /** Removes a stored file by its relative path. Never throws. */
+  async removeStoredFile(filePath: string): Promise<boolean> {
+    try {
+      return await this.storage.remove(filePath);
+    } catch (error) {
+      console.warn('[documents] the file could not be removed:', error);
+      return false;
+    }
+  }
+
+  /** Deletes a document and its file together. */
+  async deleteDocument(documentId: string): Promise<boolean> {
+    const document = findRow(this.db, 'documents', documentId, []);
+    if (!document) return false;
+
+    const result = this.db.prepare('DELETE FROM documents WHERE id = ?').run(documentId);
+    if (result.changes === 0) return false;
+
+    await this.removeFile(document);
+    return true;
+  }
+
+  /** Replaces the attachment of a document, keeping the old file until the swap succeeded. */
+  async replaceFile(documentId: string, uploadId: string): Promise<Row | null> {
+    const document = findRow(this.db, 'documents', documentId, []);
+    if (!document) return null;
+
+    const fields = this.storageFields(uploadId);
+    if (!fields) return null;
+
+    const previousPath = document.file_path as string | undefined;
+
+    this.db.prepare(
+      `UPDATE documents
+          SET file_name = ?, file_path = ?, file_size = ?, mime_type = ?, updated_at = ?
+        WHERE id = ?`,
+    ).run(
+      fields.file_name,
+      fields.file_path,
+      fields.file_size,
+      fields.mime_type,
+      new Date().toISOString(),
+      documentId,
+    );
+
+    this.claimUpload(uploadId);
+
+    if (previousPath && previousPath !== fields.file_path) {
+      await this.removeFile({ file_path: previousPath });
+    }
+
+    return findRow(this.db, 'documents', documentId, []);
+  }
+
+  /** Detaches the file from a document without deleting the record. */
+  async detachFile(documentId: string): Promise<Row | null> {
+    const document = findRow(this.db, 'documents', documentId, []);
+    if (!document) return null;
+
+    this.db.prepare(
+      `UPDATE documents
+          SET file_name = NULL, file_path = NULL, file_size = NULL, mime_type = NULL, updated_at = ?
+        WHERE id = ?`,
+    ).run(new Date().toISOString(), documentId);
+
+    await this.removeFile(document);
+    return findRow(this.db, 'documents', documentId, []);
+  }
+
+  /** Removes staged uploads that were never claimed. */
+  purgeStaleUploads(olderThanHours = 24): number {
+    const cutoff = new Date(Date.now() - olderThanHours * 3600_000).toISOString();
+    const rows = this.db
+      .prepare('SELECT file_path FROM pending_uploads WHERE created_at < ?')
+      .all(cutoff) as Row[];
+
+    for (const row of rows) {
+      void this.storage.remove(String(row.file_path));
+    }
+
+    this.db.prepare('DELETE FROM pending_uploads WHERE created_at < ?').run(cutoff);
+    return rows.length;
+  }
+}

@@ -2,45 +2,28 @@ import { motion } from 'framer-motion';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
+import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { useLanguage } from '@/contexts/LanguageContext';
-import { 
-  User, 
-  Mail, 
-  Phone, 
-  Building2, 
+import {
+  User,
+  Mail,
+  Phone,
+  Building2,
   Calendar,
   FileText,
-  Eye
+  Eye,
 } from 'lucide-react';
+import type { EmployeeCardEmployee } from '@/components/employees/employeeTypes';
 
-interface Employee {
-  id: string;
-  name: string;
-  email?: string;
-  phone?: string;
-  position?: string;
-  hire_date?: string;
-  birth_date?: string;
-  civil_id_no?: string;
-  residency_expiry_date?: string;
-  company_id: string;
-  document_count?: number;
-  companies?: {
-    name: string;
-    name_ar: string;
-  };
-}
-
-interface EmployeeCardProps {
-  employee: Employee;
+export interface EmployeeCardProps {
+  employee: EmployeeCardEmployee;
   onViewDocuments: (employeeId: string) => void;
-  onViewProfile: (employee: Employee) => void;
+  onViewProfile: (employee: EmployeeCardEmployee) => void;
 }
 
 export function EmployeeCard({ employee, onViewDocuments, onViewProfile }: EmployeeCardProps) {
   const { t } = useLanguage();
-  
+
   const getInitials = (name: string) => {
     return name
       .split(' ')
@@ -59,7 +42,7 @@ export function EmployeeCard({ employee, onViewDocuments, onViewProfile }: Emplo
               {getInitials(employee.name)}
             </AvatarFallback>
           </Avatar>
-          
+
           <div className="flex-1 min-w-0">
             <div className="flex items-center justify-between">
               <CardTitle className="text-lg font-semibold truncate">
@@ -69,7 +52,7 @@ export function EmployeeCard({ employee, onViewDocuments, onViewProfile }: Emplo
                 <Button
                   variant="outline"
                   size="sm"
-                  onClick={(e) => {
+                  onClick={e => {
                     e.stopPropagation();
                     onViewDocuments(employee.id);
                   }}
@@ -88,7 +71,7 @@ export function EmployeeCard({ employee, onViewDocuments, onViewProfile }: Emplo
           </div>
         </div>
       </CardHeader>
-      
+
       <CardContent className="space-y-3">
         {employee.position && (
           <div className="flex items-center space-x-2">
@@ -98,33 +81,35 @@ export function EmployeeCard({ employee, onViewDocuments, onViewProfile }: Emplo
             </Badge>
           </div>
         )}
-        
+
         {employee.email && (
           <div className="flex items-center space-x-2 text-sm text-muted-foreground">
             <Mail className="h-4 w-4" />
             <span className="truncate">{employee.email}</span>
           </div>
         )}
-        
+
         {employee.phone && (
           <div className="flex items-center space-x-2 text-sm text-muted-foreground">
             <Phone className="h-4 w-4" />
             <span>{employee.phone}</span>
           </div>
         )}
-        
+
         {employee.hire_date && (
           <div className="flex items-center space-x-2 text-sm text-muted-foreground">
             <Calendar className="h-4 w-4" />
-            <span>{t('employees.table.hireDate')}: {new Date(employee.hire_date).toLocaleDateString('en-GB')}</span>
+            <span>
+              {t('employees.table.hireDate')}: {new Date(employee.hire_date).toLocaleDateString('en-GB')}
+            </span>
           </div>
         )}
-        
+
         <div className="flex items-center justify-between pt-3 border-t border-border">
           <Button
             variant="ghost"
             size="sm"
-            onClick={(e) => {
+            onClick={e => {
               e.stopPropagation();
               onViewProfile(employee);
             }}
@@ -133,11 +118,11 @@ export function EmployeeCard({ employee, onViewDocuments, onViewProfile }: Emplo
             <Eye className="h-4 w-4 ml-1" />
             {t('employees.actions.viewProfile')}
           </Button>
-          
+
           <Button
             variant="default"
             size="sm"
-            onClick={(e) => {
+            onClick={e => {
               e.stopPropagation();
               onViewDocuments(employee.id);
             }}

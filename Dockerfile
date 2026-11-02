@@ -1,36 +1,57 @@
-# Build stage
-FROM node:18-alpine as build
+# syntax=docker/dockerfile:1
 
-# Set working directory
+###############################################################################
+# Build stage — compiles the SPA and the API server
+###############################################################################
+FROM node:24-alpine AS build
+
 WORKDIR /app
 
-# Copy package files
-COPY package*.json ./
-
-# Install dependencies (including dev dependencies for build)
+# Install every dependency first so the layer is cached.
+COPY package.json package-lock.json ./
 RUN npm ci
 
-# Copy source code
 COPY . .
 
-# Build the application
+# The SPA and the server are compiled together.
 RUN npm run build
 
-# Production stage
-FROM nginx:alpine
 
-# Copy built assets from build stage
-COPY --from=build /app/dist /usr/share/nginx/html
+###############################################################################
+# Runtime stage — serves the API and the built SPA from one process
+###############################################################################
+FROM node:24-alpine AS runtime
 
-# Copy custom nginx configuration
-COPY nginx.conf /etc/nginx/conf.d/default.conf
+WORKDIR /app
 
-# Expose port 80
-EXPOSE 80
+ENV NODE_ENV=production \
+    PORT=3000 \
+    DATA_DIR=/data \
+    UPLOADS_DIR=/data/uploads
 
-# Health check
-HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
-  CMD curl -f http://localhost/ || exit 1
+# Only the production dependencies are shipped.
+COPY package.json package-lock.json ./
+RUN npm ci --omit=dev && npm cache clean --force
 
-# Start nginx
-CMD ["nginx", "-g", "daemon off;"]
+# The compiled server, the SQL migrations and the seed data.
+COPY --from=build /app/server-dist ./server-dist
+COPY --from=build /app/server/db/migrations ./server/db/migrations
+COPY --from=build /app/data/seed.json ./data/seed.json
+
+# The built SPA, served by the API process.
+COPY --from=build /app/dist ./dist
+
+# The application runs as a non-root user.
+RUN addgroup -g 1001 -S app \
+ && adduser -u 1001 -S app -G app \
+ && mkdir -p /data/uploads \
+ && chown -R app:app /data /app
+
+USER app
+
+EXPOSE 3000
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
+  CMD node -e "fetch('http://127.0.0.1:'+(process.env.PORT||3000)+'/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+
+CMD ["node", "server-dist/index.js"]

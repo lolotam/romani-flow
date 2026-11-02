@@ -1,57 +1,49 @@
-version: '3.8'
+name: romani-flow
 
 services:
-  romani-app:
+  app:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: romani-management-system
-    ports:
-      - "8087:80"
-      - "443:443"
-    environment:
-      - NODE_ENV=production
-      - VITE_APP_NAME=ROMANI Management System
-      - VITE_DB_KEY=romani_json_database
-    volumes:
-      # Optional: Mount SSL certificates for HTTPS
-      # - ./ssl:/etc/nginx/ssl:ro
-      # Optional: Mount custom nginx config
-      # - ./custom-nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    container_name: romani-flow
     restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      # The persistent volume. The SQLite database and the file bucket live here.
+      DATA_DIR: /data
+      UPLOADS_DIR: /data/uploads
+      # Signing key for the session cookie — required in production.
+      JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET in the environment}
+      # The timezone the daily reminder runs in.
+      TZ: ${TZ:-Asia/Kuwait}
+      # SMTP. The password never leaves the environment.
+      SMTP_HOST: ${SMTP_HOST:-smtp.gmail.com}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_SECURE: ${SMTP_SECURE:-false}
+      SMTP_USER: ${SMTP_USER:-samirfayez03@gmail.com}
+      SMTP_PASS: ${SMTP_PASS:?set the Gmail app password in the environment}
+      SMTP_FROM: ${SMTP_FROM:-ROMANI Flow <samirfayez03@gmail.com>}
+      # Limits
+      MAX_UPLOAD_MB: ${MAX_UPLOAD_MB:-25}
+      MAX_EMAIL_ATTACHMENT_MB: ${MAX_EMAIL_ATTACHMENT_MB:-20}
+    volumes:
+      # The bucket and the database, stored on the host — outside the container.
+      - ${ROMANI_DATA_DIR:-/opt/romani/data}:/data
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost/health"]
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:3000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 40s
+      start_period: 20s
     labels:
-      - "com.docker.compose.project=romani-management"
-      - "description=ROMANI Employee and Document Management System"
-
-  # Optional: Database backup service (if needed for future database integration)
-  # backup:
-  #   image: alpine:latest
-  #   container_name: romani-backup
-  #   volumes:
-  #     - ./backups:/backups
-  #   command: |
-  #     sh -c "
-  #     while true; do
-  #       echo 'Backup service running...'
-  #       sleep 86400
-  #     done
-  #     "
-  #   restart: unless-stopped
-  #   depends_on:
-  #     - romani-app
-
-networks:
-  default:
-    name: romani-network
-    driver: bridge
-
-# Optional: Volumes for persistent data
-# volumes:
-#   romani-data:
-#     driver: local
+      - "com.docker.compose.project=romani-flow"
+      - "description=ROMANI employee and document management system"

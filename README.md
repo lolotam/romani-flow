@@ -1,281 +1,226 @@
-# ROMANI Employee and Document Management System
+# ROMANI Flow — Employee and Document Management
 
-A comprehensive bilingual (Arabic/English) web application for managing employees and documents with advanced filtering, search, and administrative capabilities.
+A bilingual (Arabic / English) web application for managing employees and their
+documents, with expiry reminders delivered by email.
 
-## 🌟 Features
-
-### Employee Management
-- **Employee Registration**: Add new employees with detailed information
-- **Dynamic Table View**: Sortable and filterable employee list with numbering column
-- **Search & Filter**: Advanced search by name, position, company, and status
-- **Employee Profiles**: Complete employee information including contact details, hire date, civil ID, and residency expiry
-
-### Document Management
-- **Document Upload**: File upload with drag-and-drop support
-- **Document Categorization**: Organize by document types and ministries
-- **Expiry Tracking**: Automatic status calculation (Valid, Expiring Soon, Expired)
-- **Document Search**: Filter by employee, company, document type, and ministry
-- **Status Management**: Visual indicators for document validity
-
-### Administrative Settings
-- **Company Management**: Create and manage company profiles
-- **Ministry Configuration**: Manage government ministries and departments
-- **Document Types**: Define custom document categories
-- **Position Management**: Configure employee positions and roles
-- **Email Configuration**: Set up SMTP settings and email templates
-
-### Email Notification System
-- **Automated Notifications**: Send email alerts for document expiry and system events
-- **Custom Templates**: HTML email templates for different notification types
-- **Employee & Company Alerts**: Separate notification workflows
-- **EmailJS Integration**: Client-side email sending with fallback SMTP support
-- **Template Customization**: Editable HTML email templates with dynamic content
-
-### Authentication & Security
-- **Secure Login**: Admin authentication system
-- **Session Management**: Persistent login sessions
-- **Access Control**: Protected routes for authenticated users only
-
-### Bilingual Support
-- **Arabic Interface**: Full RTL (Right-to-Left) support
-- **English Interface**: LTR (Left-to-Right) layout
-- **Dynamic Switching**: Seamless language switching
-
-## 🚀 Technology Stack
-
-- **Frontend**: React 18 with TypeScript
-- **Build Tool**: Vite
-- **UI Framework**: shadcn/ui components
-- **Styling**: Tailwind CSS
-- **Forms**: React Hook Form with Zod validation
-- **Routing**: React Router DOM
-- **State Management**: React Query (TanStack Query)
-- **Database**: Browser localStorage with JSON structure
-- **Email Service**: EmailJS & Nodemailer for notifications
-- **Icons**: Lucide React
-- **Animations**: Framer Motion
-
-## 📋 Prerequisites
-
-- Node.js (v16 or higher)
-- npm or yarn package manager
-- Modern web browser with localStorage support
-
-## 🔧 Installation
-
-### Clone the Repository
-```bash
-git clone https://github.com/lolotam/ROMANI-LOVABEL-LOCAL2.git
-cd ROMANI-LOVABEL-LOCAL2
-```
-
-### Install Dependencies
-```bash
-npm install
-```
-
-### Start Development Server
-```bash
-npm run dev
-```
-
-The application will be available at `http://localhost:5173`
-
-## 🏗️ Build & Deployment
-
-### Development Build
-```bash
-npm run build:dev
-```
-
-### Production Build
-```bash
-npm run build
-```
-
-### Preview Production Build
-```bash
-npm run preview
-```
-
-### Linting
-```bash
-npm run lint
-```
-
-## 🔐 Authentication
-
-### Default Admin Credentials
-- **Username**: `Admin`
-- **Password**: `@Xx123456789xX@`
-
-> **Note**: For production deployment, update authentication credentials in `src/hooks/useAuth.tsx`
-
-## 🗂️ Project Structure
-
-```
-src/
-├── components/          # Reusable UI components
-│   ├── ui/             # shadcn/ui components
-│   ├── DocumentForm.tsx # Document creation form
-│   └── ...
-├── pages/              # Main application pages
-│   ├── Login.tsx       # Authentication page
-│   ├── Dashboard.tsx   # Main dashboard
-│   ├── Employees.tsx   # Employee management
-│   ├── Documents.tsx   # Document management
-│   └── Settings.tsx    # Administrative settings
-├── hooks/              # Custom React hooks
-│   └── useAuth.tsx     # Authentication logic
-├── lib/                # Utility libraries
-│   ├── jsonDatabase.ts # localStorage database implementation
-│   └── emailService.ts # Email notification service
-├── email-template-employee.html  # Employee notification template
-├── email-template-company.html   # Company notification template
-└── App.tsx             # Main application component
-```
-
-## 💾 Database Structure
-
-The application uses a browser-based JSON database stored in localStorage with the following entities:
-
-- **Companies**: Organization profiles
-- **Ministries**: Government departments
-- **Document Types**: Document categories
-- **Positions**: Employee roles
-- **Employees**: Staff information
-- **Documents**: File records with metadata
-- **Admin Users**: Authentication data
-
-## 🌐 Deployment Options
-
-### Option 1: Static Hosting (Recommended)
-1. Build the project: `npm run build`
-2. Deploy the `dist` folder to any static hosting service:
-   - Vercel
-   - Netlify
-   - GitHub Pages
-   - Firebase Hosting
-   - AWS S3 + CloudFront
-
-### Option 2: Docker Container
-See the included `docker-compose.yml` file for containerized deployment.
-
-### Option 3: Traditional Web Server
-Deploy the built files to any web server (Apache, Nginx, IIS).
-
-## 🔧 Configuration
-
-### Environment Variables
-Create a `.env` file for custom configuration:
-```
-VITE_APP_NAME=ROMANI Management System
-VITE_DB_KEY=romani_json_database
-
-# EmailJS Configuration (optional)
-VITE_EMAILJS_SERVICE_ID=your_service_id
-VITE_EMAILJS_TEMPLATE_ID=your_template_id
-VITE_EMAILJS_PUBLIC_KEY=your_public_key
-
-# SMTP Configuration (optional - for server-side email)
-VITE_SMTP_HOST=smtp.gmail.com
-VITE_SMTP_PORT=587
-VITE_SMTP_USER=your_email@gmail.com
-VITE_SMTP_PASS=your_app_password
-```
-
-### Database Initialization
-The application automatically initializes with empty database structure. To populate with existing data:
-1. Export data to `public/data/database.json`
-2. The app will load this data on first run
-
-## 📱 Browser Compatibility
-
-- Chrome 90+
-- Firefox 88+
-- Safari 14+
-- Edge 90+
-- Mobile browsers with modern JavaScript support
-
-## 🔒 Security Considerations
-
-- **Client-Side Storage**: Data is stored in localStorage (not suitable for sensitive production data)
-- **Authentication**: Currently uses hardcoded credentials (update for production)
-- **File Upload**: Files are converted to base64 and stored locally
-- **HTTPS Required**: Use HTTPS in production for security
-
-## 🛠️ Development
-
-### Adding New Features
-1. Follow existing code structure and patterns
-2. Use TypeScript for type safety
-3. Follow shadcn/ui component guidelines
-4. Update database schema in `jsonDatabase.ts` if needed
-
-### Testing
-- Use browser developer tools for debugging
-- Test localStorage functionality
-- Verify responsive design on different screen sizes
-
-## 📄 API Reference
-
-The application uses a localStorage-based database with the following main methods:
-
-```typescript
-// Query data
-const result = await jsonDatabase.from('employees')
-  .select('*')
-  .eq('company_id', companyId)
-  .execute();
-
-// Insert data
-const result = await jsonDatabase.insert('employees', employeeData);
-
-// Update data
-const result = await jsonDatabase.update('employees', id, updates);
-
-// Delete data
-const result = await jsonDatabase.delete('employees', id);
-```
-
-## 🤝 Contributing
-
-1. Fork the repository
-2. Create a feature branch: `git checkout -b feature/new-feature`
-3. Commit changes: `git commit -am 'Add new feature'`
-4. Push to branch: `git push origin feature/new-feature`
-5. Submit a pull request
-
-## 📞 Support
-
-For technical support or feature requests:
-- Create an issue in the GitHub repository
-- Contact the development team
-
-## 📝 License
-
-This project is proprietary software developed for ROMANI organization.
-
-## 🔄 Version History
-
-- **v1.1.0**: Email notification system
-  - EmailJS integration for client-side emails
-  - Custom HTML email templates
-  - SMTP fallback configuration
-  - Automated document expiry notifications
-
-- **v1.0.0**: Initial release with core functionality
-  - Employee and document management
-  - Bilingual interface support
-  - localStorage database implementation
-  - Authentication system
-
-## 📦 Dependencies
-
-See [DEPENDENCIES.md](./DEPENDENCIES.md) for a complete list of all production and development dependencies, including version requirements and configuration details.
+The application is a **Vite + React SPA served by a small Node API**. The API
+owns a **SQLite database** and a **file bucket** that lives on a mounted volume
+outside the container, so the data survives every rebuild.
 
 ---
 
-**Note**: This application is designed for internal use and requires proper security hardening before production deployment with sensitive data.# Webhook Test
-Webhook test after firewall fix - Mon, Sep 15, 2025  1:32:20 AM
-Testing async webhook - Mon, Sep 15, 2025  1:36:38 AM
+## Features
+
+### Employees
+- Registration and editing with company, position, civil ID and residency expiry
+- Search and filter by name, position, company and status
+- Employee profiles with their documents and an uploaded photo
+
+### Documents
+- Upload with drag and drop — the real file is stored in the bucket, never as base64
+- Categorisation by document type and ministry
+- Expiry tracking with a derived status: valid, expiring soon, expired
+- Preview and download through authenticated endpoints
+- **Send one document, or a multi-selected batch, by email with the files attached**
+
+### Reminders
+- A daily scheduled job that reports expiring employee residencies and documents
+- **Five reminder thresholds, each switchable on its own**: 3 months, 1 month, 15 days, 1 week and 1 day before expiry
+- Multiple recipients and a CC list, configured in Settings
+- The report is **Arabic and right-to-left** by default, in the same teal palette as the app
+- Every send attempt is recorded and can be reviewed in Settings
+
+### Administration
+- Companies, ministries, document types and positions
+- SMTP status and a connection test
+- Cron schedule, look-ahead window and a manual "run now"
+- Data export and a guarded "erase all data"
+- Bilingual interface with full RTL support
+
+---
+
+## Tech stack
+
+| Layer | Technology |
+|---|---|
+| Frontend | React 18, TypeScript, Vite |
+| UI | shadcn/ui, Tailwind CSS, Lucide icons, Framer Motion |
+| Forms | React Hook Form + Zod |
+| Routing | React Router DOM |
+| Server | Node 24, Express 5 |
+| Database | SQLite through the built-in `node:sqlite` driver |
+| Files | A directory on a mounted volume (`node:fs`) |
+| Mail | Nodemailer over SMTP (Gmail app password) |
+| Scheduler | node-cron, inside the API process |
+| Auth | bcryptjs + a signed JWT in an httpOnly cookie |
+
+`node:sqlite` is used deliberately: it needs **no native compilation**, so the
+Docker image stays small and the build never depends on a toolchain.
+
+---
+
+## Getting started
+
+### Requirements
+
+- Node.js 24 or newer
+- npm
+
+### Install and run
+
+```bash
+npm install
+cp .env.example .env      # fill in JWT_SECRET and the SMTP password
+npm run db:migrate
+npm run db:seed
+npm run server:dev        # API on http://localhost:3000
+npm run dev               # SPA on http://localhost:8080
+```
+
+The SPA proxies `/api` to the server in development — see `vite.config.ts`.
+
+### Useful commands
+
+| Command | Purpose |
+|---|---|
+| `npm run dev` | the SPA in development mode |
+| `npm run build` | builds the SPA **and** the server |
+| `npm run typecheck` | type-checks both tsconfigs |
+| `npm run lint` | ESLint + the 500-line file size check |
+| `npm run check:sizes` | fails if a source file exceeds 500 lines |
+| `npm run server:dev` | the API with hot reload |
+| `npm run db:migrate` | applies pending SQL migrations |
+| `npm run db:seed` | imports the reference data and the admin accounts |
+
+---
+
+## Configuration
+
+Every variable is documented in [`.env.example`](./.env.example). The important
+ones:
+
+| Variable | Required | Default | Purpose |
+|---|---|---|---|
+| `JWT_SECRET` | **yes in production** | — | signs the session cookie; the server refuses to boot without it |
+| `DATA_DIR` | no | `/data` | the persistent volume |
+| `UPLOADS_DIR` | no | `${DATA_DIR}/uploads` | the file bucket |
+| `SMTP_HOST` / `SMTP_PORT` / `SMTP_SECURE` | for mail | Gmail defaults | the SMTP server |
+| `SMTP_USER` | for mail | `samirfayez03@gmail.com` | the sender account |
+| `SMTP_PASS` | for mail | — | the Gmail **app password** |
+| `TZ` | no | `Asia/Kuwait` | the timezone the daily job runs in |
+| `MAX_UPLOAD_MB` | no | `25` | the upload size cap |
+| `MAX_EMAIL_ATTACHMENT_MB` | no | `20` | the attachment cap, kept under Gmail's 25 MB ceiling |
+
+The SMTP password is read from the environment **only**. It is never written to
+the database and never returned by the API — the Settings screen only shows
+whether SMTP is configured.
+
+---
+
+## Seeded administrators
+
+| Email | Password |
+|---|---|
+| `dr.vet.waleedtam@gmail.com` | `@Xx123456789xX@` |
+| `Room_samer20105@yahoo.com` | `@Xx123456789xX@` |
+
+The seed creates these accounts on the first boot and never overwrites an
+existing one. **Change the password before putting the app in front of anybody
+else.**
+
+---
+
+## The API
+
+The SPA talks to a small REST API. It serves the same envelope everywhere:
+
+```json
+{ "data": …, "error": null }
+```
+
+| Area | Endpoints |
+|---|---|
+| Auth | `POST /api/auth/login`, `POST /api/auth/logout`, `GET /api/auth/me` |
+| Data | `GET/POST /api/{companies,ministries,document-types,positions,employees,documents}`, `GET/PATCH/DELETE /api/{resource}/:id` |
+| Files | `POST /api/files/upload`, `GET /api/files/:documentId`, `…/download`, `…/preview`, `PUT/DELETE /api/documents/:id/file`, `…/employees/:id/photo` |
+| Email | `GET /api/email/status`, `POST /api/email/test`, `GET /api/email/expiry-preview`, `POST /api/email/expiry-report`, `POST /api/email/send-documents`, `GET /api/email/log` |
+| Scheduler | `GET /api/cron/status`, `PUT /api/cron/schedule` |
+| Settings | `GET/PUT /api/settings` |
+| Backup | `GET /api/backup/export`, `POST /api/backup/erase` |
+| Health | `GET /api/health` |
+
+List endpoints accept `select`, `eq[field]`, `neq[field]`, `gt[field]`,
+`gte[field]`, `lt[field]`, `lte[field]`, `like[field]`, `in[field]`, `order`,
+`limit` and `offset`.
+
+`select` is a **relation-inclusion** directive, not a projection: a row always
+comes back complete, with the requested relations embedded as nested objects.
+
+A `PATCH` keeps the stored value for any key you omit, and clears the field when
+you send an explicit `null`.
+
+---
+
+## Deployment
+
+The full runbook — including how to mount the file bucket on the host — is in
+**[docs/DOKPLOY.md](./docs/DOKPLOY.md)**.
+
+In short:
+
+```bash
+# on the host
+sudo mkdir -p /opt/romani/data/uploads
+sudo chown -R 1001:1001 /opt/romani/data
+sudo touch /opt/romani/data/.romani-volume
+```
+
+Then bind-mount `/opt/romani/data` → `/data` in Dokploy and set the environment
+variables. The `.romani-volume` marker makes the server fail loudly instead of
+silently writing into a container directory that disappears with the next deploy.
+
+---
+
+## Project layout
+
+```
+├── server/                  # the API
+│   ├── db/                  # connection, migrations, seed
+│   ├── middleware/          # auth, error envelope
+│   ├── repositories/        # data access
+│   ├── routes/              # HTTP endpoints
+│   ├── services/            # storage, mail, cron, expiry, documents
+│   └── templates/           # the HTML emails
+├── src/
+│   ├── lib/api/             # the typed API client
+│   ├── components/          # UI components
+│   ├── translations/        # en + ar translations
+│   ├── pages/               # screens
+│   └── types/               # shared types
+├── docs/                    # SPEC.md, IMPLEMENTATION_PLAN.md, DOKPLOY.md
+└── data/seed.json           # the reference data imported on first boot
+```
+
+No source file exceeds **500 lines**; `npm run check:sizes` enforces it. The
+vendored shadcn primitives in `src/components/ui/` are the only exception — they
+are generated and are not hand-edited.
+
+---
+
+## Security notes
+
+- Passwords are hashed with bcrypt; the session is an HS256 JWT in an httpOnly,
+  SameSite cookie.
+- Login attempts are rate limited per IP.
+- Every API route except login and the health check requires a session.
+- Uploaded files are served only through authenticated endpoints — there is no
+  static directory that publishes them.
+- The resolved file path is verified to stay inside the bucket, so a stored path
+  can never escape it.
+- The SMTP password and the JWT secret live in the environment only.
+
+---
+
+## Licence
+
+Proprietary software developed for the ROMANI organization.
