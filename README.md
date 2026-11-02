@@ -118,6 +118,11 @@ When any SMTP host, user, password or sender is set, `SMTP_USER`, `SMTP_PASS`
 and `SMTP_FROM` are required at startup, including outside Compose. The host
 defaults to Gmail when credentials are supplied. For direct Node startup, disable
 mail by leaving all four empty; startup logs one "mail not configured" warning.
+Also clear every supported alias: `MAIL_HOST`, `EMAIL_HOST`, `SMTP_USERNAME`,
+`MAIL_USER`, `EMAIL_USER`, `EMAIL_USERNAME`, `SMTP_PASSWORD`, `MAIL_PASS`,
+`MAIL_PASSWORD`, `EMAIL_PASS`, `EMAIL_PASSWORD`, `MAIL_FROM`, `EMAIL_FROM`,
+`FROM_EMAIL` and `SMTP_FROM_ADDRESS`. Empty canonical variables do not override
+non-empty aliases.
 Compose always requires SMTP credentials and does not support this opt-out.
 No sender is derived. Before upgrading an existing deployment, explicitly set
 `SMTP_FROM` (or a supported alias); incomplete SMTP configuration prevents boot.
