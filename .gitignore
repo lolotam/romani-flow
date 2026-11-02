@@ -79,3 +79,5 @@ preview/
 .kiro/steering/byterover-rules.md
 .qoder/rules/byterover-rules.md
 .augment/rules/byterover-rules.md
+# Browser-automation artifacts (screenshots, exports) can contain personal data
+.playwright-mcp/
