@@ -9,8 +9,6 @@ export const createDocumentSchema = (t: (key: string) => string) => z.object({
   document_type_id: z.string().optional(),
   ministry_id: z.string().optional(),
   entity_name: z.string().optional(),
-  issue_date: z.date().optional(),
-  expiry_date: z.date({ required_error: t('documents.form.validation.expiryDateRequired') }),
   notes: z.string().optional(),
 }).superRefine((data, ctx) => {
   // Attach required-field errors to rendered controls, never an invisible root error.
@@ -21,7 +19,11 @@ export const createDocumentSchema = (t: (key: string) => string) => z.object({
     if (!data[field]?.trim()) ctx.addIssue({ code: z.ZodIssueCode.custom,
       message: t('documents.form.validation.allFieldsRequired'), path: [field] });
   }
-}).refine((data) => {
+}).and(z.object({
+  // Parse dates independently so missing dates do not suppress selection errors.
+  issue_date: z.date().optional(),
+  expiry_date: z.date({ required_error: t('documents.form.validation.expiryDateRequired') }),
+})).refine((data) => {
   // Date validation - expiry date should be >= issue date
   if (data.issue_date && data.expiry_date) {
     return data.expiry_date >= data.issue_date;
