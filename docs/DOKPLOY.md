@@ -105,7 +105,6 @@ sensitive so they are masked in the UI):
 | `JWT_SECRET` | *(random, ≥ 32 chars)* | `openssl rand -base64 48` — **required**, the app refuses to boot without it |
 | `DATA_DIR` | `/data` | the mount point |
 | `UPLOADS_DIR` | `/data/uploads` | the bucket |
-| `TZ` | `Asia/Kuwait` | the timezone the daily reminder fires in |
 | `SMTP_HOST` | `smtp.gmail.com` | |
 | `SMTP_PORT` | `587` | use `465` with `SMTP_SECURE=true` |
 | `SMTP_SECURE` | `false` | |
@@ -114,6 +113,13 @@ sensitive so they are masked in the UI):
 | `SMTP_FROM` | *(required, no default)* | e.g. `ROMANI Flow <sender@example.com>` |
 | `MAX_UPLOAD_MB` | `25` | |
 | `MAX_EMAIL_ATTACHMENT_MB` | `20` | keeps the message under Gmail's 25 MB ceiling |
+
+Timezone is optional: leave `TZ` **unset** for the current direct deployment;
+the read-only runtime check found no TZ override and resolved `UTC`. Do not add
+a literal `unset` value or descriptive prose as an environment value. Compose's
+separate default is the valid IANA name `Asia/Kuwait`. Preserve any existing
+verified override in other deployments; changing timezone changes reminder times
+and requires an explicit operating decision.
 
 ### The Gmail app password
 
@@ -192,31 +198,38 @@ sends**.
 
 ## 8. Backup and restore
 
-The JSON export in Settings contains the **database records only** — not the
-uploaded files. A restorable backup is a copy of the whole storage root:
+The Settings JSON export omits attachment bytes and account password hashes. It
+is not a complete recovery set. Use the checked-out release's host recovery CLI,
+as documented in [OPERATIONS.md](OPERATIONS.md#full-recovery-set):
 
 ```bash
-# On the host — stop the app first so the database is consistent
-cd /opt/romani
-sudo systemctl stop romani-flow        # or: docker compose stop app
-sudo tar czf romani-backup-$(date +%F).tgz -C /opt/romani data
-sudo systemctl start romani-flow
+# On the host: replace this with the actual approved release checkout path.
+RELEASE_DIR=/absolute/path/to/approved-release
+cd "$RELEASE_DIR" || exit 1
+test -r scripts/recovery.py || exit 1
+# sudo is required here to read the private data tree and write below /root.
+sudo python3 scripts/recovery.py backup --data-dir /opt/romani/data --output /root/romani-backup-UNIQUE
+sudo python3 scripts/recovery.py verify --backup /root/romani-backup-UNIQUE
+sudo python3 scripts/recovery.py restore --backup /root/romani-backup-UNIQUE --target /root/romani-isolated-restore-UNIQUE
 ```
 
-Restoring:
+For the separate uploads bind in section 4, add
+`--uploads-dir /mnt/bigdisk/romani-uploads` to the **backup** command. For a
+`DB_PATH` override, add `--db /actual/host/path/database.sqlite`. Use verified
+host paths, not container paths. See OPERATIONS.md for the restored layout.
 
-```bash
-sudo systemctl stop romani-flow
-sudo rm -rf /opt/romani/data
-sudo tar xzf romani-backup-2026-11-02.tgz -C /opt/romani
-sudo chown -R 1001:1001 /opt/romani/data
-sudo systemctl start romani-flow
-curl -fsS https://romani.curemed.iq/api/health
-```
+Choose new private directories. The CLI verifies the SQLite snapshot, referenced
+attachments, hashes and foreign keys, and refuses an existing restore target.
+Never remove or extract an archive over the live data tree merely to prove
+recovery. The former delete-and-extract tar procedure is not permitted for
+production restore. Promoting an isolated restored instance requires a separate
+explicit deployment decision; it is not part of these verification commands.
 
-The three seeded documents point at files that lived in the old Supabase
-storage and were never imported. They appear in the app without an attachment —
-upload the real file to complete them.
+Before testing the normal production entrypoint on that isolated copy, follow
+OPERATIONS.md's verified-target/bind-mount checks, isolated uid/gid ownership,
+manual `.romani-volume` preparation and network/SMTP/cron isolation. Do not create
+a marker on an unverified mount or bypass the production volume guard. Keep the
+source backup, live database and rollback/KEEP assets intact.
 
 ---
 
@@ -224,9 +237,9 @@ upload the real file to complete them.
 
 | Symptom | Cause | Fix |
 |---|---|---|
-| The app exits with *"The persistent volume is not mounted"* | The bind mount is missing or points somewhere else | Add the mount `/opt/romani/data → /data` and create `.romani-volume` on the host |
+| The app exits with *"The persistent volume is not mounted"* | The bind mount is missing or points somewhere else | Verify the expected existing production data directory and actual bind source/destination before repairing the mount. Never create a marker merely to bypass startup. For a separate isolated restore, follow the verified-target procedure in [OPERATIONS.md](OPERATIONS.md#full-recovery-set). |
 | `SQLITE_BUSY` / "database is locked" | The volume is on a filesystem without proper locking | Move `/data` to a local disk |
-| Login always fails | The seeded accounts were not created because the database already had data | Check the logs; create the account from the server console or wipe the volume |
+| Login always fails | Credentials, inactive account or incomplete approved bootstrap | Check sanitized auth/bootstrap logs and use the owner-approved account recovery process; never wipe the data volume to fix login |
 | The expiry email never arrives | SMTP is not configured, or Gmail rejected the sender | Check `SMTP_PASS`, then press **Test connection** in Settings |
 | The email arrives but is empty | No item falls into a selected interval | Tick more intervals, or widen `cron.days` |
 | Uploads fail with 413 | The file is larger than `MAX_UPLOAD_MB` | Raise the limit and restart |

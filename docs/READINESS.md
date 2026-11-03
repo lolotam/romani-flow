@@ -1,0 +1,20 @@
+# GOAL B acceptance ledger
+
+Scope is finite: daily document use, controlled notification operations and recoverability. Infrastructure health alone does not complete a journey. No customer data or production fixtures may be fabricated. Preserve KEEP and pre-PR4 rollback assets.
+
+| ID | Acceptance | Required evidence | Current state |
+| --- | --- | --- | --- |
+| B1 | Login/session/logout and active-account permissions | Isolated real password login, invalid/revoked sessions, viewer denied mutations; designated live account | Local journey passed; live admin1 login/identity/Secure+HttpOnly/logout passed; release regression pending |
+| B2 | Company/employee document workflow | Create catalogs and employee in isolated fixture, PDF upload/save, persisted metadata, byte-identical retrieval, edit and account defaults; controlled live document | Isolated employee PDF journey passed; authorized live company PDF upload/save/hash retrieval/edit/re-login/defaults passed; exactly owned test record deleted and defaults cleared |
+| B3 | Arabic form failures and successful save | Field validation regressions plus real browser/live journey, no silent save | INCOMPLETE: owner-authenticated live Chrome file picker/form and rejected incomplete Save showed Arabic employee/type/expiry field errors, with no extra record/staging rows. Successful BROWSER save/retrieval is still pending. Earlier successful live API save/retrieval is separate supporting evidence and does not close the browser success requirement |
+| B4 | Email outcomes | Local transport acceptance/rejection/failure and durable attempts; designated live recipient receipt matched to message/time | Local partial/failure/dedup proof passed; one live designated document-email relay accepted and matching INBOX receipt observed 2026-11-03T18:18:29Z with one 622-byte PDF; fix release pending |
+| B5 | Reminders/scheduling | Due-item selection, deduplication, failure retry, real scheduler firing and next-run status; production schedule/timezone read-only confirmation | Accelerated isolated scheduler actually fired; due/dedup/failure retry passed. Production expression enabled 0 8 * * * and runtime timezone independently resolved UTC, unchanged. Pre-fix API next 2026-11-04T08:00Z was an estimate; engine-derived production nextRun requires post-release verification. No live firing claim |
+| B6 | Backup AND isolated restoration | Consistent SQLite plus attachments, checksums, integrity/FK checks; restore to separate directory, real login and byte-identical retrieval from restored app | Full production snapshot with authorized PDF restored in separate server tree; network-none/read-only-image instance logged in with designated existing credentials and downloaded identical PDF hash. SMTP absent, scheduler unarmed; production source untouched. Integrity/FK/hash passed |
+| B7 | Operating documentation | Setup prerequisites, daily actions, mail failure handling, scheduling/timezone, backup/restore/rollback and evidence limits | docs/OPERATIONS.md written; focused review pending |
+| B8 | Release/acceptance/freeze | Exact-head checks and reviews, approved release, deployed build identity, journey/operations receipt and owner acceptance | Pending |
+
+Owner designated the first administrator and previously chosen recipient, and approved one explicitly labeled no-personal-data test PDF record followed by deletion. No customer mail. Credentials remain private, never chat. A local fixture is not live proof. SQLite backup restoration never replaces production merely to prove recovery. JSON business export alone omits file bytes/password hashes and is not a complete recovery set.
+
+SA accepted B1–B8 as the complete finite list. No additional acceptance row or feature is implied. SMTP relay acceptance and recipient delivery are separate evidence. Local real scheduler firing and production schedule observations are separate. Preserve the production cadence/timezone, pre-PR4 rollback and KEEP assets.
+
+Freeze only after B1–B8 have actual evidence and any remaining evidence limits are explicitly accepted. Pending auth/mail is one targeted blocker; continue other authorized work.

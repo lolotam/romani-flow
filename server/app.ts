@@ -1,9 +1,10 @@
 import path from 'node:path';
 import cookieParser from 'cookie-parser';
+import cronEngine from 'node-cron';
 import express, { type Express, type Request, type Response, type NextFunction } from 'express';
 import type { AppConfig } from './config.js';
 import type { Db } from './db/connection.js';
-import { requireAuth } from './middleware/auth.js';
+import { requireAuth, requireAdmin } from './middleware/auth.js';
 import { asyncHandler, errorHandler, notFoundHandler } from './middleware/errorHandler.js';
 import { createAuthRouter } from './routes/auth.js';
 import { createBackupRouter } from './routes/backup.js';
@@ -88,6 +89,7 @@ export function createApp(deps: AppDependencies): Express {
   app.put(
     '/api/cron/schedule',
     authenticated,
+    requireAdmin,
     (req: Request, res: Response) => {
       const schedule = typeof req.body?.schedule === 'string' ? req.body.schedule.trim() : '';
       const enabled = typeof req.body?.enabled === 'boolean' ? req.body.enabled : undefined;
@@ -100,11 +102,11 @@ export function createApp(deps: AppDependencies): Express {
         return;
       }
 
-      if (!/^\S+\s+\S+\s+\S+\s+\S+\s+\S+$/.test(schedule)) {
+      if (!/^\S+\s+\S+\s+\S+\s+\S+\s+\S+$/.test(schedule) || !cronEngine.validate(schedule)) {
         res.status(400).json({
           data: null,
           error: {
-            message: 'The cron expression must have five fields (minute hour day month weekday).',
+            message: 'A valid five-field cron expression is required (minute hour day month weekday).',
             code: 'invalid_schedule',
           },
         });
@@ -135,6 +137,7 @@ export function createApp(deps: AppDependencies): Express {
   app.put(
     '/api/documents/:id/file',
     authenticated,
+    requireAdmin,
     asyncHandler(async (req, res) => {
       const uploadId = typeof req.body?.upload_id === 'string' ? req.body.upload_id : '';
       if (!uploadId) {
@@ -160,6 +163,7 @@ export function createApp(deps: AppDependencies): Express {
   app.delete(
     '/api/documents/:id/file',
     authenticated,
+    requireAdmin,
     asyncHandler(async (req, res) => {
       const updated = await documents.detachFile(String(req.params.id));
       if (!updated) {

@@ -110,7 +110,7 @@ ones:
 | `SMTP_USER` | **yes** (for mail) | — | the sender account |
 | `SMTP_PASS` | **yes** (for mail) | — | the Gmail **app password** |
 | `SMTP_FROM` | **yes** (for mail) | — | the sender shown to recipients, e.g. `ROMANI Flow <sender@example.com>` |
-| `TZ` | no | `Asia/Kuwait` | the timezone the daily job runs in |
+| `TZ` | no | Compose: `Asia/Kuwait`; direct Node/Dockerfile: process/container timezone | the daily job's process timezone; the Compose default does not configure direct deployments |
 | `MAX_UPLOAD_MB` | no | `25` | the upload size cap |
 | `MAX_EMAIL_ATTACHMENT_MB` | no | `20` | the attachment cap, kept under Gmail's 25 MB ceiling |
 
@@ -153,6 +153,10 @@ that decision; simply omitting an optional seed does not finalize it or prevent 
 later import.
 
 ## First administrators
+
+For daily document operations, notification evidence, full SQLite/attachment
+backup and isolated recovery, see [the operating guide](docs/OPERATIONS.md).
+The finite operational acceptance ledger is [GOAL B readiness](docs/READINESS.md).
 
 There is no built-in account and no default password. On the first start of an
 empty database the server creates the administrators named in

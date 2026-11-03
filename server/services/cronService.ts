@@ -30,7 +30,6 @@ export interface CronStatus {
 export class CronService {
   private task: ScheduledTask | null = null;
   private inFlight = false;
-  private nextRunAt: Date | null = null;
 
   constructor(
     private readonly db: Db,
@@ -58,7 +57,6 @@ export class CronService {
       void this.run();
     });
 
-    this.nextRunAt = this.computeNextRun(schedule);
     console.log(`[cron] expiry reminder scheduled with "${schedule}"`);
 
     return this.status();
@@ -117,7 +115,7 @@ export class CronService {
       running: this.inFlight,
       lastRunAt: getString(this.db, 'cron.last_run_at'),
       lastRunResult: getString(this.db, 'cron.last_run_result'),
-      nextRun: this.nextRunAt ? this.nextRunAt.toISOString() : null,
+      nextRun: this.task?.getNextRun()?.toISOString() ?? null,
     };
   }
 
@@ -126,24 +124,6 @@ export class CronService {
       this.task.stop();
       this.task = null;
     }
-    this.nextRunAt = null;
   }
 
-  /** Best-effort estimate of the next fire time for the status screen. */
-  private computeNextRun(schedule: string): Date | null {
-    const parts = schedule.trim().split(/\s+/);
-    if (parts.length !== 5) return null;
-
-    const [minute, hour] = parts;
-    const now = new Date();
-    const next = new Date(now);
-    next.setSeconds(0, 0);
-    next.setMinutes(Number.parseInt(minute, 10) || 0);
-    next.setHours(Number.parseInt(hour, 10) || 0);
-
-    if (next <= now) {
-      next.setDate(next.getDate() + 1);
-    }
-    return next;
-  }
 }
