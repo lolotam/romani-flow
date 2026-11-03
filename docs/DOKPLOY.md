@@ -221,7 +221,7 @@ source backup, live database and rollback/KEEP assets intact.
 
 | Symptom | Cause | Fix |
 |---|---|---|
-| The app exits with *"The persistent volume is not mounted"* | The bind mount is missing or points somewhere else | Add the mount `/opt/romani/data → /data` and create `.romani-volume` on the host |
+| The app exits with *"The persistent volume is not mounted"* | The bind mount is missing or points somewhere else | Verify the expected existing production data directory and actual bind source/destination before repairing the mount. Never create a marker merely to bypass startup. For a separate isolated restore, follow the verified-target procedure in [OPERATIONS.md](OPERATIONS.md#full-recovery-set). |
 | `SQLITE_BUSY` / "database is locked" | The volume is on a filesystem without proper locking | Move `/data` to a local disk |
 | Login always fails | Credentials, inactive account or incomplete approved bootstrap | Check sanitized auth/bootstrap logs and use the owner-approved account recovery process; never wipe the data volume to fix login |
 | The expiry email never arrives | SMTP is not configured, or Gmail rejected the sender | Check `SMTP_PASS`, then press **Test connection** in Settings |
