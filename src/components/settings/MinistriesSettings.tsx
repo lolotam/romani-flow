@@ -23,7 +23,7 @@ export default function MinistriesSettings({
   return (
     <Card className="shadow-elegant">
       <CardHeader>
-        <CardTitle className="flex items-center space-x-2">
+        <CardTitle className="flex items-center gap-2">
           <Shield className="h-5 w-5" />
           <span>{t('settings.ministries.title')}</span>
         </CardTitle>
@@ -43,7 +43,7 @@ export default function MinistriesSettings({
           <div>
             <Label htmlFor="ministry_name_en">{t('settings.ministries.nameEnglish')}</Label>
             <Input
-              id="ministry_name_en"
+              id="ministry_name_en" dir="ltr"
               value={newMinistry.name}
               onChange={(e) => onNewMinistryChange({ ...newMinistry, name: e.target.value })}
               placeholder={t('settings.ministries.nameEnglishPlaceholder')}
@@ -63,7 +63,7 @@ export default function MinistriesSettings({
                   <p className="font-medium">{ministry.name_ar}</p>
                   <p className="text-sm text-muted-foreground">{ministry.name}</p>
                 </div>
-                <div className="flex space-x-2">
+                <div className="flex gap-2">
                   <Button size="sm" variant="outline" onClick={() => onEdit(ministry)}>
                     <Pencil className="h-4 w-4" />
                   </Button>

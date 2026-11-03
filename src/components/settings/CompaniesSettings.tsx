@@ -24,7 +24,7 @@ export default function CompaniesSettings({
   return (
     <Card className="shadow-elegant">
       <CardHeader>
-        <CardTitle className="flex items-center space-x-2">
+        <CardTitle className="flex items-center gap-2">
           <Building2 className="h-5 w-5" />
           <span>{t('settings.companies.title')}</span>
         </CardTitle>
@@ -44,7 +44,7 @@ export default function CompaniesSettings({
           <div>
             <Label htmlFor="company_name_en">{t('settings.companies.nameEnglish')}</Label>
             <Input
-              id="company_name_en"
+              id="company_name_en" dir="ltr"
               value={newCompany.name}
               onChange={(e) => onNewCompanyChange({ ...newCompany, name: e.target.value })}
               placeholder={t('settings.companies.nameEnglishPlaceholder')}
@@ -55,7 +55,7 @@ export default function CompaniesSettings({
           </div>
         </div>
         <div>
-          <Label htmlFor="company_description">{t('settings.companies.description')}</Label>
+          <Label htmlFor="company_description">{t('settings.companies.descriptionLabel')}</Label>
           <Textarea
             id="company_description"
             value={newCompany.description}
@@ -73,7 +73,7 @@ export default function CompaniesSettings({
                   <p className="font-medium">{company.name_ar}</p>
                   <p className="text-sm text-muted-foreground">{company.name}</p>
                 </div>
-                <div className="flex space-x-2">
+                <div className="flex gap-2">
                   <Button size="sm" variant="outline" onClick={() => onEdit(company)}>
                     <Pencil className="h-4 w-4" />
                   </Button>

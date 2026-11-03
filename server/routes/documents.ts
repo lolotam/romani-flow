@@ -10,6 +10,7 @@ import {
   type Row,
 } from '../repositories/base.js';
 import { getNumber } from '../repositories/settings.js';
+import { rememberSubmission } from '../repositories/formDefaults.js';
 import type { DocumentService } from '../services/documentService.js';
 import { documentStatus, normalizeDate } from '../utils/dates.js';
 
@@ -85,7 +86,8 @@ export function createDocumentsRouter(db: Db, documents: DocumentService): Route
         prepared.expiry_date = normalizeDate(prepared.expiry_date);
       }
 
-      const row = documents.createDocument(prepared, statusFor);
+      const row = documents.createDocument(prepared, statusFor,
+        (created) => rememberSubmission(db, req.user!.id, 'documents', created));
       // The envelope always carries a list, so the client's `insert()` contract
       // is the same for every resource.
       res.status(201).json({ data: [shape(row)], error: null });

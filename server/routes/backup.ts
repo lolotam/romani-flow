@@ -88,6 +88,7 @@ export function createBackupRouter(db: Db, documents: DocumentService): Router {
           db.prepare(`DELETE FROM "${table}"`).run();
         }
         db.prepare('DELETE FROM pending_uploads').run();
+        db.prepare('DELETE FROM form_defaults').run();
         db.prepare('DELETE FROM expiry_notifications').run();
 
         // The seed marker is written here as well: erasing the data must never

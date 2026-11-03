@@ -16,6 +16,8 @@ import { DocumentBeneficiaryFields } from './documents/DocumentBeneficiaryFields
 import { DocumentDateFields } from './documents/DocumentDateFields';
 import { saveDocument } from './documents/saveDocument';
 import { useStagedDocumentUpload } from './documents/useStagedDocumentUpload';
+import { useLastSubmissionRestore } from '@/hooks/useLastSubmission';
+import { restoreFormDate } from '@/lib/formDefaults';
 
 export function DocumentForm({
   uploadedFile,
@@ -57,6 +59,17 @@ export function DocumentForm({
   });
 
   const { stageFile, clearUpload } = useStagedDocumentUpload();
+  const formIsDirty = form.formState.isDirty;
+  useLastSubmissionRestore('documents', !editingDocument, (saved) => {
+    form.reset({ ...form.getValues(),
+      title: fileName ? fileName.replace(/\.[^/.]+$/, '') : String(saved.title ?? ''),
+      beneficiary_type: preselectedCompanyId ? 'company' : preselectedEmployeeId ? 'employee' : saved.employee_id ? 'employee' : 'company',
+      company_id: preselectedCompanyId ?? String(saved.company_id ?? ''),
+      employee_id: preselectedEmployeeId ?? String(saved.employee_id ?? ''),
+      document_type_id: String(saved.document_type_id ?? ''), ministry_id: String(saved.ministry_id ?? ''),
+      issue_date: restoreFormDate(saved.issue_date), expiry_date: restoreFormDate(saved.expiry_date), notes: String(saved.notes ?? ''),
+    });
+  }, () => !formIsDirty);
 
   const handleSubmit = async (data: DocumentFormData): Promise<boolean> => {
     if (submitting.current) return false;

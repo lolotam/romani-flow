@@ -6,6 +6,7 @@ import { isSmtpConfigured, loadConfig, validateConfig } from './config.js';
 import { closeDatabase, openDatabase } from './db/connection.js';
 import { runMigrations } from './db/migrator.js';
 import { defaultSeedFile, seedDatabase } from './db/seed.js';
+import { applyOwnerCatalogs } from './db/ownerCatalogs.js';
 import { CronService } from './services/cronService.js';
 import { DocumentService } from './services/documentService.js';
 import { Mailer } from './services/mailer.js';
@@ -80,6 +81,7 @@ async function main(): Promise<void> {
     adminEmails: config.adminSeedEmails,
     adminPassword: config.adminSeedPassword,
   });
+  applyOwnerCatalogs(db);
 
   if (seed.adminsCreated.length > 0) {
     console.log(`[server] created admin accounts: ${seed.adminsCreated.join(', ')}`);

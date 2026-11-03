@@ -134,6 +134,24 @@ whether SMTP is configured.
 
 ---
 
+## Saved form entries and catalogs
+
+Add forms restore the last successful submission for the signed-in account across
+devices. Unsaved changes and edits do not replace it. Uploaded files, record IDs,
+audit fields and credentials are never reused. An explicit employee/company context
+takes precedence when adding a document. Saved entries are private to that account,
+excluded from JSON data exports, and cleared when business data is erased.
+Deleting a source record also removes its saved form entry, including personal
+identifiers. Removed or renamed catalog references are not restored.
+
+The owner-approved bilingual companies, ministries and positions are added once
+after optional seed import. Existing catalog rows are preserved. Erasing business
+data does not cause these catalogs to be reinserted on the next restart.
+Catalog setup waits for the seed decision to be finalized (`system.seed_version=1`).
+For a deliberately empty installation, the setup operator must explicitly finalize
+that decision; simply omitting an optional seed does not finalize it or prevent a
+later import.
+
 ## First administrators
 
 There is no built-in account and no default password. On the first start of an

@@ -12,6 +12,7 @@ import {
 } from '../repositories/base.js';
 import { asyncHandler } from '../middleware/errorHandler.js';
 import { requireAdmin } from '../middleware/auth.js';
+import { rememberSubmission } from '../repositories/formDefaults.js';
 
 /**
  * Generic CRUD router.
@@ -94,11 +95,21 @@ export function createResourceRouter(
       const payload = readPayload(req);
       const records = Array.isArray(payload) ? payload : [payload];
 
-      const inserted = records.map((record) => {
-        assertNoManagedFields(record, options.managedFields ?? [], tableName);
-        const prepared = options.transformWrite ? options.transformWrite(record, db) : record;
-        return insertRow(db, tableName, prepared);
-      });
+      let inserted: Row[];
+      db.exec('BEGIN');
+      try {
+        inserted = records.map((record) => {
+          assertNoManagedFields(record, options.managedFields ?? [], tableName);
+          const prepared = options.transformWrite ? options.transformWrite(record, db) : record;
+          const row = insertRow(db, tableName, prepared);
+          rememberSubmission(db, req.user!.id, tableName, shape(row));
+          return row;
+        });
+        db.exec('COMMIT');
+      } catch (error) {
+        db.exec('ROLLBACK');
+        throw error;
+      }
 
       // The rows are shaped on the way out, exactly like a GET would do them, so
       // the client sees the same column types no matter how it created the row.

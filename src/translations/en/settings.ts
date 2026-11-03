@@ -81,6 +81,7 @@ export const settings = {
 
   // Companies Management
   companies: {
+    descriptionLabel: 'Company description',
     title: 'Companies Management',
     description: 'Add and manage companies in the system',
     addNew: 'Add New Company',
@@ -146,6 +147,7 @@ export const settings = {
   },
 
   // Backup Settings
+  appearance: { title: 'Appearance', description: 'Customize the system appearance', darkMode: 'Dark mode', darkModeDescription: 'Enable or disable dark mode' },
   backup: {
     title: 'Backup & Restore',
     description: 'Manage data backup and restoration',
@@ -160,19 +162,19 @@ export const settings = {
     backupDescription: 'Export all system data to JSON file',
     exportBackup: 'Export Backup',
     restoreSection: 'Data Restore',
-    restoreDescription: 'Import data from backup file',
+    restoreDescription: 'Backup restore is currently unavailable. You can export your data from the adjacent section.',
     chooseFile: 'Choose File',
     importBackup: 'Import Backup',
     automaticBackups: 'Automatic Backups',
     dailyBackups: 'Daily Backups',
-    dailyBackupsDesc: 'Keep only the last two backups',
+    dailyBackupsDesc: 'Currently unavailable; automatic backups are not created.',
     backupNotifications: 'Backup Notifications',
-    backupNotificationsDesc: 'Send confirmation via email',
+    backupNotificationsDesc: 'Currently unavailable; backup confirmation emails are not sent.',
     eraseData: 'Erase All Data',
     eraseDataDescription: 'Permanently delete all data from the database. This action cannot be undone.',
     eraseButton: 'Erase All Data',
     eraseConfirmTitle: 'Are you absolutely sure?',
-    eraseConfirmDescription: 'This will permanently delete ALL data including companies, employees, documents, and settings. This action cannot be undone. Please type "DELETE ALL" to confirm.',
+    eraseConfirmDescription: 'This permanently deletes business data and saved form defaults. Accounts and system settings remain. Type "DELETE ALL" to confirm.',
     eraseConfirmPlaceholder: 'Type DELETE ALL',
     eraseCancel: 'Cancel',
     eraseConfirmButton: 'Yes, Erase Everything',

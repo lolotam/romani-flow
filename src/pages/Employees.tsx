@@ -1,3 +1,4 @@
+import { useLastSubmissionState } from '@/hooks/useLastSubmission';
 import { useState, useEffect, useMemo } from 'react';
 import { motion } from 'framer-motion';
 import { Card, CardContent } from '@/components/ui/card';
@@ -327,7 +328,7 @@ export default function Employees() {
     fetchData();
   }, [toast]);
 
-  const [formData, setFormData] = useState<EmployeeFormState>(EMPTY_EMPLOYEE_FORM);
+  const [formData, setFormData] = useLastSubmissionState<EmployeeFormState>('employees', EMPTY_EMPLOYEE_FORM, isAddDialogOpen);
 
   const updateFormData = (patch: Partial<EmployeeFormState>) => {
     setFormData(prev => ({ ...prev, ...patch }));

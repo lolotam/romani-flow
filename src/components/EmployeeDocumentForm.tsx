@@ -14,6 +14,8 @@ import { api, type Document, type DocumentType, type Ministry } from '@/lib/api'
 import { useStagedDocumentUpload } from './documents/useStagedDocumentUpload';
 import { toast } from 'sonner';
 import { useLanguage } from '@/contexts/LanguageContext';
+import { useLastSubmissionRestore } from '@/hooks/useLastSubmission';
+import { restoreFormDate } from '@/lib/formDefaults';
 
 const emptyForm = {
   title: '', document_type_id: '', ministry_id: '',
@@ -43,6 +45,13 @@ export function EmployeeDocumentForm({
   const submitting = useRef(false);
   
   const [formData, setFormData] = useState(emptyForm);
+  const dirty = useRef(false);
+  useEffect(() => { if (isOpen) dirty.current = false; }, [isOpen, employeeId]);
+  useLastSubmissionRestore('documents', isOpen, (saved) => {
+    setFormData({ title: uploadedFile ? uploadedFile.name.replace(/\.[^/.]+$/, '') : String(saved.title ?? ''),
+      document_type_id: String(saved.document_type_id ?? ''), ministry_id: String(saved.ministry_id ?? ''),
+      issue_date: restoreFormDate(saved.issue_date) ?? null, expiry_date: restoreFormDate(saved.expiry_date) ?? null, notes: String(saved.notes ?? '') });
+  }, () => !dirty.current);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -70,6 +79,11 @@ export function EmployeeDocumentForm({
       }));
     }
   }, [isOpen, uploadedFile]);
+
+  const editForm = (patch: Partial<typeof emptyForm>) => {
+    dirty.current = true;
+    setFormData(current => ({ ...current, ...patch }));
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -144,7 +158,7 @@ export function EmployeeDocumentForm({
               <Input
                 id="title"
                 value={formData.title}
-                onChange={(e) => setFormData(prev => ({ ...prev, title: e.target.value }))}
+                onChange={(e) => editForm({ title: e.target.value })}
                 placeholder={t('documents.form.titlePlaceholder')}
                 required
               />
@@ -154,7 +168,7 @@ export function EmployeeDocumentForm({
               <Label htmlFor="document_type_id">{t('documents.form.documentType')} *</Label>
               <Select
                 value={formData.document_type_id}
-                onValueChange={(value) => setFormData(prev => ({ ...prev, document_type_id: value }))}
+                onValueChange={(value) => editForm({ document_type_id: value })}
                 required
               >
                 <SelectTrigger>
@@ -174,7 +188,7 @@ export function EmployeeDocumentForm({
               <Label htmlFor="ministry_id">{t('documents.form.ministry')}</Label>
               <Select
                 value={formData.ministry_id}
-                onValueChange={(value) => setFormData(prev => ({ ...prev, ministry_id: value }))}
+                onValueChange={(value) => editForm({ ministry_id: value })}
               >
                 <SelectTrigger>
                   <SelectValue placeholder={t('documents.form.selectMinistry')} />
@@ -209,7 +223,7 @@ export function EmployeeDocumentForm({
                   <Calendar
                     mode="single"
                     selected={formData.issue_date || undefined}
-                    onSelect={(date) => setFormData(prev => ({ ...prev, issue_date: date || null }))}
+                    onSelect={(date) => editForm({ issue_date: date || null })}
                     initialFocus
                   />
                 </PopoverContent>
@@ -236,7 +250,7 @@ export function EmployeeDocumentForm({
                   <Calendar
                     mode="single"
                     selected={formData.expiry_date || undefined}
-                    onSelect={(date) => setFormData(prev => ({ ...prev, expiry_date: date || null }))}
+                    onSelect={(date) => editForm({ expiry_date: date || null })}
                     initialFocus
                   />
                 </PopoverContent>
@@ -248,7 +262,7 @@ export function EmployeeDocumentForm({
               <Textarea
                 id="notes"
                 value={formData.notes}
-                onChange={(e) => setFormData(prev => ({ ...prev, notes: e.target.value }))}
+                onChange={(e) => editForm({ notes: e.target.value })}
                 placeholder={t('documents.form.notesPlaceholder')}
                 rows={3}
               />
