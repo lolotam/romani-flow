@@ -57,6 +57,7 @@ temp/
 server-dist/
 
 # Local runtime data (SQLite database and the file bucket)
+/data/seed.json
 data/romani.db
 data/romani.db-wal
 data/romani.db-shm
