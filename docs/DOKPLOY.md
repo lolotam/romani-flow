@@ -132,7 +132,14 @@ is configured.
 
 ## 6. First boot
 
-Deploy and watch the logs. A healthy first boot prints:
+The image builds without `data/seed.json` and contains no seed payload. An empty
+database starts with empty business tables when no seed file is mounted. To import
+an owner-approved seed on first boot, prepare it through a private transfer and
+mount that file read-only at `/app/data/seed.json`. Never commit a personal-data
+seed or copy it into the image. Review the import and administrator bootstrap
+before starting the backend; normal startup migrates, seeds and arms the scheduler.
+
+Deploy and watch the logs. A healthy first boot with an approved seed mounted prints:
 
 ```
 [server] environment : production

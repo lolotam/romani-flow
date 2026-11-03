@@ -45,6 +45,8 @@ coverage/
 logs
 
 # Runtime data
+data/
+.playwright-mcp/
 pids
 *.pid
 *.seed

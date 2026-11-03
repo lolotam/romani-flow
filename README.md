@@ -213,7 +213,7 @@ silently writing into a container directory that disappears with the next deploy
 │   ├── pages/               # screens
 │   └── types/               # shared types
 ├── docs/                    # SPEC.md, IMPLEMENTATION_PLAN.md, DOKPLOY.md
-└── data/seed.json           # the reference data imported on first boot
+└── data/seed.json           # optional private seed; mount read-only in production
 ```
 
 No source file exceeds **500 lines**; `npm run check:sizes` enforces it. The
