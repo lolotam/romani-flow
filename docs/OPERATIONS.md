@@ -97,6 +97,30 @@ Never start a restored production copy with outbound networking or SMTP credenti
 merely to prove recovery. Environment secrets require a separate owner-managed
 secure recovery source; they are deliberately absent from the backup.
 
+The recovery CLI copies only the manifest-listed database and attachments. It
+deliberately does **not** copy `.romani-volume`. Before testing the normal
+production entrypoint against a restored tree, the operator must first verify
+that the canonical host target is the newly approved isolated restore directory,
+not `/opt/romani/data` or any production mount. Inspect the container's bind-mount
+source and destination and verify that `/data` resolves to that isolated tree.
+Only after those checks, create an empty `.romani-volume` **in that isolated host
+tree**, owned by uid/gid 1001 with mode 0600, and verify it is a readable regular
+file from the isolated container as uid 1001. Do not create it in the image layer,
+on an unverified mount, or on production merely to bypass a startup failure. If
+the target/mount cannot be established, stop the isolated boot and investigate;
+never disable `server/index.ts`'s production volume guard. Keep outbound network,
+SMTP and scheduling disabled during this isolated production-mode boot.
+
+Evidence provenance: the recorded restored-app proof used `NODE_ENV=test`, a
+fresh test-only JWT key and direct `createApp` construction from the compiled
+modules, rather than the `server/index.ts` entrypoint. Its restored bind mount was
+`/isolated`, the container ran as uid/gid 1001 with `--network none` and a read-only
+image, and only the copied database's email/cron flags were disabled. It proved
+preserved password authentication and attachment retrieval, not the production
+volume-marker/bootstrap guard. No marker was created by that proof. The operator
+step above is required for a future normal production-entrypoint restore check;
+this documentation correction does not claim that check was executed.
+
 Verify restored account hashes without printing them, then use the designated
 credentials for login in the isolated instance. Download a restored attachment and
 compare its SHA256. Preserve the source backup and production database. Promoting
