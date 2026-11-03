@@ -138,6 +138,9 @@ export const documents = {
 
     // Validation messages
     validation: {
+      reviewFields: 'Review the errors shown in the form fields before saving.',
+      noDocumentTypes: 'Add a document type in Settings first, then return to save the document.',
+      noEmployees: 'No employees are available. Add an employee first or select a company beneficiary.',
       titleMinLength: 'Document title must be at least 3 characters',
       titleMaxLength: 'Document title must not exceed 120 characters',
       beneficiaryTypeRequired: 'Beneficiary type is required',

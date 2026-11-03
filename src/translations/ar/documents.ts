@@ -138,6 +138,9 @@ export const documents = {
 
     // Validation messages
     validation: {
+      reviewFields: 'راجع الأخطاء الموضحة في حقول النموذج قبل الحفظ.',
+      noDocumentTypes: 'أضف نوع وثيقة من الإعدادات أولًا، ثم ارجع لإكمال الحفظ.',
+      noEmployees: 'لا يوجد موظفون. أضف موظفًا أولًا أو اختر شركة كمستفيد.',
       titleMinLength: 'عنوان الوثيقة يجب أن يكون 3 أحرف على الأقل',
       titleMaxLength: 'عنوان الوثيقة يجب ألا يزيد عن 120 حرف',
       beneficiaryTypeRequired: 'نوع المستفيد مطلوب',

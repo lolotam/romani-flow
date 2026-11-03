@@ -9,30 +9,16 @@ export const createDocumentSchema = (t: (key: string) => string) => z.object({
   document_type_id: z.string().optional(),
   ministry_id: z.string().optional(),
   entity_name: z.string().optional(),
-  issue_date: z.date().optional(),
-  expiry_date: z.date({ required_error: t('documents.form.validation.expiryDateRequired') }),
   notes: z.string().optional(),
-}).refine((data) => {
-  // Company validation
-  if (data.beneficiary_type === 'company') {
-    return data.company_id && data.ministry_id && data.document_type_id;
+}).superRefine((data, ctx) => {
+  // Attach required-field errors to rendered controls, never an invisible root error.
+  const required = data.beneficiary_type === 'company'
+    ? ['company_id', 'ministry_id', 'document_type_id'] as const
+    : ['employee_id', 'document_type_id'] as const;
+  for (const field of required) {
+    if (!data[field]?.trim()) ctx.addIssue({ code: z.ZodIssueCode.custom,
+      message: t('documents.form.validation.allFieldsRequired'), path: [field] });
   }
-  // Employee validation  
-  if (data.beneficiary_type === 'employee') {
-    return data.employee_id && data.document_type_id;
-  }
-  return false;
-}, {
-  message: t('documents.form.validation.allFieldsRequired'),
-}).refine((data) => {
-  // Date validation - expiry date should be >= issue date
-  if (data.issue_date && data.expiry_date) {
-    return data.expiry_date >= data.issue_date;
-  }
-  return true;
-}, {
-  message: t('documents.form.validation.invalidDateRange'),
-  path: ['expiry_date']
 }).refine((data) => {
   // Entity name required when ministry is "أخرى"
   if (data.ministry_id && data.ministry_id === 'other') {
@@ -42,6 +28,19 @@ export const createDocumentSchema = (t: (key: string) => string) => z.object({
 }, {
   message: t('documents.form.validation.entityNameRequired'),
   path: ['entity_name']
+}).and(z.object({
+  // Parse dates independently so missing dates do not suppress selection errors.
+  issue_date: z.date().optional(),
+  expiry_date: z.date({ required_error: t('documents.form.validation.expiryDateRequired') }),
+})).refine((data) => {
+  // Date validation - expiry date should be >= issue date
+  if (data.issue_date && data.expiry_date) {
+    return data.expiry_date >= data.issue_date;
+  }
+  return true;
+}, {
+  message: t('documents.form.validation.invalidDateRange'),
+  path: ['expiry_date']
 });
 
 export type DocumentFormData = z.infer<ReturnType<typeof createDocumentSchema>>;
