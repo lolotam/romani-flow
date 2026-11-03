@@ -110,7 +110,7 @@ ones:
 | `SMTP_USER` | **yes** (for mail) | — | the sender account |
 | `SMTP_PASS` | **yes** (for mail) | — | the Gmail **app password** |
 | `SMTP_FROM` | **yes** (for mail) | — | the sender shown to recipients, e.g. `ROMANI Flow <sender@example.com>` |
-| `TZ` | no | `Asia/Kuwait` | the timezone the daily job runs in |
+| `TZ` | no | Compose: `Asia/Kuwait`; direct Node/Dockerfile: process/container timezone | the daily job's process timezone; the Compose default does not configure direct deployments |
 | `MAX_UPLOAD_MB` | no | `25` | the upload size cap |
 | `MAX_EMAIL_ATTACHMENT_MB` | no | `20` | the attachment cap, kept under Gmail's 25 MB ceiling |
 

@@ -57,11 +57,18 @@ designated mailbox/relay before retrying to avoid duplicates. Failed reminders
 remain retryable; a successful automated day is deduplicated. Selection is based
 on enabled intervals and due dates, not on the mere existence of a document.
 
-The scheduler runs inside the single API process. It uses the process timezone;
-the observed production schedule is `0 8 * * *` with next execution reported as
-08:00 UTC (11:00 Kuwait) at the readiness check. Preserve this cadence/timezone
-unless the owner requests a change. The API next-run value comes from the actual
-scheduler, not a hand-calculated daily estimate. A manual report is not proof that
+The scheduler runs inside the single API process. It uses the process timezone.
+Production's configured expression is `0 8 * * *`; a separate read-only runtime
+check resolved the actual process timezone as `UTC`. This is a direct
+Dockerfile/Node deployment, so Compose's `TZ=Asia/Kuwait` default does not apply.
+The pre-fix API reported 08:00Z (11:00 Kuwait) using the old estimate; that response
+is not proof of the next actual timer execution. Preserve the existing expression
+and runtime timezone, without changing deployment configuration. After releasing
+the scheduler fix, re-read the engine-derived API nextRun and record it separately.
+With Compose's actual Asia/Kuwait setting, the same expression instead means
+08:00 Kuwait (05:00Z); never infer deployment mode from `.env.example` alone.
+The fixed API next-run value comes from the actual scheduler, not a hand-calculated
+daily estimate. A manual report is not proof that
 the scheduler fired. An accelerated isolated timer test proves local scheduler
 execution only; record production observations separately.
 
