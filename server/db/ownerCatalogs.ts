@@ -70,6 +70,8 @@ WHERE NOT EXISTS (SELECT 1 FROM positions WHERE trim(name_ar)='مدير مبيع
 
 /** Apply owner catalogs after optional private import, once, without replacing existing rows. */
 export function applyOwnerCatalogs(db: Db): void {
+  // A missing optional seed must remain importable until the operator finalizes that decision.
+  if (getSetting(db, 'system.seed_version') !== '1') return;
   if (getSetting(db, 'system.owner_catalog_version') === '1') return;
   db.exec('BEGIN');
   try {

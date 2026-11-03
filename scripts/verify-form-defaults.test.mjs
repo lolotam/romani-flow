@@ -1,3 +1,5 @@
+import {setSetting} from '../server/repositories/settings.ts';
+import {seedDatabase} from '../server/db/seed.ts';
 import {applyOwnerCatalogs} from '../server/db/ownerCatalogs.ts';
 ﻿import assert from 'node:assert/strict';
 import { before, after, test } from 'node:test';
@@ -21,7 +23,7 @@ const config=loadConfig({NODE_ENV:'test',JWT_SECRET:randomBytes(32).toString('he
 const accounts=['actor-a','actor-b'].map((id,i)=>({id,email:`actor${i}@example.invalid`,name:'Test admin',role:'admin'}));
 let base,server;
 before(async()=>{
- runMigrations(db,path.resolve('server/db/migrations'));applyOwnerCatalogs(db);
+ runMigrations(db,path.resolve('server/db/migrations'));setSetting(db,'system.seed_version','1');applyOwnerCatalogs(db);
  for(const user of accounts)db.prepare('INSERT INTO admin_users (id,email,name,role,password_hash,created_at,updated_at) VALUES (?,?,?,?,?,?,?)').run(user.id,user.email,user.name,user.role,'unused-fixture-hash','2026-01-01','2026-01-01');
  const storage=new StorageService(dir);storage.ensureDirectories();const mailer=new Mailer(config);const cron=new CronService(db,mailer);const documents=new DocumentService(db,storage);
  server=createApp({config,db,mailer,cron,storage,documents,staticDir:dir}).listen(0,'127.0.0.1');
@@ -70,6 +72,7 @@ test('document defaults omit files and do not change on failed upload claim',asy
 test('catalog setup preserves a previously imported owner row',()=>{
  const other=new DatabaseSync(':memory:');try{
  runMigrations(other,path.resolve('server/db/migrations'));
+ setSetting(other,'system.seed_version','1');
  const old=insertRow(other,'companies',{name:'curemed',name_ar:'Existing owner label',description:'Keep this description'});
  applyOwnerCatalogs(other);
  assert.equal(other.prepare('SELECT count(*) n FROM companies').get().n,2);
@@ -94,4 +97,38 @@ test('deleted catalog references are not restored into a new document form',asyn
  db.prepare('DELETE FROM ministries WHERE id=?').run(ministry.id);
  const defaults=(await call('/api/form-defaults/documents')).payload.data;
  assert.equal('ministry_id' in defaults,false);assert.equal(defaults.title,'Reference fixture');
+});
+test('all catalog add request objects are accepted and remembered',async()=>{
+ const payloads={companies:{name:'Fixture company',name_ar:'Fixture company AR'},ministries:{name:'Fixture ministry',name_ar:'Fixture ministry AR'},positions:{name:'Fixture position',name_ar:'Fixture position AR',value:'fixture-position'},document_types:{name:'Fixture document type',name_ar:'Fixture document type AR'}};
+ for(const [table,body] of Object.entries(payloads)){
+  const result=await call('/api/'+(table==='document_types'?'document-types':table),{method:'POST',body});assert.equal(result.status,201,table);
+  assert.equal((await call('/api/form-defaults/'+table)).payload.data.name,body.name);
+ }
+});
+test('renamed or removed positions are cleared from employee defaults',async()=>{
+ const company=db.prepare('SELECT id FROM companies LIMIT 1').get().id;
+ const position=db.prepare('SELECT id,value FROM positions LIMIT 1').get();
+ const result=await call('/api/employees',{method:'POST',body:{name:'Position fixture',company_id:company,position:position.value}});assert.equal(result.status,201);
+ db.prepare('UPDATE positions SET value=? WHERE id=?').run('renamed-fixture-value',position.id);
+ assert.equal('position' in (await call('/api/form-defaults/employees')).payload.data,false);
+ db.prepare('UPDATE positions SET value=? WHERE id=?').run(position.value,position.id);
+});
+test('deleting an employee removes retained identity data as well as the record',async()=>{
+ const company=db.prepare('SELECT id FROM companies LIMIT 1').get().id;
+ const result=await call('/api/employees',{actor:1,method:'POST',body:{name:'Retention fixture',company_id:company,civil_id_no:'fixture-id-not-real',email:'fixture@example.invalid'}});assert.equal(result.status,201);
+ assert.equal((await call('/api/form-defaults/employees',{actor:1})).payload.data.civil_id_no,'fixture-id-not-real');
+ assert.equal((await call('/api/employees/'+result.payload.data[0].id,{actor:1,method:'DELETE'})).status,200);
+ assert.deepEqual((await call('/api/form-defaults/employees',{actor:1})).payload.data,{});
+ assert.equal(db.prepare('SELECT count(*) n FROM form_defaults WHERE user_id=? AND form_key=?').get(accounts[1].id,'employees').n,0);
+});
+test('a missing optional seed stays importable after a later restart',async()=>{
+ const other=new DatabaseSync(':memory:');const file=path.join(dir,'late-synthetic-seed.json');
+ try{
+ runMigrations(other,path.resolve('server/db/migrations'));
+ const missing=await seedDatabase(other,{seedFile:file,adminEmails:[],adminPassword:null});assert.equal(missing.seedApplied,false);
+ applyOwnerCatalogs(other);assert.equal(other.prepare('SELECT count(*) n FROM companies').get().n,0);
+ fs.writeFileSync(file,JSON.stringify({companies:[{id:'late-seed-fixture',name:'Imported fixture',name_ar:'Imported fixture AR'}]}));
+ const imported=await seedDatabase(other,{seedFile:file,adminEmails:[],adminPassword:null});assert.equal(imported.seedApplied,true);
+ applyOwnerCatalogs(other);assert.equal(other.prepare('SELECT count(*) n FROM companies').get().n,3);
+ }finally{other.close();}
 });

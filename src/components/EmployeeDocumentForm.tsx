@@ -80,6 +80,11 @@ export function EmployeeDocumentForm({
     }
   }, [isOpen, uploadedFile]);
 
+  const editForm = (patch: Partial<typeof emptyForm>) => {
+    dirty.current = true;
+    setFormData(current => ({ ...current, ...patch }));
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (submitting.current) return;
@@ -146,14 +151,14 @@ export function EmployeeDocumentForm({
           </DialogDescription>
         </DialogHeader>
 
-        <form onSubmit={handleSubmit} onChangeCapture={() => { dirty.current = true; }} onPointerDownCapture={() => { dirty.current = true; }} className="space-y-6">
+        <form onSubmit={handleSubmit} className="space-y-6">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div className="md:col-span-2">
               <Label htmlFor="title">{t('documents.form.title')} *</Label>
               <Input
                 id="title"
                 value={formData.title}
-                onChange={(e) => setFormData(prev => ({ ...prev, title: e.target.value }))}
+                onChange={(e) => editForm({ title: e.target.value })}
                 placeholder={t('documents.form.titlePlaceholder')}
                 required
               />
@@ -163,7 +168,7 @@ export function EmployeeDocumentForm({
               <Label htmlFor="document_type_id">{t('documents.form.documentType')} *</Label>
               <Select
                 value={formData.document_type_id}
-                onValueChange={(value) => setFormData(prev => ({ ...prev, document_type_id: value }))}
+                onValueChange={(value) => editForm({ document_type_id: value })}
                 required
               >
                 <SelectTrigger>
@@ -183,7 +188,7 @@ export function EmployeeDocumentForm({
               <Label htmlFor="ministry_id">{t('documents.form.ministry')}</Label>
               <Select
                 value={formData.ministry_id}
-                onValueChange={(value) => setFormData(prev => ({ ...prev, ministry_id: value }))}
+                onValueChange={(value) => editForm({ ministry_id: value })}
               >
                 <SelectTrigger>
                   <SelectValue placeholder={t('documents.form.selectMinistry')} />
@@ -218,7 +223,7 @@ export function EmployeeDocumentForm({
                   <Calendar
                     mode="single"
                     selected={formData.issue_date || undefined}
-                    onSelect={(date) => setFormData(prev => ({ ...prev, issue_date: date || null }))}
+                    onSelect={(date) => editForm({ issue_date: date || null })}
                     initialFocus
                   />
                 </PopoverContent>
@@ -245,7 +250,7 @@ export function EmployeeDocumentForm({
                   <Calendar
                     mode="single"
                     selected={formData.expiry_date || undefined}
-                    onSelect={(date) => setFormData(prev => ({ ...prev, expiry_date: date || null }))}
+                    onSelect={(date) => editForm({ expiry_date: date || null })}
                     initialFocus
                   />
                 </PopoverContent>
@@ -257,7 +262,7 @@ export function EmployeeDocumentForm({
               <Textarea
                 id="notes"
                 value={formData.notes}
-                onChange={(e) => setFormData(prev => ({ ...prev, notes: e.target.value }))}
+                onChange={(e) => editForm({ notes: e.target.value })}
                 placeholder={t('documents.form.notesPlaceholder')}
                 rows={3}
               />

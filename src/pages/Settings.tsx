@@ -102,7 +102,7 @@ export default function Settings() {
   // Companies
   const addCompany = () => {
     if (!validateRequired(newCompany.name, newCompany.name_ar)) return;
-    crudAction(async () => { const { error } = await api.insert('companies', [{ name: newCompany.name, name_ar: newCompany.name_ar, description: newCompany.description }]); if (error) throw error; }, 'companyAdded', 'companyAddError');
+    crudAction(async () => { const { error } = await api.insert('companies', { name: newCompany.name, name_ar: newCompany.name_ar, description: newCompany.description }); if (error) throw error; }, 'companyAdded', 'companyAddError');
   };
   const updateCompany = () => {
     if (!editingCompany || !validateRequired(editingCompany.name, editingCompany.name_ar)) return;
@@ -116,7 +116,7 @@ export default function Settings() {
   // Document Types
   const addDocumentType = () => {
     if (!validateRequired(newDocType.name, newDocType.name_ar)) return;
-    crudAction(async () => { const { error } = await api.insert('document_types', [newDocType]); if (error) throw error; }, 'documentTypeAdded', 'documentTypeAddError');
+    crudAction(async () => { const { error } = await api.insert('document_types', newDocType); if (error) throw error; }, 'documentTypeAdded', 'documentTypeAddError');
   };
   const updateDocumentType = () => {
     if (!editingDocType || !validateRequired(editingDocType.name, editingDocType.name_ar)) return;
@@ -130,7 +130,7 @@ export default function Settings() {
   // Ministries
   const addMinistry = () => {
     if (!validateRequired(newMinistry.name, newMinistry.name_ar)) return;
-    crudAction(async () => { const { error } = await api.insert('ministries', [newMinistry]); if (error) throw error; }, 'ministryAdded', 'ministryAddError');
+    crudAction(async () => { const { error } = await api.insert('ministries', newMinistry); if (error) throw error; }, 'ministryAdded', 'ministryAddError');
   };
   const updateMinistry = () => {
     if (!editingMinistry || !validateRequired(editingMinistry.name, editingMinistry.name_ar)) return;
@@ -144,7 +144,7 @@ export default function Settings() {
   // Positions
   const addPosition = () => {
     if (!validateRequired(newPosition.name, newPosition.name_ar, newPosition.value)) return;
-    crudAction(async () => { const { error } = await api.insert('positions', [newPosition]); if (error) throw error; }, 'positionAdded', 'positionAddError');
+    crudAction(async () => { const { error } = await api.insert('positions', newPosition); if (error) throw error; }, 'positionAdded', 'positionAddError');
   };
   const updatePosition = () => {
     if (!editingPosition || !validateRequired(editingPosition.name, editingPosition.name_ar, editingPosition.value)) return;

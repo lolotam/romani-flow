@@ -47,8 +47,8 @@ export default function BackupSettings({ onExportBackup, onEraseAllData }: Backu
             <h3 className="text-lg font-semibold">{t('settings.backup.restoreSection')}</h3>
             <p className="text-sm text-muted-foreground">{t('settings.backup.restoreDescription')}</p>
             <div className="space-y-2">
-              <Input type="file" accept=".json" />
-              <Button className="w-full" variant="outline">
+              <Input type="file" accept=".json" disabled />
+              <Button className="w-full" variant="outline" disabled>
                 <Upload className="h-4 w-4 me-2" />
                 {t('settings.backup.importBackup')}
               </Button>
@@ -64,14 +64,14 @@ export default function BackupSettings({ onExportBackup, onEraseAllData }: Backu
                 <p className="font-medium">{t('settings.backup.dailyBackups')}</p>
                 <p className="text-sm text-muted-foreground">{t('settings.backup.dailyBackupsDesc')}</p>
               </div>
-              <Switch defaultChecked />
+              <Switch checked={false} disabled aria-label={t('settings.backup.dailyBackups')} />
             </div>
             <div className="flex items-center justify-between p-3 bg-muted/50 rounded-lg">
               <div>
                 <p className="font-medium">{t('settings.backup.backupNotifications')}</p>
                 <p className="text-sm text-muted-foreground">{t('settings.backup.backupNotificationsDesc')}</p>
               </div>
-              <Switch defaultChecked />
+              <Switch checked={false} disabled aria-label={t('settings.backup.backupNotifications')} />
             </div>
           </div>
         </div>
