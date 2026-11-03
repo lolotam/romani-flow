@@ -16,6 +16,7 @@
     "check:sizes": "node scripts/check-file-sizes.mjs",
     "verify:api": "node scripts/verify-api.mjs",
     "test:config": "node --import tsx --test scripts/verify-config.test.mjs",
+    "test:operations": "node --import tsx --test scripts/verify-operations.test.mjs",
     "test:forms": "node --import tsx --test scripts/verify-form-defaults.test.mjs scripts/verify-settings-translations.test.mjs scripts/verify-document-validation.test.mjs",
     "lint": "eslint . && npm run check:sizes",
     "preview": "vite preview"

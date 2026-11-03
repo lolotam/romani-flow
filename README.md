@@ -154,6 +154,10 @@ later import.
 
 ## First administrators
 
+For daily document operations, notification evidence, full SQLite/attachment
+backup and isolated recovery, see [the operating guide](docs/OPERATIONS.md).
+The finite operational acceptance ledger is [GOAL B readiness](docs/READINESS.md).
+
 There is no built-in account and no default password. On the first start of an
 empty database the server creates the administrators named in
 `ADMIN_SEED_EMAILS` (comma-separated) with the password in

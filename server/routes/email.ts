@@ -7,7 +7,7 @@ import { findRow, type Row } from '../repositories/base.js';
 import { getBoolean, getNumber, getRawList, getString, getStringList } from '../repositories/settings.js';
 import type { Mailer } from '../services/mailer.js';
 import type { CronService } from '../services/cronService.js';
-import { collectExpiring, startEmailAttempt, finishEmailAttempt, writeEmailLog } from '../services/expiryService.js';
+import { collectExpiring, startEmailAttempt, finishEmailAttempt } from '../services/expiryService.js';
 import { parseIntervals } from '../services/intervals.js';
 import { documentEmailHtml, documentEmailText } from '../services/templates/index.js';
 import type { StorageService } from '../services/storageService.js';
@@ -93,8 +93,12 @@ export function createEmailRouter(
         return;
       }
 
+      const logId = startEmailAttempt(db, {
+        kind: 'test', recipients, subject: 'ROMANI Flow — SMTP test', details: { invalid },
+      });
       const verification = await mailer.verify();
       if (!verification.ok) {
+        finishEmailAttempt(db, logId, { status: 'failed', error: verification.message });
         res.status(502).json({
           data: null,
           error: { message: verification.message, code: 'smtp_unavailable' },
@@ -103,31 +107,28 @@ export function createEmailRouter(
       }
 
       try {
-        await mailer.send({
+        const result = await mailer.send({
           to: recipients,
           subject: 'ROMANI Flow — SMTP test',
           text: 'This is a test message from ROMANI Flow. SMTP is configured correctly.',
           html: '<p style="font-family:Segoe UI,Arial,sans-serif">This is a test message from <strong>ROMANI Flow</strong>. SMTP is configured correctly.</p>',
         });
 
-        writeEmailLog(db, {
-          kind: 'test',
-          recipients,
-          subject: 'ROMANI Flow — SMTP test',
-          status: 'sent',
-          details: { invalid },
+        finishEmailAttempt(db, logId, {
+          status: result.status,
+          error: result.rejected.length ? 'Some recipients were rejected by the relay.' : undefined,
+          details: { invalid, messageId: result.messageId, accepted: result.accepted, rejected: result.rejected },
         });
 
-        res.json({ data: { sent: true, recipients, invalid }, error: null });
+        if (result.status === 'partial') {
+          res.status(502).json({ data: { sent: false, status: result.status },
+            error: { message: 'The relay did not accept every test recipient.', code: 'partial_delivery' } });
+          return;
+        }
+        res.json({ data: { sent: true, recipients, invalid, messageId: result.messageId }, error: null });
       } catch (error) {
         const detail = error instanceof Error ? error.message : String(error);
-        writeEmailLog(db, {
-          kind: 'test',
-          recipients,
-          subject: 'ROMANI Flow — SMTP test',
-          status: 'failed',
-          error: detail,
-        });
+        finishEmailAttempt(db, logId, { status: 'failed', error: detail });
         res.status(502).json({ data: null, error: { message: detail, code: 'send_failed' } });
       }
     }),
@@ -160,6 +161,7 @@ export function createEmailRouter(
 
   router.post(
     '/expiry-report',
+    requireAdmin,
     asyncHandler(async (_req, res) => {
       const result = await cron.run('manual');
       res.json({

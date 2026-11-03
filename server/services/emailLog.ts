@@ -66,11 +66,12 @@ export function startEmailAttempt(db: Db, entry: EmailLogDraft): string {
 export function finishEmailAttempt(
   db: Db,
   logId: string,
-  outcome: { status: string; error?: string },
+  outcome: { status: string; error?: string; details?: unknown },
 ): void {
-  db.prepare('UPDATE email_log SET status = ?, error = ? WHERE id = ?').run(
+  db.prepare('UPDATE email_log SET status = ?, error = ?, details = COALESCE(?, details) WHERE id = ?').run(
     outcome.status,
     outcome.error ?? null,
+    outcome.details === undefined ? null : JSON.stringify(outcome.details),
     logId,
   );
 }
