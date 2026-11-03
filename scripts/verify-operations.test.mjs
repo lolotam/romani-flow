@@ -198,7 +198,11 @@ test('consistent backup restores real login and attachment bytes in a separate a
     const splitUploads = path.join(root, 'split-uploads');
     fs.cpSync(path.join(dir, 'uploads'), splitUploads, { recursive: true });
     const splitBackup = path.join(root, 'split-backup'), splitRestore = path.join(root, 'split-restored');
-    assert.equal(run(['backup', '--data-dir', dir, '--db', customDb, '--uploads-dir', splitUploads,
+    // No default source exists: ignoring either explicit root must make this fail.
+    const emptyData = path.join(root, 'empty-default-data'); fs.mkdirSync(emptyData);
+    assert.equal(fs.existsSync(path.join(emptyData, 'romani.db')), false);
+    assert.equal(fs.existsSync(path.join(emptyData, 'uploads')), false);
+    assert.equal(run(['backup', '--data-dir', emptyData, '--db', customDb, '--uploads-dir', splitUploads,
       '--output', splitBackup]).verified, true);
     assert.equal(run(['restore', '--backup', splitBackup, '--target', splitRestore]).restored, true);
     const splitDb = new DatabaseSync(path.join(splitRestore, 'romani.db'), { readOnly: true });
