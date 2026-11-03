@@ -4,6 +4,16 @@ import { createDocumentSchema } from '../src/components/documents/documentFormSc
 
 const schema = createDocumentSchema(key => key);
 const base = { title: 'Fixture document', expiry_date: new Date(2030, 1, 1) };
+test('custom entity errors remain visible with missing or invalid dates', () => {
+  const custom = { ...base, beneficiary_type: 'company', company_id: 'fixture',
+    document_type_id: 'fixture', ministry_id: 'other', entity_name: ' ' };
+  for (const expiry_date of [undefined, new Date('invalid')]) {
+    const result = schema.safeParse({ ...custom, expiry_date });
+    assert.equal(result.success, false);
+    assert.deepEqual(result.error.issues.map(issue => issue.path[0]).sort(), ['entity_name', 'expiry_date']);
+  }
+  assert.equal(schema.safeParse({ ...custom, entity_name: 'Custom entity' }).success, true);
+});
 for (const [beneficiary_type, required] of [
   ['company', ['company_id', 'ministry_id', 'document_type_id']],
   ['employee', ['employee_id', 'document_type_id']],

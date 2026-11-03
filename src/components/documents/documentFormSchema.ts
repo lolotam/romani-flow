@@ -19,6 +19,15 @@ export const createDocumentSchema = (t: (key: string) => string) => z.object({
     if (!data[field]?.trim()) ctx.addIssue({ code: z.ZodIssueCode.custom,
       message: t('documents.form.validation.allFieldsRequired'), path: [field] });
   }
+}).refine((data) => {
+  // Entity name required when ministry is "أخرى"
+  if (data.ministry_id && data.ministry_id === 'other') {
+    return data.entity_name && data.entity_name.trim().length > 0;
+  }
+  return true;
+}, {
+  message: t('documents.form.validation.entityNameRequired'),
+  path: ['entity_name']
 }).and(z.object({
   // Parse dates independently so missing dates do not suppress selection errors.
   issue_date: z.date().optional(),
@@ -32,15 +41,6 @@ export const createDocumentSchema = (t: (key: string) => string) => z.object({
 }, {
   message: t('documents.form.validation.invalidDateRange'),
   path: ['expiry_date']
-}).refine((data) => {
-  // Entity name required when ministry is "أخرى"
-  if (data.ministry_id && data.ministry_id === 'other') {
-    return data.entity_name && data.entity_name.trim().length > 0;
-  }
-  return true;
-}, {
-  message: t('documents.form.validation.entityNameRequired'),
-  path: ['entity_name']
 });
 
 export type DocumentFormData = z.infer<ReturnType<typeof createDocumentSchema>>;
