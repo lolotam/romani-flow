@@ -47,12 +47,16 @@ def copy_private(source, target):
     target.chmod(0o600)
 
 
-def backup(data, output):
+def backup(data, output, db_file=None, uploads_dir=None):
     data, output = data.resolve(), output.resolve()
-    if output.is_relative_to(data) or data.is_relative_to(output):
-        raise ValueError('Backup must be outside the live data tree')
+    db_file = (db_file or data / 'romani.db').resolve()
+    uploads_dir = (uploads_dir or data / 'uploads').resolve()
+    if (output.is_relative_to(data) or data.is_relative_to(output)
+            or output.is_relative_to(uploads_dir) or uploads_dir.is_relative_to(output)
+            or db_file.is_relative_to(output)):
+        raise ValueError('Backup must be separate from live database and upload roots')
     output.mkdir(mode=0o700, parents=True, exist_ok=False)
-    source = database(data / 'romani.db')
+    source = database(db_file)
     destination = sqlite3.connect(output / 'romani.db')
     try:
         source.backup(destination)
@@ -67,7 +71,7 @@ def backup(data, output):
             for row in snapshot.execute(f'SELECT "{column}" FROM "{table}" WHERE "{column}" IS NOT NULL'):
                 if row[0]:
                     relative = str(row[0])
-                    source_file = inside(data / 'uploads', relative)
+                    source_file = inside(uploads_dir, relative)
                     if not source_file.is_file():
                         raise ValueError('Referenced attachment missing; backup incomplete')
                     target_file = inside(output, 'uploads/' + relative)
@@ -131,11 +135,13 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest='action', required=True)
     b = sub.add_parser('backup'); b.add_argument('--data-dir', type=Path, required=True); b.add_argument('--output', type=Path, required=True)
+    b.add_argument('--db', type=Path, help='Actual host SQLite file; defaults to <data-dir>/romani.db')
+    b.add_argument('--uploads-dir', type=Path, help='Actual host upload root; defaults to <data-dir>/uploads')
     v = sub.add_parser('verify'); v.add_argument('--backup', type=Path, required=True)
     r = sub.add_parser('restore'); r.add_argument('--backup', type=Path, required=True); r.add_argument('--target', type=Path, required=True)
     args = parser.parse_args()
     if args.action == 'backup':
-        result = backup(args.data_dir, args.output)
+        result = backup(args.data_dir, args.output, args.db, args.uploads_dir)
     elif args.action == 'verify':
         result = verify(args.backup)
     else:

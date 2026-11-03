@@ -82,10 +82,23 @@ contains sensitive records and account hashes: retain it in a private directory,
 encrypt any off-host storage and limit access/retention according to owner policy.
 
 ```sh
-python3 scripts/recovery.py backup --data-dir /opt/romani/data --output /root/romani-backup-UNIQUE
-python3 scripts/recovery.py verify --backup /root/romani-backup-UNIQUE
-python3 scripts/recovery.py restore --backup /root/romani-backup-UNIQUE --target /root/romani-isolated-restore-UNIQUE
+# Replace with the actual approved release checkout on the host.
+RELEASE_DIR=/absolute/path/to/approved-release
+cd "$RELEASE_DIR" || exit 1
+test -r scripts/recovery.py || exit 1
+sudo python3 scripts/recovery.py backup --data-dir /opt/romani/data --output /root/romani-backup-UNIQUE
+sudo python3 scripts/recovery.py verify --backup /root/romani-backup-UNIQUE
+sudo python3 scripts/recovery.py restore --backup /root/romani-backup-UNIQUE --target /root/romani-isolated-restore-UNIQUE
 ```
+
+Run as a privileged host account (the examples use sudo), because live data and
+`/root` destinations are private. For split mounts, pass the actual host upload
+root with `backup --uploads-dir /mnt/bigdisk/romani-uploads`; for a database-file
+override pass `backup --db /actual/host/path/database.sqlite`. Defaults remain
+`<data-dir>/uploads` and `<data-dir>/romani.db`. The recovery set and new restored
+tree normalize these to `uploads/` and `romani.db`; configure only the isolated
+instance to use those restored paths rather than reusing production DB_PATH or
+UPLOADS_DIR. Verify the actual source layout before choosing arguments.
 
 The CLI takes a SQLite online snapshot and copies every attachment referenced by
 that snapshot, including employee photos and staged uploads. It checks hashes,

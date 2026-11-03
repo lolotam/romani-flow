@@ -105,7 +105,6 @@ sensitive so they are masked in the UI):
 | `JWT_SECRET` | *(random, ≥ 32 chars)* | `openssl rand -base64 48` — **required**, the app refuses to boot without it |
 | `DATA_DIR` | `/data` | the mount point |
 | `UPLOADS_DIR` | `/data/uploads` | the bucket |
-| `TZ` | Preserve the verified process timezone | Compose defaults to `Asia/Kuwait`; the current direct Dockerfile/Node deployment independently resolves `UTC`. Do not change the live cadence as a setup repair. |
 | `SMTP_HOST` | `smtp.gmail.com` | |
 | `SMTP_PORT` | `587` | use `465` with `SMTP_SECURE=true` |
 | `SMTP_SECURE` | `false` | |
@@ -114,6 +113,13 @@ sensitive so they are masked in the UI):
 | `SMTP_FROM` | *(required, no default)* | e.g. `ROMANI Flow <sender@example.com>` |
 | `MAX_UPLOAD_MB` | `25` | |
 | `MAX_EMAIL_ATTACHMENT_MB` | `20` | keeps the message under Gmail's 25 MB ceiling |
+
+Timezone is optional: leave `TZ` **unset** for the current direct deployment;
+the read-only runtime check found no TZ override and resolved `UTC`. Do not add
+a literal `unset` value or descriptive prose as an environment value. Compose's
+separate default is the valid IANA name `Asia/Kuwait`. Preserve any existing
+verified override in other deployments; changing timezone changes reminder times
+and requires an explicit operating decision.
 
 ### The Gmail app password
 
@@ -197,10 +203,20 @@ is not a complete recovery set. Use the checked-out release's host recovery CLI,
 as documented in [OPERATIONS.md](OPERATIONS.md#full-recovery-set):
 
 ```bash
-python3 scripts/recovery.py backup --data-dir /opt/romani/data --output /root/romani-backup-UNIQUE
-python3 scripts/recovery.py verify --backup /root/romani-backup-UNIQUE
-python3 scripts/recovery.py restore --backup /root/romani-backup-UNIQUE --target /root/romani-isolated-restore-UNIQUE
+# On the host: replace this with the actual approved release checkout path.
+RELEASE_DIR=/absolute/path/to/approved-release
+cd "$RELEASE_DIR" || exit 1
+test -r scripts/recovery.py || exit 1
+# sudo is required here to read the private data tree and write below /root.
+sudo python3 scripts/recovery.py backup --data-dir /opt/romani/data --output /root/romani-backup-UNIQUE
+sudo python3 scripts/recovery.py verify --backup /root/romani-backup-UNIQUE
+sudo python3 scripts/recovery.py restore --backup /root/romani-backup-UNIQUE --target /root/romani-isolated-restore-UNIQUE
 ```
+
+For the separate uploads bind in section 4, add
+`--uploads-dir /mnt/bigdisk/romani-uploads` to the **backup** command. For a
+`DB_PATH` override, add `--db /actual/host/path/database.sqlite`. Use verified
+host paths, not container paths. See OPERATIONS.md for the restored layout.
 
 Choose new private directories. The CLI verifies the SQLite snapshot, referenced
 attachments, hashes and foreign keys, and refuses an existing restore target.

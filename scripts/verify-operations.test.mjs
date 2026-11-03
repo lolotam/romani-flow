@@ -161,7 +161,7 @@ test('failed reminders remain retryable with durable failure evidence', () => fi
   assert.equal(deliveries.length, 2);
 }));
 
-test('consistent backup restores real login and attachment bytes in a separate application', () => fixture(async ({ dir, request, login, config, password, mailer, reminderType }) => {
+test('consistent backup restores real login and attachment bytes in a separate application', () => fixture(async ({ db, dir, request, login, config, password, mailer, reminderType }) => {
   const cookie = await login();
   const pdf = Buffer.from('%PDF-1.4\nIsolated recovery fixture\n%%EOF');
   const multipart = new FormData(); multipart.append('files', new Blob([pdf], { type: 'application/pdf' }), 'restore.pdf');
@@ -192,6 +192,20 @@ test('consistent backup restores real login and attachment bytes in a separate a
     assert.equal(auth.status, 200);
     const response = await fetch(base + `/api/files/${saved.json.data[0].id}/download`, { headers: { cookie: auth.headers.get('set-cookie').split(';')[0] } });
     assert.equal(response.status, 200); assert.deepEqual(Buffer.from(await response.arrayBuffer()), pdf);
+    // Existing supported split mounts/DB_PATH overrides must produce a usable set too.
+    const customDb = path.join(root, 'custom.sqlite');
+    db.prepare('VACUUM INTO ?').run(customDb);
+    const splitUploads = path.join(root, 'split-uploads');
+    fs.cpSync(path.join(dir, 'uploads'), splitUploads, { recursive: true });
+    const splitBackup = path.join(root, 'split-backup'), splitRestore = path.join(root, 'split-restored');
+    assert.equal(run(['backup', '--data-dir', dir, '--db', customDb, '--uploads-dir', splitUploads,
+      '--output', splitBackup]).verified, true);
+    assert.equal(run(['restore', '--backup', splitBackup, '--target', splitRestore]).restored, true);
+    const splitDb = new DatabaseSync(path.join(splitRestore, 'romani.db'), { readOnly: true });
+    try {
+      const file = splitDb.prepare('SELECT file_path FROM documents WHERE id=?').get(saved.json.data[0].id).file_path;
+      assert.deepEqual(fs.readFileSync(path.join(splitRestore, 'uploads', file)), pdf);
+    } finally { splitDb.close(); }
     fs.appendFileSync(path.join(backup, 'romani.db'), 'tampered');
     assert.throws(() => run(['verify', '--backup', backup]));
   } finally {
