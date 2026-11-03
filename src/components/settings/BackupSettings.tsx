@@ -26,7 +26,7 @@ export default function BackupSettings({ onExportBackup, onEraseAllData }: Backu
   return (
     <Card className="shadow-elegant">
       <CardHeader>
-        <CardTitle className="flex items-center space-x-2">
+        <CardTitle className="flex items-center gap-2">
           <Database className="h-5 w-5" />
           <span>{t('settings.backup.title')}</span>
         </CardTitle>
@@ -38,7 +38,7 @@ export default function BackupSettings({ onExportBackup, onEraseAllData }: Backu
             <h3 className="text-lg font-semibold">{t('settings.backup.backupSection')}</h3>
             <p className="text-sm text-muted-foreground">{t('settings.backup.backupDescription')}</p>
             <Button onClick={onExportBackup} className="w-full">
-              <Download className="h-4 w-4 ml-2" />
+              <Download className="h-4 w-4 me-2" />
               {t('settings.backup.exportBackup')}
             </Button>
           </div>
@@ -49,7 +49,7 @@ export default function BackupSettings({ onExportBackup, onEraseAllData }: Backu
             <div className="space-y-2">
               <Input type="file" accept=".json" />
               <Button className="w-full" variant="outline">
-                <Upload className="h-4 w-4 ml-2" />
+                <Upload className="h-4 w-4 me-2" />
                 {t('settings.backup.importBackup')}
               </Button>
             </div>
@@ -87,7 +87,7 @@ export default function BackupSettings({ onExportBackup, onEraseAllData }: Backu
             <Dialog open={isEraseDialogOpen} onOpenChange={setIsEraseDialogOpen}>
               <DialogTrigger asChild>
                 <Button variant="destructive" className="shrink-0">
-                  <Trash2 className="h-4 w-4 mr-2" />
+                  <Trash2 className="h-4 w-4 me-2" />
                   {t('settings.backup.eraseButton')}
                 </Button>
               </DialogTrigger>

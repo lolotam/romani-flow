@@ -99,7 +99,7 @@ export class DocumentService {
    * transaction rolls back and the upload stays pending, so the administrator
    * can correct the data and retry with the same upload id.
    */
-  createDocument(payload: Row, status: (expiry: string | null) => string): Row {
+  createDocument(payload: Row, status: (expiry: string | null) => string, onCreated?: (row: Row) => void): Row {
     const fields: Row = { ...payload };
     const uploadId = typeof fields.upload_id === 'string' ? fields.upload_id : null;
     delete fields.upload_id;
@@ -116,6 +116,7 @@ export class DocumentService {
       });
 
       if (uploadId) this.claimUpload(uploadId);
+      onCreated?.(row);
       this.db.exec('COMMIT');
       return row;
     } catch (error) {

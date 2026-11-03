@@ -14,6 +14,8 @@ import { api, type Document, type DocumentType, type Ministry } from '@/lib/api'
 import { useStagedDocumentUpload } from './documents/useStagedDocumentUpload';
 import { toast } from 'sonner';
 import { useLanguage } from '@/contexts/LanguageContext';
+import { useLastSubmissionRestore } from '@/hooks/useLastSubmission';
+import { restoreFormDate } from '@/lib/formDefaults';
 
 const emptyForm = {
   title: '', document_type_id: '', ministry_id: '',
@@ -43,6 +45,13 @@ export function EmployeeDocumentForm({
   const submitting = useRef(false);
   
   const [formData, setFormData] = useState(emptyForm);
+  const dirty = useRef(false);
+  useEffect(() => { if (isOpen) dirty.current = false; }, [isOpen, employeeId]);
+  useLastSubmissionRestore('documents', isOpen, (saved) => {
+    setFormData({ title: uploadedFile ? uploadedFile.name.replace(/\.[^/.]+$/, '') : String(saved.title ?? ''),
+      document_type_id: String(saved.document_type_id ?? ''), ministry_id: String(saved.ministry_id ?? ''),
+      issue_date: restoreFormDate(saved.issue_date) ?? null, expiry_date: restoreFormDate(saved.expiry_date) ?? null, notes: String(saved.notes ?? '') });
+  }, () => !dirty.current);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -137,7 +146,7 @@ export function EmployeeDocumentForm({
           </DialogDescription>
         </DialogHeader>
 
-        <form onSubmit={handleSubmit} className="space-y-6">
+        <form onSubmit={handleSubmit} onChangeCapture={() => { dirty.current = true; }} onPointerDownCapture={() => { dirty.current = true; }} className="space-y-6">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div className="md:col-span-2">
               <Label htmlFor="title">{t('documents.form.title')} *</Label>

@@ -81,6 +81,7 @@ export const settings = {
 
   // Companies Management
   companies: {
+    descriptionLabel: 'Company description',
     title: 'Companies Management',
     description: 'Add and manage companies in the system',
     addNew: 'Add New Company',
@@ -146,6 +147,7 @@ export const settings = {
   },
 
   // Backup Settings
+  appearance: { title: 'Appearance', description: 'Customize the system appearance', darkMode: 'Dark mode', darkModeDescription: 'Enable or disable dark mode' },
   backup: {
     title: 'Backup & Restore',
     description: 'Manage data backup and restoration',
@@ -172,7 +174,7 @@ export const settings = {
     eraseDataDescription: 'Permanently delete all data from the database. This action cannot be undone.',
     eraseButton: 'Erase All Data',
     eraseConfirmTitle: 'Are you absolutely sure?',
-    eraseConfirmDescription: 'This will permanently delete ALL data including companies, employees, documents, and settings. This action cannot be undone. Please type "DELETE ALL" to confirm.',
+    eraseConfirmDescription: 'This permanently deletes business data and saved form defaults. Accounts and system settings remain. Type "DELETE ALL" to confirm.',
     eraseConfirmPlaceholder: 'Type DELETE ALL',
     eraseCancel: 'Cancel',
     eraseConfirmButton: 'Yes, Erase Everything',

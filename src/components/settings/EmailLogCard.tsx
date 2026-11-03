@@ -11,6 +11,10 @@ const VISIBLE_ROWS = 10;
 export function EmailLogCard({ entries }: EmailLogCardProps) {
   const { language } = useLanguage();
   const L = (ar: string, en: string) => (language === 'ar' ? ar : en);
+  const kinds: Record<string, string> = { test: L('اختبار البريد', 'Email test'),
+    documents: L('إرسال وثائق', 'Document delivery'), expiry_report: L('تقرير انتهاء الصلاحية', 'Expiry report') };
+  const statuses: Record<string, string> = { sent: L('تم الإرسال', 'Sent'), partial: L('إرسال جزئي', 'Partially sent'),
+    failed: L('فشل الإرسال', 'Failed'), skipped: L('تم التجاوز', 'Skipped'), sending: L('جارٍ الإرسال', 'Sending') };
 
   return (
     <Card className="shadow-elegant">
@@ -36,9 +40,9 @@ export function EmailLogCard({ entries }: EmailLogCardProps) {
                 {entries.slice(0, VISIBLE_ROWS).map((entry, index) => (
                   <tr key={entry.id} className={index % 2 === 0 ? 'bg-background' : 'bg-muted/25'}>
                     <td className="p-2">{entry.created_at}</td>
-                    <td className="p-2">{entry.kind}</td>
+                    <td className="p-2">{kinds[entry.kind] ?? entry.kind}</td>
                     <td className="p-2" dir="ltr">{entry.recipients}</td>
-                    <td className="p-2" title={entry.error ?? undefined}>{entry.status}</td>
+                    <td className="p-2" title={entry.error ?? undefined}>{statuses[entry.status] ?? entry.status}</td>
                   </tr>
                 ))}
               </tbody>

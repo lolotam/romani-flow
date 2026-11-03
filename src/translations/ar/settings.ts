@@ -91,6 +91,7 @@ export const settings = {
 
   // Companies Management
   companies: {
+    descriptionLabel: 'وصف الشركة',
     title: 'إدارة الشركات',
     description: 'إضافة وإدارة الشركات في النظام',
     addNew: 'إضافة شركة جديدة',
@@ -157,6 +158,26 @@ export const settings = {
 
   // Backup Settings
   backup: {
+    backupSection: 'تصدير نسخة احتياطية',
+    backupDescription: 'تصدير بيانات النظام إلى ملف JSON',
+    exportBackup: 'تصدير النسخة الاحتياطية',
+    restoreSection: 'استعادة البيانات',
+    restoreDescription: 'استيراد البيانات من ملف نسخة احتياطية',
+    importBackup: 'استيراد نسخة احتياطية',
+    automaticBackups: 'النسخ الاحتياطي التلقائي',
+    dailyBackups: 'نسخ احتياطية يومية',
+    dailyBackupsDesc: 'الاحتفاظ بآخر نسختين احتياطيتين',
+    backupNotifications: 'إشعارات النسخ الاحتياطي',
+    backupNotificationsDesc: 'إرسال تأكيد عبر البريد الإلكتروني',
+    eraseData: 'حذف جميع البيانات',
+    eraseDataDescription: 'حذف بيانات الشركات والموظفين والوثائق نهائيًا. لا يمكن التراجع عن هذه العملية.',
+    eraseButton: 'حذف جميع البيانات',
+    eraseConfirmTitle: 'تأكيد حذف جميع البيانات',
+    eraseConfirmDescription: 'ستُحذف بيانات العمل وآخر إضافات النماذج المحفوظة. تبقى الحسابات وإعدادات النظام. اكتب DELETE ALL للتأكيد.',
+    eraseConfirmPlaceholder: 'اكتب DELETE ALL',
+    eraseCancel: 'إلغاء',
+    eraseConfirmButton: 'نعم، حذف البيانات',
+    eraseSuccess: 'تم حذف البيانات بنجاح',
     title: 'النسخ الاحتياطي',
     description: 'إدارة النسخ الاحتياطي واستعادة البيانات',
     createBackup: 'إنشاء نسخة احتياطية',

@@ -15,7 +15,7 @@ export default function AppearanceSettings({ darkMode, onToggleDarkMode }: Appea
   return (
     <Card className="shadow-elegant">
       <CardHeader>
-        <CardTitle className="flex items-center space-x-2">
+        <CardTitle className="flex items-center gap-2">
           {darkMode ? <Moon className="h-5 w-5" /> : <Sun className="h-5 w-5" />}
           <span>{t('settings.appearance.title')}</span>
         </CardTitle>

@@ -1,3 +1,4 @@
+import { useLastSubmissionState } from '@/hooks/useLastSubmission';
 import { useState, useEffect } from 'react';
 import { useTheme } from '@/contexts/ThemeProvider';
 import { motion } from 'framer-motion';
@@ -23,7 +24,7 @@ import MinistriesSettings from '@/components/settings/MinistriesSettings';
 import BackupSettings from '@/components/settings/BackupSettings';
 
 export default function Settings() {
-  const { t } = useLanguage();
+  const { t, isRTL } = useLanguage();
   const { toast } = useToast();
   const { theme, toggleTheme } = useTheme();
   const [activeTab, setActiveTab] = useState('email');
@@ -36,10 +37,10 @@ export default function Settings() {
   const [positions, setPositions] = useState<Position[]>([]);
 
   // Form state
-  const [newCompany, setNewCompany] = useState({ name: '', name_ar: '', description: '' });
-  const [newDocType, setNewDocType] = useState({ name: '', name_ar: '' });
-  const [newMinistry, setNewMinistry] = useState({ name: '', name_ar: '' });
-  const [newPosition, setNewPosition] = useState({ name: '', name_ar: '', value: '' });
+  const [newCompany, setNewCompany] = useLastSubmissionState('companies', { name: '', name_ar: '', description: '' });
+  const [newDocType, setNewDocType] = useLastSubmissionState('document_types', { name: '', name_ar: '' });
+  const [newMinistry, setNewMinistry] = useLastSubmissionState('ministries', { name: '', name_ar: '' });
+  const [newPosition, setNewPosition] = useLastSubmissionState('positions', { name: '', name_ar: '', value: '' });
 
   // Edit state
   const [editingCompany, setEditingCompany] = useState<Company | null>(null);
@@ -101,7 +102,7 @@ export default function Settings() {
   // Companies
   const addCompany = () => {
     if (!validateRequired(newCompany.name, newCompany.name_ar)) return;
-    crudAction(async () => { const { error } = await api.insert('companies', [{ name: newCompany.name, name_ar: newCompany.name_ar, description: newCompany.description }]); if (error) throw error; }, 'companyAdded', 'companyAddError', () => setNewCompany({ name: '', name_ar: '', description: '' }));
+    crudAction(async () => { const { error } = await api.insert('companies', [{ name: newCompany.name, name_ar: newCompany.name_ar, description: newCompany.description }]); if (error) throw error; }, 'companyAdded', 'companyAddError');
   };
   const updateCompany = () => {
     if (!editingCompany || !validateRequired(editingCompany.name, editingCompany.name_ar)) return;
@@ -115,7 +116,7 @@ export default function Settings() {
   // Document Types
   const addDocumentType = () => {
     if (!validateRequired(newDocType.name, newDocType.name_ar)) return;
-    crudAction(async () => { const { error } = await api.insert('document_types', [newDocType]); if (error) throw error; }, 'documentTypeAdded', 'documentTypeAddError', () => setNewDocType({ name: '', name_ar: '' }));
+    crudAction(async () => { const { error } = await api.insert('document_types', [newDocType]); if (error) throw error; }, 'documentTypeAdded', 'documentTypeAddError');
   };
   const updateDocumentType = () => {
     if (!editingDocType || !validateRequired(editingDocType.name, editingDocType.name_ar)) return;
@@ -129,7 +130,7 @@ export default function Settings() {
   // Ministries
   const addMinistry = () => {
     if (!validateRequired(newMinistry.name, newMinistry.name_ar)) return;
-    crudAction(async () => { const { error } = await api.insert('ministries', [newMinistry]); if (error) throw error; }, 'ministryAdded', 'ministryAddError', () => setNewMinistry({ name: '', name_ar: '' }));
+    crudAction(async () => { const { error } = await api.insert('ministries', [newMinistry]); if (error) throw error; }, 'ministryAdded', 'ministryAddError');
   };
   const updateMinistry = () => {
     if (!editingMinistry || !validateRequired(editingMinistry.name, editingMinistry.name_ar)) return;
@@ -143,7 +144,7 @@ export default function Settings() {
   // Positions
   const addPosition = () => {
     if (!validateRequired(newPosition.name, newPosition.name_ar, newPosition.value)) return;
-    crudAction(async () => { const { error } = await api.insert('positions', [newPosition]); if (error) throw error; }, 'positionAdded', 'positionAddError', () => setNewPosition({ name: '', name_ar: '', value: '' }));
+    crudAction(async () => { const { error } = await api.insert('positions', [newPosition]); if (error) throw error; }, 'positionAdded', 'positionAddError');
   };
   const updatePosition = () => {
     if (!editingPosition || !validateRequired(editingPosition.name, editingPosition.name_ar, editingPosition.value)) return;
@@ -196,7 +197,7 @@ export default function Settings() {
 
   return (
     <Layout>
-      <div className="p-6 space-y-6">
+      <div dir={isRTL ? 'rtl' : 'ltr'} className="p-4 sm:p-6 space-y-6 text-start">
         <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
           <div>
             <h1 className="text-3xl font-bold text-gradient">{t('settings.title')}</h1>
@@ -205,15 +206,15 @@ export default function Settings() {
         </motion.div>
 
         <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }}>
-          <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
-            <TabsList className="grid w-full grid-cols-2 lg:grid-cols-7">
-              <TabsTrigger value="email" className="flex items-center space-x-2"><Mail className="h-4 w-4" /><span>{t('settings.tabs.email')}</span></TabsTrigger>
-              <TabsTrigger value="appearance" className="flex items-center space-x-2"><Moon className="h-4 w-4" /><span>{t('settings.tabs.appearance')}</span></TabsTrigger>
-              <TabsTrigger value="companies" className="flex items-center space-x-2"><Building2 className="h-4 w-4" /><span>{t('settings.tabs.companies')}</span></TabsTrigger>
-              <TabsTrigger value="positions" className="flex items-center space-x-2"><UserCog className="h-4 w-4" /><span>{t('settings.tabs.positions')}</span></TabsTrigger>
-              <TabsTrigger value="documents" className="flex items-center space-x-2"><FileText className="h-4 w-4" /><span>{t('settings.tabs.documents')}</span></TabsTrigger>
-              <TabsTrigger value="ministries" className="flex items-center space-x-2"><Shield className="h-4 w-4" /><span>{t('settings.tabs.ministries')}</span></TabsTrigger>
-              <TabsTrigger value="backup" className="flex items-center space-x-2"><Database className="h-4 w-4" /><span>{t('settings.tabs.backup')}</span></TabsTrigger>
+          <Tabs dir={isRTL ? 'rtl' : 'ltr'} value={activeTab} onValueChange={setActiveTab} className="space-y-6">
+            <TabsList className="grid h-auto w-full grid-cols-2 sm:grid-cols-3 xl:grid-cols-7 gap-1">
+              <TabsTrigger value="email" className="flex items-center gap-2"><Mail className="h-4 w-4" /><span>{t('settings.tabs.email')}</span></TabsTrigger>
+              <TabsTrigger value="appearance" className="flex items-center gap-2"><Moon className="h-4 w-4" /><span>{t('settings.tabs.appearance')}</span></TabsTrigger>
+              <TabsTrigger value="companies" className="flex items-center gap-2"><Building2 className="h-4 w-4" /><span>{t('settings.tabs.companies')}</span></TabsTrigger>
+              <TabsTrigger value="positions" className="flex items-center gap-2"><UserCog className="h-4 w-4" /><span>{t('settings.tabs.positions')}</span></TabsTrigger>
+              <TabsTrigger value="documents" className="flex items-center gap-2"><FileText className="h-4 w-4" /><span>{t('settings.tabs.documents')}</span></TabsTrigger>
+              <TabsTrigger value="ministries" className="flex items-center gap-2"><Shield className="h-4 w-4" /><span>{t('settings.tabs.ministries')}</span></TabsTrigger>
+              <TabsTrigger value="backup" className="flex items-center gap-2"><Database className="h-4 w-4" /><span>{t('settings.tabs.backup')}</span></TabsTrigger>
             </TabsList>
 
             <TabsContent value="email">
@@ -256,8 +257,8 @@ export default function Settings() {
             {editingCompany && (
               <div className="space-y-4">
                 <div><Label>{t('settings.companies.nameArabic')}</Label><Input value={editingCompany.name_ar} onChange={(e) => setEditingCompany({ ...editingCompany, name_ar: e.target.value })} /></div>
-                <div><Label>{t('settings.companies.nameEnglish')}</Label><Input value={editingCompany.name} onChange={(e) => setEditingCompany({ ...editingCompany, name: e.target.value })} /></div>
-                <div><Label>{t('settings.companies.description')}</Label><Textarea value={editingCompany.description || ''} onChange={(e) => setEditingCompany({ ...editingCompany, description: e.target.value })} /></div>
+                <div><Label>{t('settings.companies.nameEnglish')}</Label><Input dir="ltr" value={editingCompany.name} onChange={(e) => setEditingCompany({ ...editingCompany, name: e.target.value })} /></div>
+                <div><Label>{t('settings.companies.descriptionLabel')}</Label><Textarea value={editingCompany.description || ''} onChange={(e) => setEditingCompany({ ...editingCompany, description: e.target.value })} /></div>
                 <Button onClick={updateCompany} className="w-full">{t('settings.actions.saveChanges')}</Button>
               </div>
             )}
@@ -274,7 +275,7 @@ export default function Settings() {
             {editingDocType && (
               <div className="space-y-4">
                 <div><Label>{t('settings.documentTypes.nameArabic')}</Label><Input value={editingDocType.name_ar} onChange={(e) => setEditingDocType({ ...editingDocType, name_ar: e.target.value })} /></div>
-                <div><Label>{t('settings.documentTypes.nameEnglish')}</Label><Input value={editingDocType.name} onChange={(e) => setEditingDocType({ ...editingDocType, name: e.target.value })} /></div>
+                <div><Label>{t('settings.documentTypes.nameEnglish')}</Label><Input dir="ltr" value={editingDocType.name} onChange={(e) => setEditingDocType({ ...editingDocType, name: e.target.value })} /></div>
                 <Button onClick={updateDocumentType} className="w-full">{t('settings.actions.saveChanges')}</Button>
               </div>
             )}
@@ -291,7 +292,7 @@ export default function Settings() {
             {editingMinistry && (
               <div className="space-y-4">
                 <div><Label>{t('settings.ministries.nameArabic')}</Label><Input value={editingMinistry.name_ar} onChange={(e) => setEditingMinistry({ ...editingMinistry, name_ar: e.target.value })} /></div>
-                <div><Label>{t('settings.ministries.nameEnglish')}</Label><Input value={editingMinistry.name} onChange={(e) => setEditingMinistry({ ...editingMinistry, name: e.target.value })} /></div>
+                <div><Label>{t('settings.ministries.nameEnglish')}</Label><Input dir="ltr" value={editingMinistry.name} onChange={(e) => setEditingMinistry({ ...editingMinistry, name: e.target.value })} /></div>
                 <Button onClick={updateMinistry} className="w-full">{t('settings.actions.saveChanges')}</Button>
               </div>
             )}
@@ -308,7 +309,7 @@ export default function Settings() {
             {editingPosition && (
               <div className="grid grid-cols-1 gap-4 py-4">
                 <div><Label>{t('settings.positions.nameArabic')}</Label><Input value={editingPosition.name_ar} onChange={(e) => setEditingPosition({ ...editingPosition, name_ar: e.target.value })} /></div>
-                <div><Label>{t('settings.positions.nameEnglish')}</Label><Input value={editingPosition.name} onChange={(e) => setEditingPosition({ ...editingPosition, name: e.target.value })} /></div>
+                <div><Label>{t('settings.positions.nameEnglish')}</Label><Input dir="ltr" value={editingPosition.name} onChange={(e) => setEditingPosition({ ...editingPosition, name: e.target.value })} /></div>
                 <div><Label>{t('settings.positions.value')}</Label><Input value={editingPosition.value} onChange={(e) => setEditingPosition({ ...editingPosition, value: e.target.value })} /></div>
               </div>
             )}

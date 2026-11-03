@@ -23,7 +23,7 @@ export default function DocumentTypesSettings({
   return (
     <Card className="shadow-elegant">
       <CardHeader>
-        <CardTitle className="flex items-center space-x-2">
+        <CardTitle className="flex items-center gap-2">
           <FileText className="h-5 w-5" />
           <span>{t('settings.documentTypes.title')}</span>
         </CardTitle>
@@ -43,7 +43,7 @@ export default function DocumentTypesSettings({
           <div>
             <Label htmlFor="doctype_name_en">{t('settings.documentTypes.nameEnglish')}</Label>
             <Input
-              id="doctype_name_en"
+              id="doctype_name_en" dir="ltr"
               value={newDocType.name}
               onChange={(e) => onNewDocTypeChange({ ...newDocType, name: e.target.value })}
               placeholder={t('settings.documentTypes.nameEnglishPlaceholder')}
@@ -63,7 +63,7 @@ export default function DocumentTypesSettings({
                   <p className="font-medium">{docType.name_ar}</p>
                   <p className="text-sm text-muted-foreground">{docType.name}</p>
                 </div>
-                <div className="flex space-x-2">
+                <div className="flex gap-2">
                   <Button size="sm" variant="outline" onClick={() => onEdit(docType)}>
                     <Pencil className="h-4 w-4" />
                   </Button>

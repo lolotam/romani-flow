@@ -141,7 +141,7 @@ export function EmployeeFormFields({
       </div>
       <div>
         <Label htmlFor={id('driving_license')}>{t('employees.dialog.fields.drivingLicense')}</Label>
-        <div className="flex items-center space-x-3 mt-2 p-3 border rounded-md">
+        <div className="flex items-center gap-3 mt-2 p-3 border rounded-md">
           <Switch
             id={id('driving_license')}
             checked={formData.driving_license}
@@ -172,7 +172,7 @@ export function EmployeeFormFields({
       )}
       <div>
         <Label htmlFor={id('document_count')}>{t('employees.dialog.fields.documentCount')}</Label>
-        <div className="flex items-center space-x-2 p-3 bg-muted/30 border rounded-md">
+        <div className="flex items-center gap-2 p-3 bg-muted/30 border rounded-md">
           <FileText className="h-4 w-4 text-muted-foreground" />
           {mode === 'edit' ? (
             <span className="text-sm font-medium">
@@ -187,7 +187,7 @@ export function EmployeeFormFields({
       </div>
       <div className="col-span-2">
         <Label htmlFor={id('is_active')}>{t('employees.dialog.fields.employeeStatus')}</Label>
-        <div className="flex items-center space-x-3 mt-2 p-3 border rounded-md">
+        <div className="flex items-center gap-3 mt-2 p-3 border rounded-md">
           <Switch
             id={id('is_active')}
             checked={formData.is_active}

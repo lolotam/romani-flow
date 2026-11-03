@@ -23,7 +23,7 @@ export default function PositionsSettings({
   return (
     <Card className="shadow-elegant">
       <CardHeader>
-        <CardTitle className="flex items-center space-x-2">
+        <CardTitle className="flex items-center gap-2">
           <UserCog className="h-5 w-5" />
           <span>{t('settings.positions.title')}</span>
         </CardTitle>
@@ -43,7 +43,7 @@ export default function PositionsSettings({
           <div>
             <Label htmlFor="position_name_en">{t('settings.positions.nameEnglish')}</Label>
             <Input
-              id="position_name_en"
+              id="position_name_en" dir="ltr"
               value={newPosition.name}
               onChange={(e) => onNewPositionChange({ ...newPosition, name: e.target.value })}
               placeholder={t('settings.positions.nameEnglishPlaceholder')}
@@ -72,7 +72,7 @@ export default function PositionsSettings({
                   <p className="font-medium">{position.name_ar}</p>
                   <p className="text-sm text-muted-foreground">{position.name} - {position.value}</p>
                 </div>
-                <div className="flex space-x-2">
+                <div className="flex gap-2">
                   <Button size="sm" variant="outline" onClick={() => onEdit(position)}>
                     <Pencil className="h-4 w-4" />
                   </Button>

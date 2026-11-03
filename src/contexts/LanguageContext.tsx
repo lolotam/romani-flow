@@ -1,4 +1,6 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
+import { DirectionProvider } from '@radix-ui/react-direction';
+import { formatTranslation } from '@/lib/translationText';
 
 export type Language = 'ar' | 'en';
 
@@ -16,6 +18,11 @@ import { translations } from '../translations';
 
 export const LanguageProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [language, setLanguage] = useState<Language>('ar');
+
+  useEffect(() => {
+    document.documentElement.lang = language;
+    document.documentElement.dir = language === 'ar' ? 'rtl' : 'ltr';
+  }, [language]);
 
   // Load language from localStorage on mount
   useEffect(() => {
@@ -56,9 +63,7 @@ export const LanguageProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     
     // Replace parameters in the translation
     if (params) {
-      return value.replace(/\{\{(\w+)\}\}/g, (match: string, paramKey: string) => {
-        return params[paramKey]?.toString() || match;
-      });
+      return formatTranslation(value, params);
     }
     
     return value;
@@ -73,7 +78,7 @@ export const LanguageProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       t,
       isRTL
     }}>
-      {children}
+      <DirectionProvider dir={isRTL ? 'rtl' : 'ltr'}>{children}</DirectionProvider>
     </LanguageContext.Provider>
   );
 };
