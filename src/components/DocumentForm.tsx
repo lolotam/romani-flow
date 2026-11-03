@@ -109,8 +109,11 @@ export function DocumentForm({
     <Card className="w-full" dir={isRTL ? 'rtl' : 'ltr'}>
       <CardContent className="p-6">
         <Form {...form}>
-          <form onSubmit={form.handleSubmit(handleSubmit)} className="space-y-6">
+          <form onSubmit={form.handleSubmit(handleSubmit, () => toast.error(t('documents.form.validation.allFieldsRequired')))} className="space-y-6">
             <DocumentAttachment uploadedFile={uploadedFile} editingDocument={editingDocument} />
+            {documentTypes.length === 0 && <p role="alert" className="text-destructive">{t('documents.form.validation.noDocumentTypes')}</p>}
+            {form.watch('beneficiary_type') === 'employee' && employees.length === 0 &&
+              <p role="alert" className="text-destructive">{t('documents.form.validation.noEmployees')}</p>}
 
             {/* Always Visible Fields */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -227,7 +230,8 @@ export function DocumentForm({
                     disabled={isSubmitting}
                     onClick={async () => {
                       let saved = false;
-                      await form.handleSubmit(async (data) => { saved = await handleSubmit(data); })();
+                      await form.handleSubmit(async (data) => { saved = await handleSubmit(data); },
+                        () => toast.error(t('documents.form.validation.allFieldsRequired')))();
                       if (!saved) return;
                       // Reset form for new document
                       form.reset({
