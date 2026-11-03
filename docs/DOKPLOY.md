@@ -109,9 +109,9 @@ sensitive so they are masked in the UI):
 | `SMTP_HOST` | `smtp.gmail.com` | |
 | `SMTP_PORT` | `587` | use `465` with `SMTP_SECURE=true` |
 | `SMTP_SECURE` | `false` | |
-| `SMTP_USER` | `samirfayez03@gmail.com` | the sender account |
+| `SMTP_USER` | *(required, no default)* | the sender account |
 | `SMTP_PASS` | *(Gmail app password)* | see below |
-| `SMTP_FROM` | `ROMANI Flow <samirfayez03@gmail.com>` | |
+| `SMTP_FROM` | *(required, no default)* | e.g. `ROMANI Flow <sender@example.com>` |
 | `MAX_UPLOAD_MB` | `25` | |
 | `MAX_EMAIL_ATTACHMENT_MB` | `20` | keeps the message under Gmail's 25 MB ceiling |
 
@@ -119,7 +119,7 @@ sensitive so they are masked in the UI):
 
 The sender account needs an **app password**, not its account password:
 
-1. Sign in to `samirfayez03@gmail.com` with 2-Step Verification enabled.
+1. Sign in to the sender account (`SMTP_USER`) with 2-Step Verification enabled.
 2. Open <https://myaccount.google.com/apppasswords>.
 3. Create an app password named `ROMANI Flow`.
 4. Copy the 16-character password into `SMTP_PASS` in Dokploy.
@@ -132,7 +132,14 @@ is configured.
 
 ## 6. First boot
 
-Deploy and watch the logs. A healthy first boot prints:
+The image builds without `data/seed.json` and contains no seed payload. An empty
+database starts with empty business tables when no seed file is mounted. To import
+an owner-approved seed on first boot, prepare it through a private transfer and
+mount that file read-only at `/app/data/seed.json`. Never commit a personal-data
+seed or copy it into the image. Review the import and administrator bootstrap
+before starting the backend; normal startup migrates, seeds and arms the scheduler.
+
+Deploy and watch the logs. A healthy first boot with an approved seed mounted prints:
 
 ```
 [server] environment : production

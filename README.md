@@ -70,7 +70,9 @@ Docker image stays small and the build never depends on a toolchain.
 
 ```bash
 npm install
-cp .env.example .env      # fill in JWT_SECRET and the SMTP password
+cp .env.example .env      # fill in JWT_SECRET, SMTP_USER, SMTP_PASS and SMTP_FROM
+# For local development, remove NODE_ENV (server defaults to development), set DATA_DIR=./data
+# and UPLOADS_DIR=./data/uploads in .env (the sample targets production).
 npm run db:migrate
 npm run db:seed
 npm run server:dev        # API on http://localhost:3000
@@ -105,11 +107,26 @@ ones:
 | `DATA_DIR` | no | `/data` | the persistent volume |
 | `UPLOADS_DIR` | no | `${DATA_DIR}/uploads` | the file bucket |
 | `SMTP_HOST` / `SMTP_PORT` / `SMTP_SECURE` | for mail | Gmail defaults | the SMTP server |
-| `SMTP_USER` | for mail | `samirfayez03@gmail.com` | the sender account |
-| `SMTP_PASS` | for mail | — | the Gmail **app password** |
+| `SMTP_USER` | **yes** (for mail) | — | the sender account |
+| `SMTP_PASS` | **yes** (for mail) | — | the Gmail **app password** |
+| `SMTP_FROM` | **yes** (for mail) | — | the sender shown to recipients, e.g. `ROMANI Flow <sender@example.com>` |
 | `TZ` | no | `Asia/Kuwait` | the timezone the daily job runs in |
 | `MAX_UPLOAD_MB` | no | `25` | the upload size cap |
 | `MAX_EMAIL_ATTACHMENT_MB` | no | `20` | the attachment cap, kept under Gmail's 25 MB ceiling |
+
+When any SMTP host, user, password or sender is set, `SMTP_USER`, `SMTP_PASS`
+and `SMTP_FROM` are required at startup, including outside Compose. The host
+defaults to Gmail when credentials are supplied. For direct Node startup, disable
+mail by leaving all four empty; startup logs one "mail not configured" warning.
+Also clear every supported alias: `MAIL_HOST`, `EMAIL_HOST`, `SMTP_USERNAME`,
+`MAIL_USER`, `EMAIL_USER`, `EMAIL_USERNAME`, `SMTP_PASSWORD`, `MAIL_PASS`,
+`MAIL_PASSWORD`, `EMAIL_PASS`, `EMAIL_PASSWORD`, `MAIL_FROM`, `EMAIL_FROM`,
+`FROM_EMAIL` and `SMTP_FROM_ADDRESS`. Empty canonical variables do not override
+non-empty aliases.
+Compose always requires SMTP credentials and does not support this opt-out.
+No sender is derived. Before upgrading an existing Compose deployment, explicitly
+set canonical `SMTP_USER`, `SMTP_PASS`, and `SMTP_FROM`. Direct Node startup
+accepts the supported aliases listed above; incomplete SMTP configuration prevents boot.
 
 The SMTP password is read from the environment **only**. It is never written to
 the database and never returned by the API — the Settings screen only shows
@@ -196,7 +213,7 @@ silently writing into a container directory that disappears with the next deploy
 │   ├── pages/               # screens
 │   └── types/               # shared types
 ├── docs/                    # SPEC.md, IMPLEMENTATION_PLAN.md, DOKPLOY.md
-└── data/seed.json           # the reference data imported on first boot
+└── data/seed.json           # optional private seed; mount read-only in production
 ```
 
 No source file exceeds **500 lines**; `npm run check:sizes` enforces it. The

@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createApp } from './app.js';
-import { loadConfig, validateConfig } from './config.js';
+import { isSmtpConfigured, loadConfig, validateConfig } from './config.js';
 import { closeDatabase, openDatabase } from './db/connection.js';
 import { runMigrations } from './db/migrator.js';
 import { defaultSeedFile, seedDatabase } from './db/seed.js';
@@ -51,6 +51,7 @@ function assertVolumeIsMounted(dataDir: string, isProduction: boolean): void {
 async function main(): Promise<void> {
   const config = loadConfig();
   validateConfig(config);
+  if (!isSmtpConfigured(config)) console.warn('[server] WARNING: mail not configured');
 
   console.log('[server] starting ROMANI Flow API');
   console.log(`[server] environment : ${config.env}`);

@@ -33,10 +33,9 @@ ENV NODE_ENV=production \
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev && npm cache clean --force
 
-# The compiled server, the SQL migrations and the seed data.
+# The compiled server and SQL migrations. Optional seed data is mounted at runtime.
 COPY --from=build /app/server-dist ./server-dist
 COPY --from=build /app/server/db/migrations ./server/db/migrations
-COPY --from=build /app/data/seed.json ./data/seed.json
 
 # The built SPA, served by the API process.
 COPY --from=build /app/dist ./dist
@@ -44,7 +43,7 @@ COPY --from=build /app/dist ./dist
 # The application runs as a non-root user.
 RUN addgroup -g 1001 -S app \
  && adduser -u 1001 -S app -G app \
- && mkdir -p /data/uploads \
+ && mkdir -p /data/uploads /app/data \
  && chown -R app:app /data /app
 
 USER app

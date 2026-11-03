@@ -57,6 +57,7 @@ temp/
 server-dist/
 
 # Local runtime data (SQLite database and the file bucket)
+/data/seed.json
 data/romani.db
 data/romani.db-wal
 data/romani.db-shm
@@ -79,3 +80,5 @@ preview/
 .kiro/steering/byterover-rules.md
 .qoder/rules/byterover-rules.md
 .augment/rules/byterover-rules.md
+# Browser-automation artifacts (screenshots, exports) can contain personal data
+.playwright-mcp/
