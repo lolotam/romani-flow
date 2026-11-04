@@ -12,6 +12,11 @@ Adapter tests pin this provenance and assert the exact `/message/sendText/romani
 path with no query string. Configuration with a query, fragment, non-root path
 or another instance is refused before fetch.
 
+The same origin-only/exact-instance predicate gates reminder status and
+enablement. Existing pairing-only prefix/namespace compatibility is retained,
+but cannot enable reminders. URL spelling must equal its normalized origin
+after removing trailing slashes; an explicit default port is not canonical.
+
 **Separate native isolation gate:** the pinned abstract router merges query
 parameters into route parameters after authentication. A malicious native token
 holder could therefore override the authenticated instance through a query.

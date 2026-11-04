@@ -38,7 +38,7 @@ foreign401. These are manager receipts, not SA reruns or website/device proof.
 
 | Variable | Requirement |
 | --- | --- |
-| `ROMANI_EVOLUTION_URL` | Approved internal HTTP/HTTPS API base/prefix, no userinfo/query/fragment. |
+| `ROMANI_EVOLUTION_URL` | Production reminders require a canonical internal HTTP/HTTPS origin only, no prefix/userinfo/query/fragment. Pairing-only fixtures retain base-prefix compatibility; this does not establish send readiness. |
 | `ROMANI_EVOLUTION_API_KEY` | Instance `romani` token, minimum16 characters, never master/Curemed key. |
 | `ROMANI_EVOLUTION_INSTANCE` | Exact `romani` in production; code also permits the romani-prefixed namespace for isolated fixtures. |
 | `ROMANI_EVOLUTION_WEBHOOK_SECRET` | Independent private random value, minimum32 characters, different from API token. |

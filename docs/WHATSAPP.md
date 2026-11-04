@@ -85,7 +85,10 @@ already completed. No immediate document-created send is introduced. A single
 in-process worker drains at most 10 eligible jobs per 60-second tick, with a 2000-job
 pending/sending/retry backlog cap. Selection commits the eligible jobs that fit,
 logs only the deferred count and leaves overflow for the next scheduled selection
-after backlog drains. Existing accepted/unknown identities still suppress duplicates;
+after backlog drains. Overflow is not persisted as an old-bucket job: the next
+selection re-evaluates current eligibility and bucket. An original threshold can
+be missed; eventual delivery of that original threshold is not guaranteed.
+Existing accepted/unknown identities still suppress duplicates;
 the cap cannot permanently stall an oversized first batch. Audit history is retained separately
 from pending capacity.
 
@@ -97,6 +100,15 @@ are cancelled. Returning an unsent date A→B→A or removing/re-adding an unsen
 destination may enqueue one fresh current job at the next selection; retained
 cancelled history does not block it. Accepted/unknown identities still suppress
 duplicates.
+
+Owner-approved phone-change exception: when an existing employee or management
+recipient number changes, replace already-prepared, still-eligible unsent work
+for the same item/expiry/bucket on the same day. Cancellation and replacement
+commit with the phone edit. Accepted/unknown work cannot authorize a replacement;
+an existing accepted/unknown identity at the new destination still suppresses it.
+Only pending/retryable or proven-safe permanent failures qualify. New audiences,
+new documents, global enable and expiry changes do not trigger immediate enqueue.
+Capacity overflow remains subject to the next scheduled selection described above.
 
 Renewal commits expiry change and unsent-job cancellation in the same SQLite
 transaction. A failed transaction changes neither. Replacing only the attachment
@@ -146,3 +158,19 @@ rollback/races, audience transitions, immutable text, real local timer firing,
 viewer denial, HTTP adapter bounds and isolated restore. `test:forms`,
 `test:config`, `test:operations`, `test:whatsapp-pairing` and isolated `verify:api`
 remain required regressions. Preserve original assertions and exact-head receipts.
+
+## Reminder readiness and shutdown
+
+Reminder enablement and send use the same configuration predicate: exact instance
+`romani` and a canonical HTTP/HTTPS origin-only `ROMANI_EVOLUTION_URL` (optional
+trailing slash, no base prefix, query, fragment or credentials). Pairing's broader
+fixture namespace/prefix compatibility does not make a configuration send-ready.
+For example, an explicit default port or uppercase URL spelling that differs from
+the normalized origin is refused for reminders before provider access.
+
+On shutdown the worker stops new claims immediately while HTTP requests drain in
+parallel. The database closes only after both drains finish. The application hard
+deadline is 20 seconds, longer than the 15-second send timeout; interrupted sends
+remain durable for unknown recovery. Before deployment verify that the managed
+container stop grace allows this deadline with operational margin. Current host
+grace is not established by local tests; this remains a release prerequisite.

@@ -263,3 +263,17 @@ Exact-head tests/reviews remain a release receipt, not checkboxes granting a
 production migration. The new additive migration `007` is not applied to production. Global
 delivery and new opt-ins remain false by default; holder pairing and native
 query-override isolation disposition do not authorize reminder activation.
+
+## Owner-authorized bounded correction batch (2026-11-04)
+
+- [x] Replace only already-prepared unsent work after a phone edit to an existing employee/management recipient, atomically and on the same day. Preserve current eligibility, accepted/unknown suppression, capacity and A-to-B-to-A history. Do not enqueue on a new audience/document or global enable.
+- [x] Use one strict origin-only/exact-romani predicate for reminder readiness, enablement and sending; retain existing pairing-only prefix/fixture compatibility. Prove refusal before provider access.
+- [x] Stop worker claims before HTTP drain, await both before DB close and give the application a 20-second hard deadline. Verify actual managed stop grace separately before release; local lifecycle tests do not prove host grace.
+- [x] Match log retry availability to permanent-job queue capacity, retain retry of already queued jobs, and state that deferred overflow is re-evaluated at its current bucket rather than promised at its original threshold.
+- [x] Restrict specification automatic-retry wording to the pinned pre-HTTP DNS/refused allowlist. No remote retry hint or unclassified HTTP permits resend.
+
+Waleed authorized this bounded batch directly after the five-batch escalation.
+Super Admin and its automations are frozen; project execution continues and
+release decisions route directly to Waleed. This is not production migration,
+merge/deployment, enablement, webhook or live-send approval. Holder scan remains
+deferred. Exact-head results and review provenance belong in the release receipt.

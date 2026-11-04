@@ -1,5 +1,5 @@
 import type { PairingConfig } from './config.js';
-import { pairingConfiguration } from './config.js';
+import { reminderOrigin } from './config.js';
 import { PairingClient } from './pairingClient.js';
 import type { SendOutcome, WhatsAppTransport } from '../notifications/whatsapp/contracts.js';
 import { isValidReminderText } from '../notifications/whatsapp/contracts.js';
@@ -9,12 +9,14 @@ import { normalizeWhatsAppPhone } from '../notifications/whatsapp/phone.js';
 export class MessageClient implements WhatsAppTransport {
   private readonly pairing: PairingClient;
   constructor(private readonly config: PairingConfig) { this.pairing = new PairingClient(config); }
-  status() { return this.pairing.status(); }
+  async status() {
+    if (!reminderOrigin(this.config)) return { configured: false, state: 'unconfigured' as const };
+    return this.pairing.status();
+  }
 
   async sendText(phone: string, text: string): Promise<SendOutcome> {
-    if (pairingConfiguration(this.config) !== 'valid') return { kind: 'permanent_failed', code: 'whatsapp_not_configured' };
-    const origin = new URL(this.config.url).origin;
-    if (this.config.instance !== 'romani' || this.config.url.replace(/\/+$/, '') !== origin) return { kind: 'permanent_failed', code: 'whatsapp_not_configured' };
+    const origin = reminderOrigin(this.config);
+    if (!origin) return { kind: 'permanent_failed', code: 'whatsapp_not_configured' };
     if (normalizeWhatsAppPhone(phone) !== phone) return { kind: 'permanent_failed', code: 'invalid_number' };
     if (!isValidReminderText(text)) return { kind: 'permanent_failed', code: 'invalid_text' };
     try {

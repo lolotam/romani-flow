@@ -6,6 +6,22 @@ import {MessageClient} from '../server/whatsapp/messageClient.ts';
 import {WhatsAppReminders} from '../server/notifications/whatsapp/service.ts';
 import {setSetting} from '../server/repositories/settings.ts';
 
+test('reminder enablement refuses pairing-compatible prefixes, aliases and noncanonical URL spelling before provider access',()=>loopbackEvolution(async e=>{
+ for(const config of [{...e.config,url:e.config.url+'/prefix'},{...e.config,instance:'romani_test'},{...e.config,url:e.config.url.replace('http:','HTTP:')}]){
+  const transport=new MessageClient(config);
+  await reminderApi(async f=>{
+   setSetting(f.db,'whatsapp.enabled',false);
+   assert.deepEqual(await transport.status(),{configured:false,state:'unconfigured'});
+   const response=await f.request('/api/settings',{method:'PUT',body:{settings:{'whatsapp.enabled':true}}});
+   assert.equal(response.status,409);
+   assert.equal(f.db.prepare("SELECT value FROM settings WHERE key='whatsapp.enabled'").get().value,'false');
+   assert.deepEqual(await transport.sendText(MANAGER_PHONE,'Synthetic'),{kind:'permanent_failed',code:'whatsapp_not_configured'});
+   assert.equal(f.db.prepare('SELECT count(*) n FROM whatsapp_jobs').get().n,0);
+  },transport,e.env);
+ }
+ assert.equal(e.requests.length,0);assert.equal(e.sends.length,0);
+}));
+
 test('assembled API/cron/SQLite/real HTTP adapter hands off fixed text once; days/restart/reconnect do not duplicate',()=>loopbackEvolution(async e=>reminderApi(async f=>{
  setSetting(f.db,'whatsapp.enabled',false);setSetting(f.db,'email.enabled',false);
  assert.equal((await f.request('/api/settings',{method:'PUT',body:{settings:{'whatsapp.enabled':true}}})).status,200);

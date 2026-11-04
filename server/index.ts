@@ -13,6 +13,7 @@ import { Mailer } from './services/mailer.js';
 import { StorageService } from './services/storageService.js';
 import { WhatsAppReminders } from './notifications/whatsapp/service.js';
 import { MessageClient } from './whatsapp/messageClient.js';
+import { drainApplication } from './shutdown.js';
 
 /**
  * Server bootstrap.
@@ -118,17 +119,14 @@ async function main(): Promise<void> {
     console.log(`[server] listening on http://0.0.0.0:${config.port}`);
   });
 
+  let shuttingDown = false;
   const shutdown = (signal: string) => {
+    if (shuttingDown) return;
+    shuttingDown = true;
     console.log(`[server] ${signal} received, shutting down`);
     cron.stop();
-    server.close(() => {
-      void reminders.stop().finally(() => {
-        closeDatabase(db);
-        process.exit(0);
-      });
-    });
-    // Do not hang forever if a connection refuses to close.
-    setTimeout(() => process.exit(0), 10_000).unref();
+    void drainApplication({ server, stopReminders: () => reminders.stop(),
+      closeDatabase: () => closeDatabase(db), exit: code => process.exit(code) });
   };
 
   process.on('SIGTERM', () => shutdown('SIGTERM'));

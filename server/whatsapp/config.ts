@@ -27,3 +27,10 @@ export function pairingConfiguration(config: PairingConfig): 'absent' | 'valid' 
     return 'invalid';
   }
 }
+
+/** Sending is bound to the reviewed literal route; pairing fixtures may use broader configuration. */
+export function reminderOrigin(config: PairingConfig): string | null {
+  if (pairingConfiguration(config) !== 'valid' || config.instance !== 'romani') return null;
+  const origin = new URL(config.url).origin;
+  return config.url.replace(/\/+$/, '') === origin ? origin : null;
+}

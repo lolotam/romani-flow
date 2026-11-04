@@ -114,6 +114,14 @@ Draft outbox clarification (not implemented by the QR-only slice): enforce ident
 
 When a canonical destination gains or loses management status, recompute the winning audience in the same transaction as the recipient mutation. Reclassify a still-unsent eligible pending/retryable job to the winning template without changing its identity or attempt count; do not cancel a still-valid employee destination merely because its management row was removed. Cancel only if neither audience remains eligible. Accepted/unknown attempts are not reclassified or resent. Test employee→management and management→employee transitions explicitly when implementing the reminder outbox.
 
+Owner decision (2026-11-04): a phone edit to an existing employee or management
+recipient replaces already-prepared unsent work for the same still-eligible
+item/expiry/bucket on the same day, atomically with cancellation. Never derive a
+replacement from accepted/unknown work. Pending/retryable and explicitly safe
+permanent failures qualify; new destinations remain subject to capacity and
+accepted/unknown identity suppression. This exception does not enqueue on a new
+audience/document, global enable or expiry change.
+
 The existing global `cron.last_run_date` cannot serve as a shared delivery-success flag. Keep email's current completion tracking; give WhatsApp enqueue a separate day checkpoint. The checkpoint controls selection work only; changing the day must not change logical job identity or resend accepted/unknown expired reminders. Evaluate both channels even if email is disabled, lacks recipients, fails or was already processed. A single worker checks due jobs every 60 seconds; this is transport retry processing, not a change to reminder cadence. Both channels disabled means no delivery. No unbounded queues or catch-up bursts.
 
 ## 9. Renewal, eligibility and race handling
@@ -132,7 +140,7 @@ On reconnect, cancel jobs for a superseded expiry, obsolete threshold or no-long
 
 States: `pending`, `sending`, `provider_accepted`, `retryable_failed`, `permanent_failed`, `unknown`, `cancelled`.
 
-Insert the attempt and mark `sending` before network I/O. Accept success only with a valid response and provider message ID. A documented rejection known not to have accepted the message can retry after 5, 15 and 60 minutes, bounded to four attempts total and still-current eligibility. Respect an explicit provider retry delay if longer. Invalid credentials, invalid numbers and unsupported version are permanent configuration failures; show an actionable administrator error without raw provider bodies.
+Insert the attempt and mark `sending` before network I/O. Accept success only with a valid response and provider message ID. Automatic retries are limited to proven pre-HTTP `ENOTFOUND`, `EAI_AGAIN` and `ECONNREFUSED` failures, after 5, 15 and 60 minutes, bounded to four attempts total and still-current eligibility. No generic HTTP rejection or provider retry-delay hint establishes a safe retry. Timeout/reset, unclassified HTTP and malformed success remain unknown. Pinned pre-handler authorization and local zero-fetch validation failures are permanent; show an actionable administrator error without raw provider bodies.
 
 Permanent failures do not retry automatically. After correction and current-eligibility reconciliation, an administrator may explicitly retry only the pinned pre-handler `provider_unauthorized` or local zero-fetch `invalid_text`, `invalid_number` and `whatsapp_not_configured` codes, still within four attempts and queue capacity. Unknown, accepted, cancelled and unclassified remote failures remain ineligible for manual resend. The log shows translated allowlisted reasons and generic copy for an unrecognized code, never raw provider text.
 

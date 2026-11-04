@@ -4,6 +4,7 @@ import { RepositoryError } from '../../repositories/base.js';
 import type { ReminderCandidate, ReminderJob, SendOutcome } from './contracts.js';
 import { reminderIdentity, isManualRetryFailure, isValidReminderText, MANUAL_RETRY_FAILURE_CODES } from './contracts.js';
 import { normalizeWhatsAppPhone } from './phone.js';
+import type { DestinationReplacement } from './destinations.js';
 
 const FIELDS = ['instance', 'item_type', 'item_id', 'expiry_date', 'bucket', 'recipient', 'recipient_label', 'audience', 'item_name', 'owner_name', 'text'] as const;
 const SNAPSHOT = ['recipient_label', 'audience', 'item_name', 'owner_name', 'text'] as const;
@@ -19,40 +20,51 @@ export function atomic<T>(db: Db, action: () => T): T {
 export class ReminderStore {
   constructor(readonly db: Db, readonly instance: string, readonly clock: () => Date = () => new Date()) {}
 
-  reconcile(candidates: ReminderCandidate[]): void {
+  reconcile(candidates: ReminderCandidate[], replacements: DestinationReplacement[] = []): void {
     const current = new Map(candidates.map(candidate => [reminderIdentity(candidate), candidate]));
     const jobs = this.db.prepare("SELECT * FROM whatsapp_jobs WHERE instance=? AND state IN ('pending','retryable_failed','permanent_failed')").all(this.instance) as unknown as ReminderJob[];
+    const replaceable = new Set(jobs.filter(job => job.state !== 'permanent_failed' || isManualRetryFailure(job.error_code)).map(reminderIdentity));
     for (const job of jobs) {
       const candidate = current.get(reminderIdentity(job));
       if (!candidate) this.db.prepare("UPDATE whatsapp_jobs SET state='cancelled',error_code='no_longer_eligible',updated_at=? WHERE id=?").run(this.clock().toISOString(), job.id);
       else this.db.prepare(`UPDATE whatsapp_jobs SET ${SNAPSHOT.map(key => `${key}=?`).join(',')},updated_at=? WHERE id=?`)
         .run(...SNAPSHOT.map(key => candidate[key]), this.clock().toISOString(), job.id);
     }
+    this.admit(replacements.filter(pair => replaceable.has(reminderIdentity(pair.previous))).map(pair => pair.current));
   }
 
   enqueue(candidates: ReminderCandidate[]): number {
     return atomic(this.db, () => {
       this.reconcile(candidates);
-      let inserted = 0, deferred = 0;
-      const queued = Number(this.db.prepare("SELECT count(*) total FROM whatsapp_jobs WHERE state IN ('pending','retryable_failed','sending')").get()!.total);
-      const now = this.clock().toISOString();
-      const identityExists = this.db.prepare(`SELECT 1 FROM whatsapp_jobs WHERE instance=? AND item_type=? AND item_id=?
-        AND expiry_date=? AND bucket=? AND recipient=? AND state!='cancelled'`);
-      const insert = this.db.prepare(`INSERT INTO whatsapp_jobs
-        (id,${FIELDS.join(',')},next_attempt_at,created_at,updated_at) VALUES (${Array(15).fill('?').join(',')})
-        ON CONFLICT(instance,item_type,item_id,expiry_date,bucket,recipient) WHERE state!='cancelled' DO NOTHING`);
-      for (const candidate of candidates) {
-        if (candidate.instance !== this.instance) throw new Error('Reminder instance mismatch');
-        if (queued + inserted >= 2000) {
-          const existing = identityExists.get(candidate.instance, candidate.item_type, candidate.item_id, candidate.expiry_date, candidate.bucket, candidate.recipient);
-          if (!existing) deferred += 1;
-          continue;
-        }
-        inserted += Number(insert.run(randomUUID(), ...FIELDS.map(key => candidate[key]), now, now, now).changes);
-      }
-      if (deferred) console.warn(`[whatsapp] queue capacity reached; ${deferred} eligible jobs deferred until the next selection`);
-      return inserted;
+      return this.admit(candidates);
     });
+  }
+
+  private admit(candidates: ReminderCandidate[]): number {
+    if (!candidates.length) return 0;
+    let inserted = 0, deferred = 0;
+    const queued = this.queueSize();
+    const now = this.clock().toISOString();
+    const identityExists = this.db.prepare(`SELECT 1 FROM whatsapp_jobs WHERE instance=? AND item_type=? AND item_id=?
+      AND expiry_date=? AND bucket=? AND recipient=? AND state!='cancelled'`);
+    const insert = this.db.prepare(`INSERT INTO whatsapp_jobs
+      (id,${FIELDS.join(',')},next_attempt_at,created_at,updated_at) VALUES (${Array(15).fill('?').join(',')})
+      ON CONFLICT(instance,item_type,item_id,expiry_date,bucket,recipient) WHERE state!='cancelled' DO NOTHING`);
+    for (const candidate of candidates) {
+      if (candidate.instance !== this.instance) throw new Error('Reminder instance mismatch');
+      if (queued + inserted >= 2000) {
+        const existing = identityExists.get(candidate.instance, candidate.item_type, candidate.item_id, candidate.expiry_date, candidate.bucket, candidate.recipient);
+        if (!existing) deferred += 1;
+        continue;
+      }
+      inserted += Number(insert.run(randomUUID(), ...FIELDS.map(key => candidate[key]), now, now, now).changes);
+    }
+    if (deferred) console.warn(`[whatsapp] queue capacity reached; ${deferred} eligible jobs deferred until the next selection`);
+    return inserted;
+  }
+
+  queueSize(): number {
+    return Number(this.db.prepare("SELECT count(*) total FROM whatsapp_jobs WHERE state IN ('pending','retryable_failed','sending')").get()!.total);
   }
 
   due(limit = 10): ReminderJob[] {
@@ -103,7 +115,7 @@ export class ReminderStore {
       throw new RepositoryError('Correct the reminder text or destination before retrying.', 'invalid_retry', 409);
     }
     if (job?.state === 'permanent_failed' && isManualRetryFailure(job.error_code) &&
-        Number(this.db.prepare("SELECT count(*) total FROM whatsapp_jobs WHERE state IN ('pending','retryable_failed','sending')").get()!.total) >= 2000) {
+        this.queueSize() >= 2000) {
       throw new RepositoryError('The reminder queue is full.', 'whatsapp_queue_full', 409);
     }
     const changed = this.db.prepare(`UPDATE whatsapp_jobs SET state='pending',next_attempt_at=?,updated_at=?

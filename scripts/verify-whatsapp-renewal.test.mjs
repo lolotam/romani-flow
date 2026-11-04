@@ -2,6 +2,66 @@
 import {reminderApi} from './fixtures/whatsapp-api.mjs';
 import {EMPLOYEE_PHONE,MANAGER_PHONE} from './fixtures/whatsapp.mjs';
 
+test('owner phone-change policy replaces only prepared unsent work on the same day, including A-to-B-to-A',()=>reminderApi(async f=>{
+ const employeePath='/api/employees/'+f.employee.id;
+ await f.request(employeePath,{method:'PATCH',body:{whatsapp_notifications_enabled:true,residency_expiry_date:null}});
+ await f.reminders.schedule();
+ const first=f.db.prepare('SELECT id FROM whatsapp_jobs').get().id;
+ for(const phone of [MANAGER_PHONE,EMPLOYEE_PHONE]){
+  assert.equal((await f.request(employeePath,{method:'PATCH',body:{mobile_no:phone}})).status,200);
+  const pending=f.db.prepare("SELECT recipient FROM whatsapp_jobs WHERE state='pending'").all();
+  assert.deepEqual(pending.map(row=>row.recipient),[phone]);
+ }
+ assert.equal(f.db.prepare('SELECT state FROM whatsapp_jobs WHERE id=?').get(first).state,'cancelled');
+ assert.equal(await f.reminders.drain(),1);assert.equal(f.calls[0].phone,EMPLOYEE_PHONE);
+ await f.request(employeePath,{method:'PATCH',body:{mobile_no:MANAGER_PHONE}});
+ assert.equal(await f.reminders.drain(),0);assert.equal(f.calls.length,1);
+ // New audiences and new documents still wait for scheduled selection.
+ assert.equal((await f.request('/api/whatsapp/recipients',{method:'POST',body:{label:'New synthetic',phone:'+99900000003',enabled:true}})).status,201);
+ assert.equal((await f.request('/api/documents',{method:'POST',body:{title:'New synthetic',employee_id:f.employee.id,document_type_id:f.type.id,expiry_date:'2026-01-01'}})).status,201);
+ assert.equal(f.reminders.store.due().length,0);
+}));
+
+test('management number replacement is atomic; unknown outcomes never create replacements',()=>reminderApi(async f=>{
+ const recipient=await f.request('/api/whatsapp/recipients',{method:'POST',body:{label:'Synthetic manager',phone:MANAGER_PHONE,enabled:true}});
+ const recipientPath='/api/whatsapp/recipients/'+recipient.json.data.id;
+ await f.reminders.schedule();const old=f.reminders.store.due()[0];
+ f.db.exec("CREATE TRIGGER reject_replacement BEFORE INSERT ON whatsapp_jobs BEGIN SELECT RAISE(ABORT,'Synthetic replacement rejection'); END;");
+ assert.equal((await f.request(recipientPath,{method:'PATCH',body:{phone:EMPLOYEE_PHONE}})).status,500);
+ assert.equal(f.db.prepare('SELECT phone FROM whatsapp_recipients').get().phone,MANAGER_PHONE);
+ assert.equal(f.db.prepare('SELECT state FROM whatsapp_jobs WHERE id=?').get(old.id).state,'pending');
+ f.db.exec('DROP TRIGGER reject_replacement');
+ assert.equal((await f.request(recipientPath,{method:'PATCH',body:{phone:EMPLOYEE_PHONE}})).status,200);
+ assert.equal(f.db.prepare("SELECT count(*) n FROM whatsapp_jobs WHERE state='pending'").get().n,2);
+ const job=f.reminders.store.due()[0],claim=f.reminders.store.claim(job.id);
+ f.reminders.store.finish(claim.job,claim.attemptId,{kind:'unknown',code:'transport_interrupted'});
+ // Both document and residency jobs have distinct prepared identities.
+ const other=f.reminders.store.due()[0],second=f.reminders.store.claim(other.id);
+ f.reminders.store.finish(second.job,second.attemptId,{kind:'unknown',code:'transport_interrupted'});
+ await f.request(recipientPath,{method:'PATCH',body:{phone:MANAGER_PHONE}});
+ assert.equal(f.reminders.store.due().length,0);assert.equal(f.calls.length,0);
+}));
+
+test('log retry availability matches queue capacity for permanent requeue but not an already queued retry',()=>reminderApi(async f=>{
+ const {selectReminders}=await import('../server/notifications/whatsapp/selection.ts');
+ await f.request('/api/employees/'+f.employee.id,{method:'PATCH',body:{whatsapp_notifications_enabled:true,residency_expiry_date:null}});
+ await f.reminders.schedule();
+ const claim=f.reminders.store.claim(f.reminders.store.due()[0].id);
+ f.reminders.store.finish(claim.job,claim.attemptId,{kind:'permanent_failed',code:'provider_unauthorized'});
+ // Fill with valid business recipients so the real retry reconciliation retains them.
+ const insert=f.db.prepare("INSERT INTO whatsapp_recipients(id,label,phone,enabled,created_at,updated_at) VALUES(?,?,?,1,'2026-01-01','2026-01-01')");
+ for(let n=0;n<2000;n++)insert.run('synthetic-'+n,'Synthetic '+n,'+999'+String(n+10).padStart(8,'0'));
+ f.reminders.store.enqueue(selectReminders(f.db,'romani',f.clock.now));
+ const queued=f.reminders.store.due()[0],retry=f.reminders.store.claim(queued.id);
+ f.reminders.store.finish(retry.job,retry.attemptId,{kind:'retryable_failed',code:'provider_connection_failed'});
+ const permanent=(await f.request('/api/whatsapp/log?state=permanent_failed')).json.data.items[0];
+ const retryable=(await f.request('/api/whatsapp/log?state=retryable_failed')).json.data.items[0];
+ assert.equal(permanent.retry_allowed,false);assert.equal(retryable.retry_allowed,true);
+ assert.equal((await f.request('/api/whatsapp/jobs/'+claim.job.id+'/retry',{method:'POST',body:{}})).status,409);
+ assert.equal((await f.request('/api/whatsapp/jobs/'+queued.id+'/retry',{method:'POST',body:{}})).status,200);
+ assert.equal(f.calls.length,0);
+}));
+
 test('real API validates current merged opt-in/mobile and keeps new-person defaults private',()=>reminderApi(async f=>{
  const url='/api/employees/'+f.employee.id;
  assert.equal((await f.request(url,{method:'PATCH',body:{whatsapp_notifications_enabled:true}})).status,200);

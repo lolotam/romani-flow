@@ -196,7 +196,7 @@ export function createApp(deps: AppDependencies): Express {
       defaultRelations: ['companies'],
       managedFields: ['photo_path', 'photo_mime_type'],
       transformWrite: (payload, _db, existing) => prepareEmployee(payload, existing),
-      aroundWrite: action => reminders.coordinator.runExclusive(action),
+      aroundWrite: action => reminders.aroundWrite(action),
       afterWrite: () => reminders.reconcile(),
       transformRead: (row) => ({
         ...row,
@@ -207,7 +207,7 @@ export function createApp(deps: AppDependencies): Express {
     }),
   );
   app.use('/api/companies', authenticated, createResourceRouter(db, 'companies', {
-    aroundWrite: action => reminders.coordinator.runExclusive(action), afterWrite: () => reminders.reconcile(),
+    aroundWrite: action => reminders.aroundWrite(action), afterWrite: () => reminders.reconcile(),
   }));
   app.use('/api/ministries', authenticated, createResourceRouter(db, 'ministries'));
   app.use('/api/document-types', authenticated, createResourceRouter(db, 'document_types'));

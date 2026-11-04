@@ -76,10 +76,11 @@ export function createReminderRouter(reminders: WhatsAppReminders, env: NodeEnv)
       }
       const clause = where.join(' AND ');
       const total = db.prepare(`SELECT count(*) total FROM whatsapp_jobs WHERE ${clause}`).get(...values)!.total;
+      const hasCapacity = reminders.store.queueSize() < 2000;
       const items = db.prepare(`SELECT * FROM whatsapp_jobs WHERE ${clause} ORDER BY created_at DESC,id LIMIT ? OFFSET ?`).all(...values, limit, offset)
         .map(job => ({ ...job,
           retry_allowed: isValidReminderText(job.text) && normalizeWhatsAppPhone(job.recipient) === job.recipient &&
-            Number(job.attempt_count) < 4 && (job.state === 'retryable_failed' || (job.state === 'permanent_failed' && isManualRetryFailure(job.error_code))),
+            Number(job.attempt_count) < 4 && (job.state === 'retryable_failed' || (hasCapacity && job.state === 'permanent_failed' && isManualRetryFailure(job.error_code))),
           attempts: db.prepare('SELECT * FROM whatsapp_attempts WHERE job_id=? ORDER BY attempt').all(String(job.id)) }));
       res.json({ data: { items, total }, error: null });
     } catch (error) { next(error); }
