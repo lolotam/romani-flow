@@ -93,6 +93,9 @@ test('unauthenticated, viewer, foreign-project JWT and demoted account cannot co
     const method = url.endsWith('connect') ? 'POST' : 'GET';
     assert.equal((await f.request(url, { method, role: null })).status, 401);
     assert.equal((await f.request(url, { method, role: 'viewer' })).status, 403);
+    const forgedActor = { 'x-role': 'admin', 'x-user-id': 'admin', 'x-project-id': 'romani' };
+    assert.equal((await f.request(url, { method, role: null, headers: forgedActor })).status, 401);
+    assert.equal((await f.request(url, { method, role: 'viewer', headers: forgedActor })).status, 403);
     assert.equal((await f.request(url, { method, session: f.cookie('admin', foreign) })).status, 401);
   }
   assert.equal(f.db.prepare('SELECT total_changes() n').get().n, before);
