@@ -59,7 +59,7 @@ export function createReminderRouter(reminders: WhatsAppReminders, env: NodeEnv)
   }));
   router.get('/log', (req, res, next) => {
     try {
-      const { limit, offset } = page(req), where = ['instance=?'], values: (string | number)[] = [reminders.instance];
+      const { limit, offset } = page(req), where = ['instance=?'], values: (string | number)[] = [reminders.auditInstance];
       if (req.query.state !== undefined) {
         if (typeof req.query.state !== 'string' || !['pending', 'sending', 'provider_accepted', 'retryable_failed', 'permanent_failed', 'unknown', 'cancelled'].includes(req.query.state)) throw new RepositoryError('Invalid state.', 'invalid_query', 400);
         where.push('state=?'); values.push(req.query.state);

@@ -13,6 +13,7 @@ import { Mailer } from './services/mailer.js';
 import { StorageService } from './services/storageService.js';
 import { createReminderRuntime } from './whatsapp/runtime.js';
 import { drainApplication } from './shutdown.js';
+import { stopRequestWork } from './middleware/requestWork.js';
 
 /**
  * Server bootstrap.
@@ -124,7 +125,7 @@ async function main(): Promise<void> {
     shuttingDown = true;
     console.log(`[server] ${signal} received, shutting down`);
     void drainApplication({ server, stopReminders: () => reminders.stop(),
-      stopCron: () => cron.shutdown(),
+      stopCron: () => cron.shutdown(), stopHandlers: () => stopRequestWork(app),
       closeDatabase: () => closeDatabase(db), exit: code => process.exit(code) });
   };
 

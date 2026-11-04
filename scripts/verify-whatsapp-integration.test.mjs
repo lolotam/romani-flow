@@ -6,6 +6,8 @@ import {MessageClient} from '../server/whatsapp/messageClient.ts';
 import {WhatsAppReminders} from '../server/notifications/whatsapp/service.ts';
 import {setSetting} from '../server/repositories/settings.ts';
 import {createReminderRuntime} from '../server/whatsapp/runtime.ts';
+import {createApp} from '../server/app.ts';
+import {signSession} from '../server/middleware/auth.ts';
 
 test('restart with invalid local configuration cannot admit jobs, replacements or a daily checkpoint',()=>loopbackEvolution(async e=>reminderApi(async f=>{
  await f.request('/api/employees/'+f.employee.id,{method:'PATCH',body:{whatsapp_notifications_enabled:true,residency_expiry_date:null}});
@@ -16,6 +18,14 @@ test('restart with invalid local configuration cannot admit jobs, replacements o
   assert.equal(await invalid.schedule(),0);
   await invalid.mutate(()=>f.db.prepare('UPDATE employees SET mobile_no=?').run(MANAGER_PHONE));
   assert.equal(await invalid.drain(),0);
+  const app=createApp({config:f.config,db:f.db,mailer:f.mailer,cron:f.cron,storage:f.storage,documents:f.documents,reminders:invalid,staticDir:f.config.dataDir});
+  const server=app.listen(0,'127.0.0.1');await new Promise(resolve=>server.on('listening',resolve));
+  try{
+   const cookie=f.config.cookieName+'='+signSession(f.config,{id:'admin',role:'admin',name:'Synthetic',email:'admin@example.invalid'});
+   const response=await fetch('http://127.0.0.1:'+server.address().port+'/api/whatsapp/log',{headers:{cookie}});
+   assert.equal(response.status,200);const audit=(await response.json()).data;
+   assert.equal(audit.total,original.length);assert.deepEqual(audit.items.map(job=>job.id),original.map(job=>job.id));
+  }finally{server.closeAllConnections();await new Promise(resolve=>server.close(resolve));}
   assert.equal(f.db.prepare("SELECT value FROM settings WHERE key='whatsapp.last_enqueue_date'").get(),undefined);
   assert.deepEqual(f.db.prepare('SELECT * FROM whatsapp_jobs ORDER BY id').all(),original);
  }

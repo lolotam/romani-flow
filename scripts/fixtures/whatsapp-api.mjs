@@ -21,13 +21,14 @@ export async function reminderApi(run,send,pairing={}){
  const mailer=new Mailer(config),cron=new CronService(f.db,mailer),storage=new StorageService(config.uploadsDir);storage.ensureDirectories();
  for(const role of ['admin','viewer']) f.db.prepare("INSERT INTO admin_users(id,email,name,role,password_hash,created_at,updated_at) VALUES(?,?,?,?,?,'2026-01-01','2026-01-01')").run(role,role+'@example.invalid','Synthetic',role,'not-a-login-fixture');
  const documents=new DocumentService(f.db,storage);
- const server=http.createServer(createApp({config,db:f.db,mailer,cron,storage,documents,reminders,staticDir:dir}));
+ const app=createApp({config,db:f.db,mailer,cron,storage,documents,reminders,staticDir:dir});
+ const server=http.createServer(app);
  await new Promise(r=>server.listen(0,'127.0.0.1',r));const base='http://127.0.0.1:'+server.address().port;
  const request=async(url,{method='GET',body,role='admin',headers={}}={})=>{
   const cookie=role?{cookie:config.cookieName+'='+signSession(config,{id:role,name:'Synthetic',email:role+'@example.invalid',role})}:{};
   const res=await fetch(base+url,{method,headers:{...cookie,...(body!==undefined?{'content-type':'application/json'}:{}),...headers},body:body===undefined?undefined:JSON.stringify(body)});
   return {status:res.status,json:await res.json()};
  };
- try{await run({...f,reminders,calls,request,base,config,cron,documents});}
+ try{await run({...f,reminders,calls,request,base,config,cron,documents,app,server,mailer,storage});}
  finally{await cron.shutdown();await reminders.stop();server.closeAllConnections();await new Promise(r=>server.close(r));f.close();if(!dir.startsWith(path.join(os.tmpdir(),'romani-wa-api-')))throw Error('Unsafe fixture cleanup');fs.rmSync(dir,{recursive:true,force:true});}
 }

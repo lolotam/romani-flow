@@ -186,8 +186,10 @@ fixture namespace/prefix compatibility does not make a configuration send-ready.
 For example, an explicit default port or uppercase URL spelling that differs from
 the normalized origin is refused for reminders before provider access.
 
-On shutdown the worker and cron stop new admission immediately while HTTP drains
-in parallel. The database closes only after all three drains finish. The application hard
+On shutdown the worker, cron and async API handlers stop new admission immediately while HTTP drains
+in parallel. Handler work is tracked separately from sockets: a disconnected client does not
+discard an in-flight SMTP result. The database closes only after the worker, cron, HTTP and
+handler drains finish. The application hard
 deadline is 90 seconds, allowing the SMTP phase timers and worker drain; interrupted sends
 remain durable for unknown recovery. Before deployment verify that the managed
 container stop grace allows this deadline with operational margin. Current host

@@ -10,6 +10,7 @@ import { changedDestinations, snapshotDestinations, type DestinationSnapshot } f
 export class WhatsAppReminders {
   readonly coordinator = new NotificationCoordinator();
   readonly store: ReminderStore;
+  readonly auditInstance: string;
   private timer: ReturnType<typeof setInterval> | null = null;
   private draining: Promise<number> | null = null;
   private stopped = false;
@@ -18,6 +19,8 @@ export class WhatsAppReminders {
   constructor(readonly db: Db, readonly instance: string, private readonly transport: WhatsAppTransport,
     readonly clock: () => Date = () => new Date()) {
     this.store = new ReminderStore(db, instance, clock);
+    // Invalid sending configuration must not hide this backend's existing audit.
+    this.auditInstance = instance || 'romani';
   }
 
   /** Call inside the business write's transaction and the shared coordinator. */
