@@ -51,7 +51,7 @@ export function EmployeeDocumentsHeader({ employee, documentCount, onPhotoChange
     }
   };
 
-  return <div className="flex flex-col sm:flex-row items-start gap-6 flex-1">
+  return <div className="flex w-full flex-col items-center gap-4">
     <div className="relative shrink-0">
       <div className="w-24 h-24 sm:w-28 sm:h-28 rounded-full border-4 border-primary/20 overflow-hidden bg-muted shadow-elegant">
         {employee.photo_path ? <img
@@ -69,15 +69,15 @@ export function EmployeeDocumentsHeader({ employee, documentCount, onPhotoChange
         <X className="h-3 w-3" />
       </Button>}
     </div>
-    <div className="flex-1">
+    <div className="w-full text-center">
       <Button variant="ghost" size="sm" onClick={() => navigate('/employees')} className="mb-2">
         <ArrowLeft className="h-4 w-4 ml-1" />{t('employeeDocuments.back')}
       </Button>
-      <div className="flex flex-wrap items-center gap-2">
-        <h1 className="text-3xl font-bold text-gradient">{t('employeeDocuments.title', { name: employee.name })}</h1>
+      <div className="flex flex-wrap items-center justify-center gap-3">
+        <h1 className="break-words text-4xl font-bold leading-tight text-teal-950 sm:text-5xl dark:text-teal-50">{employee.name}</h1>
         <Badge>{documentCount}</Badge>
       </div>
-      <div className="flex flex-wrap items-center gap-2 mt-2">
+      <div className="flex flex-wrap items-center justify-center gap-2 mt-3">
         <UserCheck className="h-5 w-5 text-primary" />
         <span className="text-muted-foreground">{language === 'ar' ? employee.companies?.name_ar : employee.companies?.name}</span>
         {employee.position && <Badge variant="outline">{employee.position}</Badge>}

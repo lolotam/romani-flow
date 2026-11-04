@@ -15,7 +15,6 @@ import { useStagedDocumentUpload } from './documents/useStagedDocumentUpload';
 import { toast } from 'sonner';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { useLastSubmissionRestore } from '@/hooks/useLastSubmission';
-import { restoreFormDate } from '@/lib/formDefaults';
 
 const emptyForm = {
   title: '', document_type_id: '', ministry_id: '',
@@ -48,9 +47,9 @@ export function EmployeeDocumentForm({
   const dirty = useRef(false);
   useEffect(() => { if (isOpen) dirty.current = false; }, [isOpen, employeeId]);
   useLastSubmissionRestore('documents', isOpen, (saved) => {
-    setFormData({ title: uploadedFile ? uploadedFile.name.replace(/\.[^/.]+$/, '') : String(saved.title ?? ''),
+    setFormData(current => ({ ...current, title: uploadedFile ? uploadedFile.name.replace(/\.[^/.]+$/, '') : String(saved.title ?? ''),
       document_type_id: String(saved.document_type_id ?? ''), ministry_id: String(saved.ministry_id ?? ''),
-      issue_date: restoreFormDate(saved.issue_date) ?? null, expiry_date: restoreFormDate(saved.expiry_date) ?? null, notes: String(saved.notes ?? '') });
+      notes: String(saved.notes ?? '') }));
   }, () => !dirty.current);
 
   useEffect(() => {

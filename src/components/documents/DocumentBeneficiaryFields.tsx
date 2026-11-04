@@ -1,19 +1,23 @@
-import { useState } from 'react';
+import { useId, useState } from 'react';
 import { useFormContext } from 'react-hook-form';
 import { Building2, User } from 'lucide-react';
 import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 import { FormControl, FormField, FormItem, FormLabel, FormMessage } from '@/components/ui/form';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useLanguage } from '@/contexts/LanguageContext';
 import type { DocumentFormData, DocumentFormProps } from './documentFormSchema';
 
-type Props = Pick<DocumentFormProps, 'companies' | 'employees' | 'documentTypes' | 'ministries'>;
+type Props = Pick<DocumentFormProps, 'companies' | 'employees' | 'documentTypes' | 'ministries' | 'preselectedEmployeeId'>;
 
-export function DocumentBeneficiaryFields({ companies, employees, documentTypes, ministries }: Props) {
+export function DocumentBeneficiaryFields({ companies, employees, documentTypes, ministries, preselectedEmployeeId }: Props) {
   const form = useFormContext<DocumentFormData>();
   const { t, language } = useLanguage();
   const [selectedCompany, setSelectedCompany] = useState('');
+  const scopeId = useId();
   const beneficiaryType = form.watch('beneficiary_type');
+  const lockedEmployee = employees.find(employee => employee.id === preselectedEmployeeId);
+  const employeeCompany = companies.find(company => company.id === lockedEmployee?.company_id);
   const watchedMinistry = form.watch('ministry_id');
   const selectedCompanyEmployees = selectedCompany
     ? employees.filter(emp => emp.company_id === selectedCompany)
@@ -142,7 +146,12 @@ export function DocumentBeneficiaryFields({ companies, employees, documentTypes,
             <span>{t('documents.form.employeeDataLabel')}</span>
           </h3>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {preselectedEmployeeId ? <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="space-y-2"><Label htmlFor={`${scopeId}-employee`}>{t('documents.form.employeeLabel')}</Label>
+              <Input id={`${scopeId}-employee`} value={lockedEmployee?.name ?? ''} readOnly aria-readonly="true" /></div>
+            <div className="space-y-2"><Label htmlFor={`${scopeId}-company`}>{t('documents.form.company')}</Label>
+              <Input id={`${scopeId}-company`} value={language === 'ar' ? employeeCompany?.name_ar || employeeCompany?.name || '' : employeeCompany?.name || ''} readOnly aria-readonly="true" /></div>
+          </div> : <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <FormField
               control={form.control}
               name="company_id"
@@ -199,7 +208,7 @@ export function DocumentBeneficiaryFields({ companies, employees, documentTypes,
                 </FormItem>
               )}
             />
-          </div>
+          </div>}
 
           <FormField
             control={form.control}

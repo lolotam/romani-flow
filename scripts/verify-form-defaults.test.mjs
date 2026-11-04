@@ -60,11 +60,16 @@ test('only the latest successful creation is remembered; failures and edits leav
  saved=(await call('/api/form-defaults/employees')).payload.data;assert.equal(saved.name,'Latest fixture');
  assert.equal(db.prepare('SELECT count(*) n FROM form_defaults WHERE user_id=? AND form_key=?').get(accounts[0].id,'employees').n,1);
 });
-test('document defaults omit files and do not change on failed upload claim',async()=>{
+test('document defaults omit files and dates, including legacy values, without changing stored documents',async()=>{
  const type=insertRow(db,'document_types',{name:'Fixture type',name_ar:'نوع اختباري'});
- const created=await call('/api/documents',{method:'POST',body:{title:'Fixture document',document_type_id:type.id,expiry_date:'2030-01-01'}});assert.equal(created.status,201);
+ const created=await call('/api/documents',{method:'POST',body:{title:'Fixture document',document_type_id:type.id,issue_date:'2029-01-01',expiry_date:'2030-01-01'}});assert.equal(created.status,201);
  const before=(await call('/api/form-defaults/documents')).payload.data;assert.equal(before.title,'Fixture document');
- for(const k of ['file_name','file_path','file_size','mime_type','upload_id','id','status'])assert.equal(k in before,false);
+ for(const k of ['file_name','file_path','file_size','mime_type','upload_id','id','status','issue_date','expiry_date'])assert.equal(k in before,false);
+ assert.equal(created.payload.data[0].expiry_date,'2030-01-01');
+ assert.equal(created.payload.data[0].issue_date,'2029-01-01');
+ db.prepare("UPDATE form_defaults SET values_json=? WHERE user_id=? AND form_key='documents'")
+  .run(JSON.stringify({...before,issue_date:'2029-01-01',expiry_date:'2030-01-01'}),accounts[0].id);
+ assert.deepEqual((await call('/api/form-defaults/documents')).payload.data,before);
  const bad=await call('/api/documents',{method:'POST',body:{title:'Rejected document',document_type_id:type.id,upload_id:'missing'}});assert.notEqual(bad.status,201);
  assert.deepEqual((await call('/api/form-defaults/documents')).payload.data,before);
  assert.throws(()=>db.prepare('DELETE FROM document_types WHERE id=?').run(type.id));
