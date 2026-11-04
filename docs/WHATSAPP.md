@@ -81,9 +81,10 @@ permission to repeat yesterday's accepted/uncertain expired reminder.
 WhatsApp selection runs independently even when email is disabled, failed or
 already completed. No immediate document-created send is introduced. A single
 in-process worker drains at most 10 eligible jobs per 60-second tick, with a 2000-job
-pending/sending/retry backlog cap. Oversized selection rolls back rather than
-partially enqueueing or growing an unbounded pending queue. Selection retries at
-the next scheduled run after backlog drains. Audit history is retained separately
+pending/sending/retry backlog cap. Selection commits the eligible jobs that fit,
+logs only the deferred count and leaves overflow for the next scheduled selection
+after backlog drains. Existing accepted/unknown identities still suppress duplicates;
+the cap cannot permanently stall an oversized first batch. Audit history is retained separately
 from pending capacity.
 
 A current unsent expired job survives a disconnected day as the same job. On

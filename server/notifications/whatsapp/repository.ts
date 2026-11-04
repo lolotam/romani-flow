@@ -33,17 +33,24 @@ export class ReminderStore {
   enqueue(candidates: ReminderCandidate[]): number {
     return atomic(this.db, () => {
       this.reconcile(candidates);
-      let inserted = 0;
+      let inserted = 0, deferred = 0;
       const queued = Number(this.db.prepare("SELECT count(*) total FROM whatsapp_jobs WHERE state IN ('pending','retryable_failed','sending')").get()!.total);
       const now = this.clock().toISOString();
+      const identityExists = this.db.prepare(`SELECT 1 FROM whatsapp_jobs WHERE instance=? AND item_type=? AND item_id=?
+        AND expiry_date=? AND bucket=? AND recipient=? AND state!='cancelled'`);
+      const insert = this.db.prepare(`INSERT INTO whatsapp_jobs
+        (id,${FIELDS.join(',')},next_attempt_at,created_at,updated_at) VALUES (${Array(15).fill('?').join(',')})
+        ON CONFLICT(instance,item_type,item_id,expiry_date,bucket,recipient) WHERE state!='cancelled' DO NOTHING`);
       for (const candidate of candidates) {
         if (candidate.instance !== this.instance) throw new Error('Reminder instance mismatch');
-        inserted += Number(this.db.prepare(`INSERT INTO whatsapp_jobs
-          (id,${FIELDS.join(',')},next_attempt_at,created_at,updated_at) VALUES (${Array(15).fill('?').join(',')})
-          ON CONFLICT(instance,item_type,item_id,expiry_date,bucket,recipient) WHERE state!='cancelled' DO NOTHING`)
-          .run(randomUUID(), ...FIELDS.map(key => candidate[key]), now, now, now).changes);
-        if (queued + inserted > 2000) throw new RepositoryError('The reminder queue is full; retry selection after it drains.', 'whatsapp_queue_full', 409);
+        if (queued + inserted >= 2000) {
+          const existing = identityExists.get(candidate.instance, candidate.item_type, candidate.item_id, candidate.expiry_date, candidate.bucket, candidate.recipient);
+          if (!existing) deferred += 1;
+          continue;
+        }
+        inserted += Number(insert.run(randomUUID(), ...FIELDS.map(key => candidate[key]), now, now, now).changes);
       }
+      if (deferred) console.warn(`[whatsapp] queue capacity reached; ${deferred} eligible jobs deferred until the next selection`);
       return inserted;
     });
   }

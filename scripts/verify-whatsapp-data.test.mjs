@@ -43,10 +43,17 @@ test('canonical recipient uniqueness and job identity are enforced in SQLite',as
  }finally{f.close();}
 });
 
-test('queue backpressure rolls back oversized enqueue instead of growing an unbounded pending queue',async()=>{
+test('queue capacity commits what fits and selects deferred work after next-day capacity returns without duplicates',async t=>{
  const {reminderFixture}=await import('./fixtures/whatsapp.mjs');const {ReminderStore}=await import('../server/notifications/whatsapp/repository.ts');const {selectReminders}=await import('../server/notifications/whatsapp/selection.ts');
  const f=reminderFixture();try{f.db.prepare('UPDATE employees SET whatsapp_notifications_enabled=1').run();const base=selectReminders(f.db,'romani-fixture',f.clock.now)[0];const store=new ReminderStore(f.db,'romani-fixture',()=>f.clock.now);
   const candidates=Array.from({length:2001},(_,n)=>({...base,recipient:'+999'+String(n).padStart(8,'0')}));
-  assert.throws(()=>store.enqueue(candidates),/queue is full/);assert.equal(f.db.prepare('SELECT count(*) n FROM whatsapp_jobs').get().n,0);
+  const warnings=[];t.mock.method(console,'warn',message=>warnings.push(message));
+  assert.equal(store.enqueue(candidates),2000);assert.equal(f.db.prepare('SELECT count(*) n FROM whatsapp_jobs').get().n,2000);
+  assert.equal(store.enqueue(candidates),0);assert.equal(warnings.length,2);assert.ok(warnings.every(message=>!message.includes('+999')));
+  const claim=store.claim(store.due()[0].id);store.finish(claim.job,claim.attemptId,{kind:'provider_accepted',messageId:'synthetic-capacity'});
+  f.clock.now=new Date('2026-01-03T08:00:00Z');assert.equal(store.enqueue(candidates),1);assert.equal(store.enqueue(candidates),0);
+  assert.equal(f.db.prepare("SELECT count(*) n FROM whatsapp_jobs WHERE state='pending'").get().n,2000);
+  assert.equal(f.db.prepare('SELECT count(*) n FROM whatsapp_jobs').get().n,2001);assert.equal(warnings.length,2);
+  assert.ok(f.db.prepare('SELECT id FROM whatsapp_jobs WHERE recipient=?').get(candidates.at(-1).recipient));
  }finally{f.close();}
 });
