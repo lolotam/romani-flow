@@ -13,7 +13,9 @@ export default defineConfig(({ mode }) => ({
     proxy: {
       "/api": {
         target: process.env.VITE_API_URL ?? "http://127.0.0.1:3000",
-        changeOrigin: true,
+        // Preserve the browser's host so backend same-origin mutation checks
+        // also work through the development proxy, without trusting forwarded hosts.
+        changeOrigin: false,
       },
       "/health": {
         target: process.env.VITE_API_URL ?? "http://127.0.0.1:3000",

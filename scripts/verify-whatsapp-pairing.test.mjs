@@ -14,6 +14,7 @@ import { StorageService } from '../server/services/storageService.ts';
 import { DocumentService } from '../server/services/documentService.ts';
 import { CronService } from '../server/services/cronService.ts';
 import { pairingConfiguration, readPairingConfig } from '../server/whatsapp/config.ts';
+import { createServer as createViteServer } from 'vite';
 
 // Synthetic loopback provider only; no .env, production accounts or real QR scan.
 const PNG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jGDkAAAAASUVORK5CYII=';
@@ -226,4 +227,20 @@ test('malformed webhook JSON cannot leak its body to the exception log', () => f
     assert.equal(r.status, 400); assert.equal((await r.json()).error.code, 'invalid_body');
     assert.equal(logged.length, 0); assert.equal(f.calls.length, 0);
   } finally { console.error = original; }
+}));
+
+test('actual development proxy preserves same-origin pairing and still rejects another site', () => fixture(async f => {
+  const vite = await createViteServer({ configFile: path.resolve('vite.config.ts'), mode: 'test', logLevel: 'silent',
+    server: { host: '127.0.0.1', port: 0, proxy: { '/api': { target: f.base } } } });
+  try {
+    await vite.listen();
+    const origin = `http://127.0.0.1:${vite.httpServer.address().port}`;
+    const post = site => fetch(origin + '/api/whatsapp/connect', { method: 'POST',
+      headers: { origin: site, cookie: f.cookie(), 'content-type': 'application/json' }, body: '{}' });
+    const own = await post(origin);
+    assert.equal(own.status, 200); assert.equal((await own.json()).data.qr, PNG);
+    const before = f.calls.length;
+    assert.equal((await post('https://curemed.example.invalid')).status, 403);
+    assert.equal(f.calls.length, before);
+  } finally { await vite.close(); }
 }));
