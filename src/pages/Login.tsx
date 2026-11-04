@@ -65,8 +65,9 @@ export default function Login() {
         <LanguageToggle />
       </div>
 
+      {/* Login stays visible even when animation frames are delayed or suspended. */}
       <motion.div
-        initial={{ opacity: 0, y: 20 }}
+        initial={false}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.6 }}
         className="w-full max-w-md relative z-10"
@@ -74,7 +75,7 @@ export default function Login() {
         <Card className="shadow-elegant bg-card border-border">
           <CardHeader className="text-center space-y-4">
             <motion.div
-              initial={{ scale: 0 }}
+              initial={false}
               animate={{ scale: 1 }}
               transition={{ delay: 0.2, type: "spring", stiffness: 200 }}
               className="mx-auto w-16 h-16 bg-primary rounded-2xl flex items-center justify-center shadow-glow"
@@ -98,7 +99,7 @@ export default function Login() {
           <CardContent>
             <form onSubmit={handleSubmit} className="space-y-6">
               <motion.div
-                initial={{ opacity: 0, x: -20 }}
+                initial={false}
                 animate={{ opacity: 1, x: 0 }}
                 transition={{ delay: 0.3 }}
                 className="space-y-2"
@@ -118,7 +119,7 @@ export default function Login() {
               </motion.div>
 
               <motion.div
-                initial={{ opacity: 0, x: -20 }}
+                initial={false}
                 animate={{ opacity: 1, x: 0 }}
                 transition={{ delay: 0.4 }}
                 className="space-y-2"
@@ -153,7 +154,7 @@ export default function Login() {
               </motion.div>
 
               <motion.div
-                initial={{ opacity: 0, y: 20 }}
+                initial={false}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ delay: 0.5 }}
               >
@@ -168,7 +169,7 @@ export default function Login() {
             </form>
 
             <motion.div
-              initial={{ opacity: 0 }}
+              initial={false}
               animate={{ opacity: 1 }}
               transition={{ delay: 0.6 }}
               className="mt-6 text-center text-sm text-muted-foreground"
