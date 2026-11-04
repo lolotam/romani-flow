@@ -1,11 +1,12 @@
 import type { Server } from 'node:http';
 
-// Exceeds the bounded 15-second send and 10-second status requests; deployment must allow this grace.
-export const SHUTDOWN_DEADLINE_MS = 20_000;
+// Allows SMTP's 15/15/30-second phase timers plus worker drain and margin; not a delivery guarantee.
+export const SHUTDOWN_DEADLINE_MS = 90_000;
 
 interface ShutdownOptions {
   server: Server;
   stopReminders: () => Promise<void>;
+  stopCron: () => Promise<void>;
   closeDatabase: () => void;
   exit: (code: number) => void;
 }
@@ -15,11 +16,12 @@ export async function drainApplication(options: ShutdownOptions): Promise<void> 
   deadline.unref();
   // Stop new claims synchronously, before waiting for active HTTP requests.
   const remindersStopped = options.stopReminders();
+  const cronStopped = options.stopCron();
   const httpClosed = new Promise<void>((resolve, reject) => {
     options.server.close(error => error ? reject(error) : resolve());
   });
   try {
-    await Promise.all([remindersStopped, httpClosed]);
+    await Promise.all([remindersStopped, cronStopped, httpClosed]);
     options.closeDatabase();
     options.exit(0);
   } catch {

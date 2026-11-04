@@ -125,7 +125,7 @@ Expected route surface is exactly spec section 11; no arbitrary free-text send o
 - [x] Commit candidate jobs atomically; drain through one in-process worker every 60 seconds. Add one in-flight worker guard and conditional DB claims; stop its timer on normal server shutdown. No provider contact when WhatsApp is off or configuration absent.
 - [x] Use a partial unique index for logical identities where state is not cancelled. Preserve cancelled audit rows but allow one fresh live row after unsent expiry A→B→A or recipient remove/re-add; accepted/unknown rows still block a duplicate. Test both resurrection cases with competing enqueue calls.
 - [x] Before each future handoff, atomically save refreshed names/audience/text in the immutable attempt while marking sending; transmit that stored text. Test a name edit after enqueue and prove actual transport bytes equal the recorded attempt snapshot; historical attempts stay unchanged.
-- [x] Start a durable attempt before `sendText`. Known safe rejections may retry at +5/+15/+60 minutes, four attempts total, or a longer provider delay. Credentials/invalid-number/version errors fail permanently. Interrupted `sending` rows become `unknown` on startup; unknown never automatically replays.
+- [x] Start a durable attempt before `sendText`. Only proven pre-HTTP `ENOTFOUND`, `EAI_AGAIN` and `ECONNREFUSED` failures retry at +5/+15/+60 minutes, four attempts total. A provider retry hint never establishes safe resend. Authorization/local validation failures require the separately allowlisted explicit manual correction/retry. Interrupted `sending` rows become `unknown` on startup; unknown never automatically replays.
 - [x] Cancel superseded expiry/obsolete threshold/invalid-recipient jobs before dispatch. Keep a still-current never-handed-off expired job across day rollover; reconnect must reuse it, not create a daily replacement. Drain a bounded batch and preserve accepted/unknown identity suppression.
 - [x] Implement `NotificationCoordinator.runExclusive<T>(action: () => Promise<T>): Promise<T>` as the shared in-process gate. The dispatcher holds it from final eligibility read through the bounded provider handoff; mutations in Task 5 use the same instance. Do not hold a SQLite transaction while awaiting HTTP.
 - [x] Run real temporary-DB tests with deterministic clock injection and the loopback provider. Include competing drains, restart after claim, provider acceptance followed by lost response, timeout uncertainty, day rollover without expired re-enqueue and destination-specific retry. Run an accelerated real node-cron firing separately from directly invoking a handler.
@@ -268,7 +268,7 @@ query-override isolation disposition do not authorize reminder activation.
 
 - [x] Replace only already-prepared unsent work after a phone edit to an existing employee/management recipient, atomically and on the same day. Preserve current eligibility, accepted/unknown suppression, capacity and A-to-B-to-A history. Do not enqueue on a new audience/document or global enable.
 - [x] Use one strict origin-only/exact-romani predicate for reminder readiness, enablement and sending; retain existing pairing-only prefix/fixture compatibility. Prove refusal before provider access.
-- [x] Stop worker claims before HTTP drain, await both before DB close and give the application a 20-second hard deadline. Verify actual managed stop grace separately before release; local lifecycle tests do not prove host grace.
+- [x] Stop worker/cron admission before HTTP drain, await all three before DB close and use the current 90-second application hard ceiling. Verify actual managed stop grace separately before release; local lifecycle tests do not prove host grace or whole-operation SMTP completion.
 - [x] Match log retry availability to permanent-job queue capacity, retain retry of already queued jobs, and state that deferred overflow is re-evaluated at its current bucket rather than promised at its original threshold.
 - [x] Restrict specification automatic-retry wording to the pinned pre-HTTP DNS/refused allowlist. No remote retry hint or unclassified HTTP permits resend.
 
@@ -289,3 +289,18 @@ This batch contains local synthetic verification only. Production migration007,
 auto-deploying merge, enablement, QR/webhook and live sends retain their separate
 owner release/activation gates. No production data or credential changes are
 part of this correction.
+
+## Owner-approved erase/lifecycle/readiness correction batch (2026-11-04)
+
+- [x] Business erase preserves WhatsApp audit/attempts and management recipients, atomically disables WhatsApp and clears its enqueue checkpoint. AR/EN confirmation explicitly discloses retained personal audit text and deliberate re-enable. A failed disable rolls back the whole erase; no production erase is part of this task.
+- [x] Track all active cron/manual runs, close admission on shutdown and await their completion with HTTP and WhatsApp drains before DB close. Keep normal timer stop/reschedule separate from terminal shutdown. The application ceiling is90seconds, not a total SMTP delivery guarantee; actual managed grace remains a release gate.
+- [x] Construct production reminder authority from the strict local origin/exact-romani predicate. Invalid restart configuration cannot admit jobs, replacements or a checkpoint, even with already-enabled DB settings. Preserve existing rows; do not delete orphan/history data to pass a cap.
+- [x] Remove the stale provider-delay sentence from Task5 and state that selection jobs/checkpoint share an outer transaction. Same-day phone replacement means the edit day; no original-created-today condition is added.
+
+Local evidence covers retained accepted/unknown audit, cancelled pending work,
+new records while disabled and explicit re-enable, rejected erase rollback,
+invalid-config restart/correction without provider access, and held SMTP past the
+old20-second ceiling with no DB close or new cron/manual admission. Production
+migration/deploy/activation and the host's actual grace still need their existing
+owner disposition. No new feature, provider, cost lane, real recipient or secret
+operation is part of this batch.

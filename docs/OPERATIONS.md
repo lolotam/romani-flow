@@ -175,3 +175,20 @@ timestamps. Keep customer names, file contents, account emails and secrets out o
 public receipts. Send concrete blockers/results directly to SA; tool acceptance is
 not SA approval. Freeze only when the accepted B1–B8 ledger has journey and
 operating evidence and the final release is accepted.
+
+
+## Reminder shutdown and business-erasure retention
+
+The reminder release awaits HTTP, WhatsApp handoff and active cron/SMTP work before
+closing SQLite. The application has a 90-second hard shutdown ceiling; SMTP's
+15/15/30-second connection/greeting/socket timers are phase/idle limits rather
+than a total-operation bound. Verify the managed stop grace with operational
+margin before deployment. A forced shutdown remains an uncertain-delivery case,
+not proof of an unsent email. Do not change production grace without the owner
+release disposition.
+
+Business erase retains WhatsApp audit (including names/numbers/message text) and
+management recipients, disables WhatsApp and clears its enqueue checkpoint
+atomically. It is not a privacy purge. New business data cannot reactivate
+WhatsApp without deliberate administrator enablement. Preserve retained audit
+and recipient configuration; any full purge needs a separate explicit decision.

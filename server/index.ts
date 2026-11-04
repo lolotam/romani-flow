@@ -11,8 +11,7 @@ import { CronService } from './services/cronService.js';
 import { DocumentService } from './services/documentService.js';
 import { Mailer } from './services/mailer.js';
 import { StorageService } from './services/storageService.js';
-import { WhatsAppReminders } from './notifications/whatsapp/service.js';
-import { MessageClient } from './whatsapp/messageClient.js';
+import { createReminderRuntime } from './whatsapp/runtime.js';
 import { drainApplication } from './shutdown.js';
 
 /**
@@ -78,7 +77,7 @@ async function main(): Promise<void> {
   const mailer = new Mailer(config);
   const cron = new CronService(db, mailer);
   const documents = new DocumentService(db, storage);
-  const reminders = new WhatsAppReminders(db, config.whatsapp.instance, new MessageClient(config.whatsapp));
+  const reminders = createReminderRuntime(db, config.whatsapp);
 
   const seed = await seedDatabase(db, {
     seedFile: defaultSeedFile(projectRoot),
@@ -124,8 +123,8 @@ async function main(): Promise<void> {
     if (shuttingDown) return;
     shuttingDown = true;
     console.log(`[server] ${signal} received, shutting down`);
-    cron.stop();
     void drainApplication({ server, stopReminders: () => reminders.stop(),
+      stopCron: () => cron.shutdown(),
       closeDatabase: () => closeDatabase(db), exit: code => process.exit(code) });
   };
 

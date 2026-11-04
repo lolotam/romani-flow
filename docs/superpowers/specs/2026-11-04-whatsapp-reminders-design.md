@@ -122,7 +122,7 @@ permanent failures qualify; new destinations remain subject to capacity and
 accepted/unknown identity suppression. This exception does not enqueue on a new
 audience/document, global enable or expiry change.
 
-The existing global `cron.last_run_date` cannot serve as a shared delivery-success flag. Keep email's current completion tracking; give WhatsApp enqueue a separate day checkpoint. The checkpoint controls selection work only; changing the day must not change logical job identity or resend accepted/unknown expired reminders. Evaluate both channels even if email is disabled, lacks recipients, fails or was already processed. A single worker checks due jobs every 60 seconds; this is transport retry processing, not a change to reminder cadence. Both channels disabled means no delivery. No unbounded queues or catch-up bursts.
+The existing global `cron.last_run_date` cannot serve as a shared delivery-success flag. Keep email's current completion tracking; give WhatsApp enqueue a separate day checkpoint. The checkpoint controls selection work only; changing the day must not change logical job identity or resend accepted/unknown expired reminders. Evaluate both channels even if email is disabled, lacks recipients, fails or was already processed. A single worker checks due jobs every 60 seconds; this is transport retry processing, not a change to reminder cadence. Both channels disabled means no delivery. No unbounded queues or catch-up bursts. Admitted jobs and the enqueue checkpoint commit in the same outer SQLite transaction; the checkpoint advances only after admitted inserts succeed, with uniqueness making reruns idempotent.
 
 ## 9. Renewal, eligibility and race handling
 
@@ -182,3 +182,10 @@ Shared logging prerequisite: the Curemed manager owns the approved LOG_LEVEL pat
 Implement and test locally with a loopback fake Evolution HTTP server and synthetic employees before real pairing. Fake provider tests prove application contracts, not real WhatsApp delivery. Real scan/send, production environment changes, instance provisioning and deployment remain gated by the reviewed rollout packet and explicit scope; this documentation request performs none of them.
 
 The release introduces an additive schema migration: rehearse on an isolated copy and verify backward readability before proposing image-only rollback. Preserve the database and new audit data; no down-migration, wiping or production restore to undo activation. Keep WhatsApp disabled until sender, recipients, policy and service prerequisites are satisfied. Do not change the observed unset `TZ` / resolved UTC / `0 8 * * *` cadence.
+
+
+Owner erase disposition (2026-11-04): business erasure retains WhatsApp audit
+snapshots/attempts and management recipient configuration, disables WhatsApp
+sending and clears the enqueue-day checkpoint atomically with business deletion.
+New records cannot resume sending until deliberate re-enable. The UI explicitly
+discloses retained names/numbers/message text. This is not a personal-data purge.

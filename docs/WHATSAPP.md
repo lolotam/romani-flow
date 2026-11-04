@@ -185,9 +185,34 @@ fixture namespace/prefix compatibility does not make a configuration send-ready.
 For example, an explicit default port or uppercase URL spelling that differs from
 the normalized origin is refused for reminders before provider access.
 
-On shutdown the worker stops new claims immediately while HTTP requests drain in
-parallel. The database closes only after both drains finish. The application hard
-deadline is 20 seconds, longer than the 15-second send timeout; interrupted sends
+On shutdown the worker and cron stop new admission immediately while HTTP drains
+in parallel. The database closes only after all three drains finish. The application hard
+deadline is 90 seconds, allowing the SMTP phase timers and worker drain; interrupted sends
 remain durable for unknown recovery. Before deployment verify that the managed
 container stop grace allows this deadline with operational margin. Current host
 grace is not established by local tests; this remains a release prerequisite.
+
+
+Business erase retains WhatsApp recipient configuration and all job/attempt audit
+snapshots, including names, numbers and exact text. It disables WhatsApp and clears
+the enqueue-day checkpoint inside the same transaction as business deletion;
+safe unsent jobs are cancelled, accepted/unknown history remains. The AR/EN
+confirmation discloses this retention. New business records do not resume
+WhatsApp until an administrator deliberately re-enables it. No personal-data
+purge or automatic recipient deletion is implied.
+
+Production runtime construction derives outbox authority from the same strict
+local origin/exact-romani predicate as sending. An invalid local configuration
+owns no outbox namespace: it cannot admit jobs/replacements or advance the day
+checkpoint even if the database was enabled before restart. No live provider
+connection is required for selection under valid local configuration. Previously
+stored unsupported-instance jobs are not silently deleted; any such data needs
+separate operator review.
+
+Shutdown also closes cron admission and awaits every active scheduled/manual run,
+including an overlapping selection, before database close. SMTP phase/idle timers
+are 15/15/30 seconds; these are not a whole-operation bound. The application hard
+ceiling is 90 seconds, not a delivery guarantee. A forced process/host termination
+can still leave an email outcome uncertain; no exactly-once email claim is added.
+Verify actual managed stop grace exceeds this ceiling with margin before release;
+no production grace change or proof is implied by local lifecycle tests.

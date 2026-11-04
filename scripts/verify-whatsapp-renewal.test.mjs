@@ -2,6 +2,36 @@
 import {reminderApi} from './fixtures/whatsapp-api.mjs';
 import {EMPLOYEE_PHONE,MANAGER_PHONE} from './fixtures/whatsapp.mjs';
 
+test('business erase retains immutable WhatsApp audit and recipients, atomically disables sending until re-enabled',()=>reminderApi(async f=>{
+ const {getBoolean,getString}=await import('../server/repositories/settings.ts');const {insertRow}=await import('../server/repositories/base.ts');
+ await f.request('/api/employees/'+f.employee.id,{method:'PATCH',body:{whatsapp_notifications_enabled:true,residency_expiry_date:null}});
+ await f.request('/api/whatsapp/recipients',{method:'POST',body:{label:'Synthetic manager',phone:MANAGER_PHONE,enabled:true}});
+ await f.reminders.schedule();await f.reminders.drain();assert.equal(f.calls.length,2);
+ const audit=f.db.prepare("SELECT * FROM whatsapp_jobs WHERE state IN ('provider_accepted','unknown') ORDER BY id").all();
+ const attempts=f.db.prepare('SELECT * FROM whatsapp_attempts ORDER BY id').all();
+ assert.equal(audit.length,2);assert.equal(attempts.length,2);
+ await f.request('/api/whatsapp/recipients',{method:'POST',body:{label:'Another synthetic manager',phone:'+99900000003',enabled:true}});
+ f.clock.now=new Date('2026-01-03T08:00:00Z');await f.reminders.schedule();assert.equal(f.reminders.store.due().length,1);
+ const recipients=f.db.prepare('SELECT * FROM whatsapp_recipients ORDER BY id').all();
+ f.db.exec("CREATE TRIGGER reject_erase_disable BEFORE UPDATE ON settings WHEN NEW.key='whatsapp.enabled' AND NEW.value='false' BEGIN SELECT RAISE(ABORT,'Synthetic erase disable rejection'); END;");
+ assert.equal((await f.request('/api/backup/erase',{method:'POST',body:{}})).status,500);
+ assert.equal(getBoolean(f.db,'whatsapp.enabled'),true);assert.equal(f.db.prepare('SELECT count(*) n FROM employees').get().n,1);assert.equal(f.reminders.store.due().length,1);
+ f.db.exec('DROP TRIGGER reject_erase_disable');
+ assert.equal((await f.request('/api/backup/erase',{method:'POST',body:{}})).status,200);
+ assert.equal(getBoolean(f.db,'whatsapp.enabled'),false);assert.equal(getString(f.db,'whatsapp.last_enqueue_date'),'');
+ assert.equal(f.db.prepare('SELECT count(*) n FROM employees').get().n,0);assert.equal(f.reminders.store.due().length,0);
+ assert.deepEqual(f.db.prepare("SELECT * FROM whatsapp_jobs WHERE state IN ('provider_accepted','unknown') ORDER BY id").all(),audit);
+ assert.deepEqual(f.db.prepare('SELECT * FROM whatsapp_attempts ORDER BY id').all(),attempts);
+ assert.deepEqual(f.db.prepare('SELECT * FROM whatsapp_recipients ORDER BY id').all(),recipients);
+ await f.reminders.mutate(()=>{
+  const type=insertRow(f.db,'document_types',{name:'New synthetic'});
+  const employee=insertRow(f.db,'employees',{name:'New synthetic',mobile_no:EMPLOYEE_PHONE,whatsapp_notifications_enabled:true});
+  insertRow(f.db,'documents',{title:'New synthetic',employee_id:employee.id,document_type_id:type.id,expiry_date:'2026-01-01'});
+ });
+ assert.equal(await f.reminders.schedule(),0);assert.equal(await f.reminders.drain(),0);assert.equal(f.calls.length,2);
+ await f.reminders.setEnabled(true);assert.equal(await f.reminders.schedule(),3);assert.equal(f.calls.length,2);
+},phone=>phone===EMPLOYEE_PHONE?{kind:'provider_accepted',messageId:'synthetic-retained-audit'}:{kind:'unknown',code:'transport_interrupted'}));
+
 test('employee writes reject canonical opt-in collisions atomically, including concurrent creation',()=>reminderApi(async f=>{
  const first='/api/employees/'+f.employee.id;
  assert.equal((await f.request(first,{method:'PATCH',body:{whatsapp_notifications_enabled:true,residency_expiry_date:null}})).status,200);
@@ -48,11 +78,12 @@ test('disconnected already-enabled settings save succeeds; false-to-true still r
  assert.equal(f.calls.length,0);assert.equal(f.db.prepare('SELECT count(*) n FROM whatsapp_jobs').get().n,0);
 },{status:async()=>({configured:true,state:'disconnected'}),sendText:async()=>{throw Error('Unexpected synthetic send');}}));
 
-test('owner phone-change policy replaces only prepared unsent work on the same day, including A-to-B-to-A',()=>reminderApi(async f=>{
+test('owner phone edit replaces even older eligible unsent work on the edit day, including A-to-B-to-A',()=>reminderApi(async f=>{
  const employeePath='/api/employees/'+f.employee.id;
  await f.request(employeePath,{method:'PATCH',body:{whatsapp_notifications_enabled:true,residency_expiry_date:null}});
  await f.reminders.schedule();
  const first=f.db.prepare('SELECT id FROM whatsapp_jobs').get().id;
+ f.clock.now=new Date('2026-01-03T10:00:00Z');
  for(const phone of [MANAGER_PHONE,EMPLOYEE_PHONE]){
   assert.equal((await f.request(employeePath,{method:'PATCH',body:{mobile_no:phone}})).status,200);
   const pending=f.db.prepare("SELECT recipient FROM whatsapp_jobs WHERE state='pending'").all();

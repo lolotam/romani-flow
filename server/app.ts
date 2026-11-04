@@ -20,8 +20,8 @@ import type { CronService } from './services/cronService.js';
 import type { DocumentService } from './services/documentService.js';
 import type { Mailer } from './services/mailer.js';
 import type { StorageService } from './services/storageService.js';
-import { WhatsAppReminders } from './notifications/whatsapp/service.js';
-import { MessageClient } from './whatsapp/messageClient.js';
+import type { WhatsAppReminders } from './notifications/whatsapp/service.js';
+import { createReminderRuntime } from './whatsapp/runtime.js';
 import { createReminderRouter } from './notifications/whatsapp/routes.js';
 import { prepareEmployee } from './notifications/whatsapp/employeePolicy.js';
 
@@ -45,7 +45,7 @@ export interface AppDependencies {
 
 export function createApp(deps: AppDependencies): Express {
   const { config, db, mailer, cron, storage, documents, staticDir } = deps;
-  const reminders = deps.reminders ?? new WhatsAppReminders(db, config.whatsapp.instance, new MessageClient(config.whatsapp));
+  const reminders = deps.reminders ?? createReminderRuntime(db, config.whatsapp);
   documents.configureNotifications({ coordinator: reminders.coordinator, changed: () => reminders.reconcile() });
   cron.setReminderEnqueue(() => reminders.schedule());
   const app = express();

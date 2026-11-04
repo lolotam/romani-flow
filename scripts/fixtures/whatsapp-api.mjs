@@ -29,5 +29,5 @@ export async function reminderApi(run,send,pairing={}){
   return {status:res.status,json:await res.json()};
  };
  try{await run({...f,reminders,calls,request,base,config,cron,documents});}
- finally{cron.stop();await reminders.stop();server.closeAllConnections();await new Promise(r=>server.close(r));f.close();if(!dir.startsWith(path.join(os.tmpdir(),'romani-wa-api-')))throw Error('Unsafe fixture cleanup');fs.rmSync(dir,{recursive:true,force:true});}
+ finally{await cron.shutdown();await reminders.stop();server.closeAllConnections();await new Promise(r=>server.close(r));f.close();if(!dir.startsWith(path.join(os.tmpdir(),'romani-wa-api-')))throw Error('Unsafe fixture cleanup');fs.rmSync(dir,{recursive:true,force:true});}
 }

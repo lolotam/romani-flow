@@ -92,6 +92,9 @@ export function createBackupRouter(db: Db, documents: DocumentService, reminders
         db.prepare('DELETE FROM pending_uploads').run();
         db.prepare('DELETE FROM form_defaults').run();
         db.prepare('DELETE FROM expiry_notifications').run();
+        // Audit/recipient configuration survive business erase; sending requires deliberate re-enable.
+        setSetting(db, 'whatsapp.enabled', false);
+        setSetting(db, 'whatsapp.last_enqueue_date', '');
         reminders.reconcile();
 
         // The seed marker is written here as well: erasing the data must never

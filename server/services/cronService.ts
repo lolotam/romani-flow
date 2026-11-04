@@ -27,10 +27,14 @@ export interface CronStatus {
   nextRun: string | null;
 }
 
+interface CronResult { sent: boolean; skipped?: string; error?: string }
+
 export class CronService {
   private task: ScheduledTask | null = null;
   private inFlight = false;
   private reminderEnqueue: (() => Promise<unknown>) | null = null;
+  private readonly activeRuns = new Set<Promise<CronResult>>();
+  private closing = false;
 
   constructor(
     private readonly db: Db,
@@ -48,6 +52,7 @@ export class CronService {
   /** Reads the schedule from the database and (re)arms the scheduler. */
   reschedule(): CronStatus {
     this.stop();
+    if (this.closing) return this.status();
 
     const enabled = getBoolean(this.db, 'cron.enabled');
     const schedule = getString(this.db, 'cron.schedule', '0 8 * * *');
@@ -80,7 +85,15 @@ export class CronService {
    * WhatsApp selection remains idempotent and independent when a manual email
    * report overlaps the real scheduled firing.
    */
-  async run(source: 'cron' | 'manual' = 'cron'): Promise<{ sent: boolean; skipped?: string; error?: string }> {
+  run(source: 'cron' | 'manual' = 'cron'): Promise<CronResult> {
+    if (this.closing) return Promise.resolve({ sent: false, skipped: 'shutting_down' });
+    const active = this.executeRun(source);
+    this.activeRuns.add(active);
+    void active.then(() => this.activeRuns.delete(active), () => this.activeRuns.delete(active));
+    return active;
+  }
+
+  private async executeRun(source: 'cron' | 'manual'): Promise<CronResult> {
     if (this.inFlight) {
       await this.enqueueReminders(source);
       return { sent: false, skipped: 'already_running' };
@@ -125,7 +138,7 @@ export class CronService {
     return {
       enabled: getBoolean(this.db, 'cron.enabled'),
       schedule: getString(this.db, 'cron.schedule', '0 8 * * *'),
-      running: this.inFlight,
+      running: this.activeRuns.size > 0,
       lastRunAt: getString(this.db, 'cron.last_run_at'),
       lastRunResult: getString(this.db, 'cron.last_run_result'),
       nextRun: this.task?.getNextRun()?.toISOString() ?? null,
@@ -137,6 +150,12 @@ export class CronService {
       this.task.stop();
       this.task = null;
     }
+  }
+
+  async shutdown(): Promise<void> {
+    this.closing = true;
+    this.stop();
+    await Promise.all([...this.activeRuns]);
   }
 
 }

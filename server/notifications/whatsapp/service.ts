@@ -22,6 +22,7 @@ export class WhatsAppReminders {
 
   /** Call inside the business write's transaction and the shared coordinator. */
   reconcile(): void {
+    if (!this.instance) return;
     const candidates = selectReminders(this.db, this.instance, this.clock());
     const after = snapshotDestinations(this.db, candidates);
     const replacements = this.beforeDestinations ? changedDestinations(this.beforeDestinations, after) : [];

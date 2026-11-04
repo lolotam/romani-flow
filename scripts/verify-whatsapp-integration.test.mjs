@@ -5,6 +5,25 @@ import {MANAGER_PHONE} from './fixtures/whatsapp.mjs';
 import {MessageClient} from '../server/whatsapp/messageClient.ts';
 import {WhatsAppReminders} from '../server/notifications/whatsapp/service.ts';
 import {setSetting} from '../server/repositories/settings.ts';
+import {createReminderRuntime} from '../server/whatsapp/runtime.ts';
+
+test('restart with invalid local configuration cannot admit jobs, replacements or a daily checkpoint',()=>loopbackEvolution(async e=>reminderApi(async f=>{
+ await f.request('/api/employees/'+f.employee.id,{method:'PATCH',body:{whatsapp_notifications_enabled:true,residency_expiry_date:null}});
+ await f.reminders.schedule();const original=f.db.prepare('SELECT * FROM whatsapp_jobs ORDER BY id').all();assert.equal(original.length,1);
+ f.db.prepare("DELETE FROM settings WHERE key='whatsapp.last_enqueue_date'").run();
+ for(const config of [{...e.config,instance:'romani_test'},{...e.config,url:e.config.url+'/prefix'}]){
+  const invalid=createReminderRuntime(f.db,config);assert.equal(invalid.instance,'');
+  assert.equal(await invalid.schedule(),0);
+  await invalid.mutate(()=>f.db.prepare('UPDATE employees SET mobile_no=?').run(MANAGER_PHONE));
+  assert.equal(await invalid.drain(),0);
+  assert.equal(f.db.prepare("SELECT value FROM settings WHERE key='whatsapp.last_enqueue_date'").get(),undefined);
+  assert.deepEqual(f.db.prepare('SELECT * FROM whatsapp_jobs ORDER BY id').all(),original);
+ }
+ assert.equal(e.requests.length,0);assert.equal(e.sends.length,0);
+ const corrected=createReminderRuntime(f.db,e.config);assert.equal(await corrected.schedule(),1);
+ assert.equal(f.db.prepare("SELECT count(*) n FROM whatsapp_jobs WHERE instance!='romani'").get().n,0);
+ assert.equal(f.db.prepare("SELECT count(*) n FROM whatsapp_jobs WHERE state='pending' AND recipient=?").get(MANAGER_PHONE).n,1);
+})));
 
 test('reminder enablement refuses pairing-compatible prefixes, aliases and noncanonical URL spelling before provider access',()=>loopbackEvolution(async e=>{
  for(const config of [{...e.config,url:e.config.url+'/prefix'},{...e.config,instance:'romani_test'},{...e.config,url:e.config.url.replace('http:','HTTP:')}]){
