@@ -157,7 +157,12 @@ its command and runtime files without starting the application or mounting data.
 If application rollout fails, restore that preserved image through the deployment
 controller and verify its health/build identity. Do not replace the database as
 an application rollback, and do not change secrets to mask an application fault.
-This release introduces no schema migration.
+The earlier Goal-B operations release introduced no schema migration. The separate
+WhatsApp reminder release includes additive migration `007_whatsapp_notifications.sql`.
+Before that release, rehearse the migration on an isolated recovery copy and verify
+that the preserved old application image can still read the migrated database.
+An image-only rollback retains the additive schema and notification audit data;
+do not down-migrate, wipe or replace the production database to undo this feature.
 
 Capture sanitized status/error counts, exact head and merge SHA, image ID and
 timestamps. Keep customer names, file contents, account emails and secrets out of

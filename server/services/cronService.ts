@@ -39,6 +39,12 @@ export class CronService {
 
   setReminderEnqueue(action: () => Promise<unknown>): void { this.reminderEnqueue = action; }
 
+  private async enqueueReminders(source: 'cron' | 'manual'): Promise<void> {
+    if (source !== 'cron' || !this.reminderEnqueue) return;
+    try { await this.reminderEnqueue(); }
+    catch { console.error('[whatsapp] scheduled selection failed; details suppressed'); }
+  }
+
   /** Reads the schedule from the database and (re)arms the scheduler. */
   reschedule(): CronStatus {
     this.stop();
@@ -71,19 +77,19 @@ export class CronService {
    * A run that is already in flight is not started twice, and an automatic run
    * that already happened today is skipped so a container restart cannot send a
    * second copy of the same report.
+   * WhatsApp selection remains idempotent and independent when a manual email
+   * report overlaps the real scheduled firing.
    */
   async run(source: 'cron' | 'manual' = 'cron'): Promise<{ sent: boolean; skipped?: string; error?: string }> {
     if (this.inFlight) {
+      await this.enqueueReminders(source);
       return { sent: false, skipped: 'already_running' };
     }
 
     this.inFlight = true;
     try {
       // WhatsApp owns its checkpoint; an email success/disable must not suppress it.
-      if (source === 'cron' && this.reminderEnqueue) {
-        try { await this.reminderEnqueue(); }
-        catch { console.error('[whatsapp] scheduled selection failed; details suppressed'); }
-      }
+      await this.enqueueReminders(source);
       if (source === 'cron' && shouldSkipAutomatedRun(this.db)) {
         return { sent: false, skipped: 'already_run_today' };
       }

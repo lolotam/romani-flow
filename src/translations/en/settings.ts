@@ -17,6 +17,20 @@ export const settings = {
 
   // Email Settings
   whatsappReminders: {
+    failureReason: 'Reason',
+    errors: {
+      whatsapp_not_configured: 'The server integration needs configuration review before retrying.',
+      invalid_number: 'The destination must be a valid international mobile number.',
+      invalid_text: 'The reminder text is invalid or too long. Correct the document or employee name before retrying.',
+      provider_unauthorized: 'The provider rejected authorization. Review the dedicated server configuration before retrying.',
+      provider_uncertain_response: 'The provider response is uncertain. Do not resend this attempt.',
+      invalid_provider_response: 'The provider response could not confirm acceptance. Do not resend.',
+      provider_connection_failed: 'The connection failed before sending. Review connectivity and the attempt limit.',
+      transport_interrupted: 'The connection was interrupted with an uncertain outcome. Do not resend.',
+      interrupted_restart: 'The application restarted during handoff. The outcome is uncertain; do not resend.',
+      no_longer_eligible: 'The reminder was cancelled because its item or destination is no longer eligible.',
+      other: 'Review the recorded state before taking corrective action.',
+    },
     title: 'WhatsApp reminders', enabled: 'Enable WhatsApp reminders',
     scheduleHelp: 'Uses the existing email reminder schedule and thresholds. The expired reminder is once per document, expiry and recipient, not daily. Email and WhatsApp are independent.',
     recipients: 'Management numbers', label: 'Name', phone: 'WhatsApp number', phoneHelp: 'Include the country code with + or 00; no country code is guessed.',

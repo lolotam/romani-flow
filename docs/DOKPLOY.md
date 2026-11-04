@@ -149,12 +149,14 @@ mount that file read-only at `/app/data/seed.json`. Never commit a personal-data
 seed or copy it into the image. Review the import and administrator bootstrap
 before starting the backend; normal startup migrates, seeds and arms the scheduler.
 
-Deploy and watch the logs. A healthy first boot with an approved seed mounted prints:
+After the separately approved release, deploy and watch the logs. The following
+is an illustrative fresh-install log for the reminder release, with a separately
+approved seed mounted; it does not claim production migration `007` has run:
 
 ```
 [server] environment : production
 [server] data dir    : /data
-[server] applied migrations: 001_init.sql, 002_indexes.sql, 003_expiry_notifications.sql, 004_pending_uploads.sql
+[server] applied migrations: 001_init.sql, 002_indexes.sql, 003_expiry_notifications.sql, 004_pending_uploads.sql, 005_notification_identity.sql, 006_form_defaults.sql, 007_whatsapp_notifications.sql
 [server] imported seed data: companies=2, ministries=5, document_types=8, positions=6, employees=20, documents=3
 [server] created admin accounts: <the addresses you put in ADMIN_SEED_EMAILS>
 [server] listening on http://0.0.0.0:3000

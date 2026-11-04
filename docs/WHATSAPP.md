@@ -60,8 +60,10 @@ must be explicitly designated. Local fixtures prove application behavior only.
    This does not change the existing email switch.
 5. Read the outgoing log, filter by outcome/international destination/document,
    and inspect immutable attempt text and recipient snapshots. Only safe known
-   failures offer retry. Authorization failures require configuration review and
-   explicit retry; they never retry automatically. Unknown, accepted and
+   failures offer retry. Proven authorization/local number, text or configuration
+   failures require correction and an explicit retry; they never retry
+   automatically. The four-attempt limit and current eligibility still apply.
+   Unknown, accepted and
    cancelled rows cannot be forced to resend.
 
 These controls and logs are administrator-only. The backend verifies the current

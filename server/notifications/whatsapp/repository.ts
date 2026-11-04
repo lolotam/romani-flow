@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import type { Db } from '../../db/connection.js';
 import { RepositoryError } from '../../repositories/base.js';
 import type { ReminderCandidate, ReminderJob, SendOutcome } from './contracts.js';
-import { reminderIdentity } from './contracts.js';
+import { reminderIdentity, isManualRetryFailure, isValidReminderText, MANUAL_RETRY_FAILURE_CODES } from './contracts.js';
 import { normalizeWhatsAppPhone } from './phone.js';
 
 const FIELDS = ['instance', 'item_type', 'item_id', 'expiry_date', 'bucket', 'recipient', 'recipient_label', 'audience', 'item_name', 'owner_name', 'text'] as const;
@@ -98,14 +98,17 @@ export class ReminderStore {
   }
 
   retry(id: string): void {
-    const job = this.db.prepare('SELECT state,error_code FROM whatsapp_jobs WHERE id=? AND instance=?').get(id, this.instance);
-    if (job?.state === 'permanent_failed' && job.error_code === 'provider_unauthorized' &&
+    const job = this.db.prepare('SELECT state,error_code,text,recipient FROM whatsapp_jobs WHERE id=? AND instance=?').get(id, this.instance);
+    if (job && (!isValidReminderText(job.text) || normalizeWhatsAppPhone(job.recipient) !== job.recipient)) {
+      throw new RepositoryError('Correct the reminder text or destination before retrying.', 'invalid_retry', 409);
+    }
+    if (job?.state === 'permanent_failed' && isManualRetryFailure(job.error_code) &&
         Number(this.db.prepare("SELECT count(*) total FROM whatsapp_jobs WHERE state IN ('pending','retryable_failed','sending')").get()!.total) >= 2000) {
       throw new RepositoryError('The reminder queue is full.', 'whatsapp_queue_full', 409);
     }
     const changed = this.db.prepare(`UPDATE whatsapp_jobs SET state='pending',next_attempt_at=?,updated_at=?
-      WHERE id=? AND instance=? AND (state='retryable_failed' OR (state='permanent_failed' AND error_code='provider_unauthorized'))
-      AND attempt_count<4`).run(this.clock().toISOString(), this.clock().toISOString(), id, this.instance).changes;
+      WHERE id=? AND instance=? AND (state='retryable_failed' OR (state='permanent_failed' AND error_code IN (${MANUAL_RETRY_FAILURE_CODES.map(() => '?').join(',')})))
+      AND attempt_count<4`).run(this.clock().toISOString(), this.clock().toISOString(), id, this.instance, ...MANUAL_RETRY_FAILURE_CODES).changes;
     if (!changed) throw new RepositoryError('This reminder cannot be retried.', 'retry_forbidden', 409);
   }
 

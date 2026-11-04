@@ -6,6 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { whatsappReminders } from '@/lib/api/whatsapp';
 import type { useWhatsAppSettings } from '@/hooks/useWhatsAppSettings';
+import { whatsappFailureKey } from '@/lib/whatsappFailureReason';
 
 export function WhatsAppLogCard({ state }: { state: ReturnType<typeof useWhatsAppSettings> }) {
   const { t } = useLanguage();
@@ -27,10 +28,12 @@ export function WhatsAppLogCard({ state }: { state: ReturnType<typeof useWhatsAp
       <p>{job.recipient_label} <bdi dir="ltr">{job.recipient}</bdi></p>
       <p>{t('settings.whatsappReminders.expiry')}: <bdi dir="ltr">{job.expiry_date.split('-').reverse().join('/')}</bdi></p>
       <p>{t(`settings.whatsappReminders.states.${job.state}`)} · {t('settings.whatsappReminders.attempts')}: {job.attempt_count}</p>
+      {job.error_code && <p className="text-sm">{t('settings.whatsappReminders.failureReason')}: {t(`settings.whatsappReminders.errors.${whatsappFailureKey(job.error_code)}`)}</p>}
       {job.state === 'unknown' && <p className="text-sm">{t('settings.whatsappReminders.unknownHelp')}</p>}
       {job.attempts.length ? job.attempts.map(attempt => <details key={attempt.id} className="rounded-md bg-muted/30 p-2">
         <summary>{new Date(attempt.started_at).toLocaleString()} · {t(`settings.whatsappReminders.states.${attempt.state}`)}</summary>
         <p>{attempt.recipient_label} <bdi dir="ltr">{attempt.recipient}</bdi></p>
+        {attempt.error_code && <p className="text-sm">{t('settings.whatsappReminders.failureReason')}: {t(`settings.whatsappReminders.errors.${whatsappFailureKey(attempt.error_code)}`)}</p>}
         <p className="whitespace-pre-wrap break-words pt-2">{attempt.text}</p>
       </details>) : <p className="whitespace-pre-wrap text-sm text-muted-foreground">{job.text}</p>}
       {job.retry_allowed && <Button type="button" disabled={state.busy} variant="outline" onClick={() => void state.act(() => whatsappReminders.retry(job.id))}>{t('settings.whatsappReminders.retry')}</Button>}

@@ -134,6 +134,8 @@ States: `pending`, `sending`, `provider_accepted`, `retryable_failed`, `permanen
 
 Insert the attempt and mark `sending` before network I/O. Accept success only with a valid response and provider message ID. A documented rejection known not to have accepted the message can retry after 5, 15 and 60 minutes, bounded to four attempts total and still-current eligibility. Respect an explicit provider retry delay if longer. Invalid credentials, invalid numbers and unsupported version are permanent configuration failures; show an actionable administrator error without raw provider bodies.
 
+Permanent failures do not retry automatically. After correction and current-eligibility reconciliation, an administrator may explicitly retry only the pinned pre-handler `provider_unauthorized` or local zero-fetch `invalid_text`, `invalid_number` and `whatsapp_not_configured` codes, still within four attempts and queue capacity. Unknown, accepted, cancelled and unclassified remote failures remain ineligible for manual resend. The log shows translated allowlisted reasons and generic copy for an unrecognized code, never raw provider text.
+
 Network timeout/reset after handoff, malformed ambiguous success, or process restart while `sending` becomes `unknown`: do not blindly resend. Evolution acceptance can precede a lost response. Exactly-once external delivery is not promised; v1 favors visible uncertainty over automatic duplicates. Never manufacture success or handset delivery. Disconnected instances defer pending jobs without consuming send attempts; revalidate current eligibility on reconnect without inventing daily identities.
 
 ## 11. API boundary
@@ -142,7 +144,7 @@ Every browser/operator `/api/whatsapp/*` route requires an active authenticated 
 
 | Route | Contract |
 | --- | --- |
-| `GET /api/whatsapp/status` | Sanitized configured/enabled/connection/sender state, no API key or raw session. |
+| `GET /api/whatsapp/status` | Sanitized `configured` and connection `state` only; no sender profile, API key or raw session. Global `whatsapp.enabled` is read from `/api/settings`. |
 | `POST /api/whatsapp/connect` | Obtain a fresh QR for the fixed approved instance only; do not disconnect an existing connected account. No implicit provisioning of unknown instances. |
 | `GET /api/whatsapp/recipients` | Paginated named recipient rows. |
 | `POST /api/whatsapp/recipients` | Validate name/phone/enabled; normalize and enforce uniqueness. |
@@ -153,7 +155,7 @@ Every browser/operator `/api/whatsapp/*` route requires an active authenticated 
 
 Global WhatsApp enable is written through the existing validated administrator settings route. Disabling takes effect before another handoff. No user-facing arbitrary provider URL/key input.
 
-Shared logging prerequisite: the Curemed manager owns the approved LOG_LEVEL patch/reload. Q-8 is already ruled; actual execution verification is still required. Keep webhooks off and defer real QR/account-holder pairing until the verified receipt. After that receipt, perform the holder QR, dedicated webhook activation and scoped smoke one step at a time. Local reminder work uses loopback fixtures only. No live customer messaging is authorized by these design choices.
+Shared logging prerequisite: the Curemed manager owns the approved LOG_LEVEL patch/reload. SA accepted the Q8 execution verification receipt, SHA256 `262fd084465a61b891ab219f7178cf5caf9d332dcbbbeed3d3c381d7434dd813`; this satisfies the logging execution gate and is operator evidence, not a Romani server rerun. Holder QR has been separately authorized; its scan/open receipt remains pending. Keep webhooks off until that receipt, then perform connection-only webhook activation and scoped smoke as separate gated steps. The native query-override isolation gate remains open before any live send. Local reminder work uses loopback fixtures only; no live messaging is authorized here.
 
 ## 12. Acceptance and rollout
 

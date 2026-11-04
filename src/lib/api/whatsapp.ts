@@ -17,11 +17,11 @@ export const whatsappPairing = {
 
 export interface WhatsAppRecipient { id: string; label: string; phone: string; enabled: boolean }
 export type WhatsAppJobState = 'pending' | 'sending' | 'provider_accepted' | 'retryable_failed' | 'permanent_failed' | 'unknown' | 'cancelled';
-export interface WhatsAppAttempt { id: string; text: string; state: WhatsAppJobState; started_at: string; recipient_label: string; recipient: string }
+export interface WhatsAppAttempt { id: string; text: string; state: WhatsAppJobState; started_at: string; recipient_label: string; recipient: string; error_code: string | null }
 export interface WhatsAppLogItem {
   id: string; item_id: string; item_name: string; owner_name: string; expiry_date: string;
   recipient: string; recipient_label: string; audience: 'management' | 'employee';
-  state: WhatsAppJobState; attempt_count: number; retry_allowed: boolean; text: string; created_at: string; attempts: WhatsAppAttempt[];
+  state: WhatsAppJobState; attempt_count: number; retry_allowed: boolean; text: string; created_at: string; attempts: WhatsAppAttempt[]; error_code: string | null;
 }
 export interface WhatsAppPage<T> { items: T[]; total: number }
 export interface WhatsAppLogFilter { state?: string; recipient?: string; item?: string; offset?: number }

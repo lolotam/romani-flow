@@ -80,6 +80,19 @@ test('a real isolated cron timer enqueues reminders without changing production 
  f.cron.stop();assert.equal(f.reminders.store.due().length,1);assert.equal(f.calls.length,0);
 }));
 
+test('a scheduled firing still selects WhatsApp while a manual email report is in flight',()=>reminderApi(async f=>{
+ const {CronService}=await import('../server/services/cronService.ts');const {setSetting}=await import('../server/repositories/settings.ts');
+ await f.request('/api/employees/'+f.employee.id,{method:'PATCH',body:{whatsapp_notifications_enabled:true,residency_expiry_date:null}});
+ setSetting(f.db,'email.enabled',true);setSetting(f.db,'email.recipients',['synthetic@example.invalid']);
+ let release,entered;const blocked=new Promise(r=>release=r),started=new Promise(r=>entered=r);
+ const cron=new CronService(f.db,{send:async()=>{entered();await blocked;return{status:'sent',accepted:['synthetic@example.invalid'],rejected:[],messageId:'synthetic-overlap'};}});
+ cron.setReminderEnqueue(()=>f.reminders.schedule());const manual=cron.run('manual');
+ try{await started;assert.equal(f.reminders.store.due().length,0);
+  assert.equal((await cron.run('cron')).skipped,'already_running');assert.equal(f.reminders.store.due().length,1);assert.equal(f.calls.length,0);
+ }finally{release();await manual;cron.stop();}
+ assert.equal(f.db.prepare('SELECT count(*) n FROM email_log').get().n,1);
+}));
+
 test('W5 an email configuration failure cannot suppress a successful independent WhatsApp attempt',()=>reminderApi(async f=>{
  const {setSetting}=await import('../server/repositories/settings.ts');
  await f.request('/api/employees/'+f.employee.id,{method:'PATCH',body:{whatsapp_notifications_enabled:true,residency_expiry_date:null}});

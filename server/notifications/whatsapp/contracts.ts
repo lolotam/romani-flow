@@ -23,6 +23,14 @@ export interface ReminderCandidate {
   text: string;
 }
 export type JobState = 'pending' | 'sending' | 'provider_accepted' | 'retryable_failed' | 'permanent_failed' | 'unknown' | 'cancelled';
+// Only pinned pre-handler authorization or local zero-fetch failures are safe to retry manually.
+export const MANUAL_RETRY_FAILURE_CODES: readonly string[] = ['provider_unauthorized', 'invalid_text', 'invalid_number', 'whatsapp_not_configured'];
+export function isManualRetryFailure(code: unknown): boolean {
+  return typeof code === 'string' && MANUAL_RETRY_FAILURE_CODES.includes(code);
+}
+export function isValidReminderText(text: unknown): text is string {
+  return typeof text === 'string' && Boolean(text.trim()) && text.length <= 4096;
+}
 export interface ReminderJob extends ReminderCandidate {
   id: string;
   state: JobState;

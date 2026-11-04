@@ -2,6 +2,7 @@ import type { PairingConfig } from './config.js';
 import { pairingConfiguration } from './config.js';
 import { PairingClient } from './pairingClient.js';
 import type { SendOutcome, WhatsAppTransport } from '../notifications/whatsapp/contracts.js';
+import { isValidReminderText } from '../notifications/whatsapp/contracts.js';
 import { normalizeWhatsAppPhone } from '../notifications/whatsapp/phone.js';
 
 /** Contract: docs/WHATSAPP_SEND_CONTRACT.md, pinned custom source f1100ad. */
@@ -15,7 +16,7 @@ export class MessageClient implements WhatsAppTransport {
     const origin = new URL(this.config.url).origin;
     if (this.config.instance !== 'romani' || this.config.url.replace(/\/+$/, '') !== origin) return { kind: 'permanent_failed', code: 'whatsapp_not_configured' };
     if (normalizeWhatsAppPhone(phone) !== phone) return { kind: 'permanent_failed', code: 'invalid_number' };
-    if (!text.trim() || text.length > 4096) return { kind: 'permanent_failed', code: 'invalid_text' };
+    if (!isValidReminderText(text)) return { kind: 'permanent_failed', code: 'invalid_text' };
     try {
       const response = await fetch(`${origin}/message/sendText/romani`, {
         method: 'POST', headers: { apikey: this.config.apiKey, 'content-type': 'application/json' },
