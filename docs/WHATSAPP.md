@@ -37,6 +37,11 @@ post-auth query-override concern in [WHATSAPP_SEND_CONTRACT.md](WHATSAPP_SEND_CO
 remains a separate pre-live-send isolation gate. The adapter uses the exact
 server-derived `/message/sendText/romani` URL with no query string.
 
+Plain HTTP does not encrypt the scoped key or reminder content. Production transport
+requires a separately accepted HTTPS or dedicated-network isolation disposition before
+live sending; local compatibility with HTTP is not that proof. This feature does not
+change the shared service, network or environment to satisfy that gate.
+
 Keep live sends off until that isolation gate, production release/migration,
 approved holder pairing and scoped smoke are explicitly dispositioned. QR, webhook
 activation and first live reminder are separate recorded steps. No customer or
@@ -104,11 +109,15 @@ duplicates.
 
 Owner-approved phone-change exception: when an existing employee or management
 recipient number changes, replace already-prepared, still-eligible unsent work
-for the same item/expiry/bucket on the same day. Cancellation and replacement
+for the same source item on the same day, using its current eligible expiry/bucket.
+This includes a combined phone/expiry edit and a prepared job that crossed a bucket
+boundary. Cancellation and replacement
 commit with the phone edit. Accepted/unknown work cannot authorize a replacement;
 an existing accepted/unknown identity at the new destination still suppresses it.
-Only pending/retryable or proven-safe permanent failures qualify. New audiences,
-new documents, global enable and expiry changes do not trigger immediate enqueue.
+Only pending/retryable or proven-safe permanent failures qualify, including exhausted
+DNS/refused failures proven to occur before HTTP handoff. Exhaustion still forbids
+retrying that old identity. New audiences,
+new documents, global enable and expiry-only changes do not trigger immediate enqueue.
 Capacity overflow remains subject to the next scheduled selection described above.
 
 Renewal commits expiry change and unsent-job cancellation in the same SQLite
@@ -161,6 +170,13 @@ viewer denial, HTTP adapter bounds and isolated restore. `test:forms`,
 remain required regressions. Preserve original assertions and exact-head receipts.
 
 ## Reminder readiness and shutdown
+
+The settings screen applies successful recipient, audit and global-state reads
+independently. If the global setting itself is unavailable or malformed, it displays
+an unavailable state and disables the switch rather than presenting an editable OFF.
+Restart recovery is scoped to the runtime's own jobs and linked attempts; an invalid
+runtime neither starts the worker nor rewrites any outbox namespace. Audit access
+remains read-only and separate from admission readiness.
 
 Employee opt-in writes reject a canonical mobile already used by another opted-in
 employee, including inactive opted-in records. Validation and the business write

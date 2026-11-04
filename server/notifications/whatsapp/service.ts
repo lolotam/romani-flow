@@ -115,7 +115,7 @@ export class WhatsAppReminders {
   }
 
   start(): void {
-    if (this.timer) return;
+    if (this.timer || !this.instance) return;
     this.stopped = false;
     this.store.recover();
     this.timer = setInterval(() => {

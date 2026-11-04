@@ -2,6 +2,51 @@
 import {reminderApi} from './fixtures/whatsapp-api.mjs';
 import {EMPLOYEE_PHONE,MANAGER_PHONE} from './fixtures/whatsapp.mjs';
 
+test('exhausted proven pre-HTTP failures still permit phone replacement without retrying the old identity',()=>reminderApi(async f=>{
+ await f.request('/api/employees/'+f.employee.id,{method:'PATCH',body:{whatsapp_notifications_enabled:true,residency_expiry_date:null}});
+ await f.reminders.schedule();const old=f.reminders.store.due()[0];
+ for(let attempt=0;attempt<4;attempt++){
+  assert.equal(await f.reminders.drain(),0);
+  f.clock.now=new Date(f.clock.now.getTime()+2*60*60*1000);
+ }
+ assert.equal(f.calls.length,4);
+ assert.deepEqual({...f.db.prepare('SELECT state,error_code,attempt_count FROM whatsapp_jobs WHERE id=?').get(old.id)},
+  {state:'permanent_failed',error_code:'provider_connection_failed',attempt_count:4});
+ assert.equal((await f.request('/api/whatsapp/jobs/'+old.id+'/retry',{method:'POST',body:{}})).status,409);
+ assert.equal((await f.request('/api/employees/'+f.employee.id,{method:'PATCH',body:{mobile_no:MANAGER_PHONE}})).status,200);
+ const replacement=f.reminders.store.due();assert.equal(replacement.length,1);assert.equal(replacement[0].recipient,MANAGER_PHONE);assert.equal(replacement[0].attempt_count,0);
+ assert.equal(f.db.prepare('SELECT state FROM whatsapp_jobs WHERE id=?').get(old.id).state,'cancelled');
+ assert.equal(f.db.prepare('SELECT count(*) n FROM whatsapp_attempts WHERE job_id=?').get(old.id).n,4);assert.equal(f.calls.length,4);
+},async()=>({kind:'retryable_failed',code:'provider_connection_failed'})));
+
+for(const previous of ['pending','provider_accepted','unknown'])test(`combined phone/residency-expiry edit replaces only prepared safe work (${previous})`,()=>reminderApi(async f=>{
+ await f.request('/api/documents/'+f.document.id,{method:'PATCH',body:{expiry_date:'2030-01-01'}});
+ await f.request('/api/employees/'+f.employee.id,{method:'PATCH',body:{whatsapp_notifications_enabled:true}});
+ await f.reminders.schedule();const old=f.reminders.store.due()[0];assert.equal(old.item_type,'employee_residency');
+ if(previous!=='pending'){
+  const claim=f.reminders.store.claim(old.id);
+  f.reminders.store.finish(claim.job,claim.attemptId,previous==='provider_accepted'?{kind:previous,messageId:'synthetic-accepted'}:{kind:previous,code:'transport_interrupted'});
+ }
+ assert.equal((await f.request('/api/employees/'+f.employee.id,{method:'PATCH',body:{mobile_no:MANAGER_PHONE,residency_expiry_date:'2026-01-09'}})).status,200);
+ const jobs=f.reminders.store.due();assert.equal(jobs.length,previous==='pending'?1:0);
+ if(jobs.length){assert.equal(jobs[0].recipient,MANAGER_PHONE);assert.equal(jobs[0].expiry_date,'2026-01-09');assert.equal(jobs[0].bucket,7);}
+ assert.equal(f.db.prepare('SELECT state FROM whatsapp_jobs WHERE id=?').get(old.id).state,previous==='pending'?'cancelled':previous);
+ assert.equal(f.calls.length,0);
+}));
+
+test('phone edit replaces a prepared job across a bucket boundary using the current snapshot',()=>reminderApi(async f=>{
+ await f.request('/api/documents/'+f.document.id,{method:'PATCH',body:{expiry_date:'2026-01-03'}});
+ await f.request('/api/employees/'+f.employee.id,{method:'PATCH',body:{whatsapp_notifications_enabled:true,residency_expiry_date:null}});
+ await f.reminders.schedule();const old=f.reminders.store.due()[0];assert.equal(old.bucket,1);
+ f.clock.now=new Date('2026-01-04T08:00:00Z');
+ await f.request('/api/employees/'+f.employee.id,{method:'PATCH',body:{mobile_no:MANAGER_PHONE}});
+ const current=f.reminders.store.due();assert.equal(current.length,1);assert.equal(current[0].bucket,0);assert.equal(current[0].recipient,MANAGER_PHONE);
+ assert.equal(f.db.prepare('SELECT state FROM whatsapp_jobs WHERE id=?').get(old.id).state,'cancelled');
+ assert.equal(await f.reminders.drain(),1);
+ await f.request('/api/employees/'+f.employee.id,{method:'PATCH',body:{mobile_no:EMPLOYEE_PHONE}});
+ assert.equal(f.reminders.store.due().length,0);assert.equal(f.calls.length,1);
+}));
+
 test('business erase retains immutable WhatsApp audit and recipients, atomically disables sending until re-enabled',()=>reminderApi(async f=>{
  const {getBoolean,getString}=await import('../server/repositories/settings.ts');const {insertRow}=await import('../server/repositories/base.ts');
  await f.request('/api/employees/'+f.employee.id,{method:'PATCH',body:{whatsapp_notifications_enabled:true,residency_expiry_date:null}});

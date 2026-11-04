@@ -15,7 +15,8 @@ export default function WhatsAppSettings() {
   if (user?.role !== 'admin') return null;
   return <div dir={isRTL ? 'rtl' : 'ltr'} className="space-y-5 text-start">
     <Card><CardHeader><CardTitle>{t('settings.whatsappReminders.title')}</CardTitle></CardHeader><CardContent className="space-y-3">
-      <div className="flex items-center gap-3"><Switch id="wa-global-enabled" disabled={state.busy || state.loading} checked={state.enabled} onCheckedChange={value => void state.setEnabled(value)} /><Label htmlFor="wa-global-enabled">{t('settings.whatsappReminders.enabled')}</Label></div>
+      <div className="flex items-center gap-3"><Switch id="wa-global-enabled" disabled={state.busy || state.loading || state.enabled === null} checked={state.enabled === true} onCheckedChange={value => void state.setEnabled(value)} /><Label htmlFor="wa-global-enabled">{t('settings.whatsappReminders.enabled')}</Label></div>
+      {state.enabled === null && <p role="status">{t('settings.whatsappReminders.enabledUnknown')}</p>}
       <p className="text-sm text-muted-foreground">{t('settings.whatsappReminders.scheduleHelp')}</p>
       <Button type="button" variant="outline" disabled={state.busy} onClick={state.reload}>{t('settings.whatsappReminders.refresh')}</Button>
       {state.busy && <p role="status">{t('settings.whatsappReminders.saving')}</p>}

@@ -2,6 +2,30 @@
 import {reminderFixture,MANAGER_PHONE} from './fixtures/whatsapp.mjs';
 import {WhatsAppReminders} from '../server/notifications/whatsapp/service.ts';
 import {setSetting} from '../server/repositories/settings.ts';
+import {selectReminders} from '../server/notifications/whatsapp/selection.ts';
+import {createReminderRuntime} from '../server/whatsapp/runtime.ts';
+
+test('invalid-runtime startup writes nothing and valid recovery is confined to its own jobs and attempts',async()=>{
+ const f=reminderFixture();let providerCalls=0;
+ const transport={status:async()=>{providerCalls++;return{configured:false,state:'unconfigured'};},sendText:async()=>{throw Error('No handoff allowed');}};
+ try{
+  const own=new WhatsAppReminders(f.db,'romani',transport,()=>f.clock.now);
+  own.store.saveRecipient({label:'Synthetic manager',phone:MANAGER_PHONE,enabled:true});await own.schedule();
+  const other=new WhatsAppReminders(f.db,'other-isolated-fixture',transport,()=>f.clock.now);
+  other.store.enqueue(selectReminders(f.db,other.instance,f.clock.now));
+  const ownClaim=own.store.claim(own.store.due()[0].id),otherClaim=other.store.claim(other.store.due()[0].id);
+  const rows=()=>({jobs:f.db.prepare('SELECT * FROM whatsapp_jobs ORDER BY id').all(),attempts:f.db.prepare('SELECT * FROM whatsapp_attempts ORDER BY id').all()});
+  const before=rows(),changes=f.db.prepare('SELECT total_changes() n').get().n;
+  const invalid=createReminderRuntime(f.db,{url:'',apiKey:'',instance:'',webhookSecret:''});invalid.start();await invalid.stop();invalid.store.recover();
+  assert.equal(f.db.prepare('SELECT total_changes() n').get().n,changes);assert.deepEqual(rows(),before);
+  own.start();await own.stop();
+  assert.equal(f.db.prepare('SELECT state FROM whatsapp_jobs WHERE id=?').get(ownClaim.job.id).state,'unknown');
+  assert.equal(f.db.prepare('SELECT state FROM whatsapp_attempts WHERE id=?').get(ownClaim.attemptId).state,'unknown');
+  assert.equal(f.db.prepare('SELECT state FROM whatsapp_jobs WHERE id=?').get(otherClaim.job.id).state,'sending');
+  assert.equal(f.db.prepare('SELECT state FROM whatsapp_attempts WHERE id=?').get(otherClaim.attemptId).state,'sending');
+  assert.equal(providerCalls,0);
+ }finally{f.close();}
+});
 
 test('W8 full SQLite/attachment recovery retains outbox/attempt snapshots and restarts disabled without provider access',async()=>{
  const root=fs.mkdtempSync(path.join(os.tmpdir(),'romani-wa-recovery-'));const data=path.join(root,'source');fs.mkdirSync(data);
