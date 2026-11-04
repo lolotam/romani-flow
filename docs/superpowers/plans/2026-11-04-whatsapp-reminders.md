@@ -10,33 +10,34 @@
 
 **Specification:** `docs/superpowers/specs/2026-11-04-whatsapp-reminders-design.md`.
 
-**Baseline:** `origin/main` fetched at `4c9fc35bfb86b9585aa0e83ede45891ad883619b`. Preserve dirty local `AGENTS.md`, untracked `supabase/`, Goal-B audit/fixtures, KEEP and rollback images. No cleanup.
+**Baseline:** deployed QR/status plus login release `6b48727b383f7123d150affd2b82c16b7acfa783` (PR6 after PR7). The historical accepted Goal-B baseline is `4c9fc35bfb86b9585aa0e83ede45891ad883619b`. Preserve dirty local `AGENTS.md`, untracked `supabase/`, Goal-B audit/fixtures, KEEP and rollback images. No cleanup.
 
-**Current implementation scope:** The project-isolated QR/status portion is described in `docs/WHATSAPP_PAIRING.md`. The rest of this reminder plan remains proposed; daily-overdue/company/residency defaults remain unresolved. This paragraph is a scope description, not a grant of authority.
+**Current implementation scope:** The project-isolated QR/status portion is described in `docs/WHATSAPP_PAIRING.md`. The owner has confirmed current `mobile_no` with country code, once-only expired reminders, and both company-document/residency coverage. The revised reminder design awaits focused SA review before local reminder implementation. This paragraph is a scope description, not a grant of authority.
 
 ## Task 0 — Resolve design defaults and provider prerequisites
 
 **Files:** Specification above; future `.git/WHATSAPP_PROVIDER_PREFLIGHT.md` (sanitized, local-only).
 
-- [ ] Owner reviews the three explicit defaults: use `mobile_no` without `phone` fallback; repeat overdue WhatsApp reminders daily until renewal; management-only company template plus existing residency-date coverage. Record adjustments in the specification before application code.
+- [x] Record the owner's three explicit choices: use `mobile_no` with country code and no `phone` fallback; one reminder in the expired bucket per item/expiry/bucket/recipient, not daily; management-only company documents plus employee residency coverage. Revised specification is the source of these contracts.
+- [ ] Obtain focused SA review of the revised reminder design. QR/status approval does not substitute for review of the outbox/schema/sending design.
 - [ ] Compare direct cron sends against durable in-process outbox; retain the outbox architecture unless the owner changes the fixed audit/retry requirements.
 - [ ] Preserve the approved baseline; start an implementation branch from the accepted main, carrying only intentional changes. Do not stage `AGENTS.md`, `supabase/`, `.env` or `.git` audit artifacts.
-- [ ] Recheck Evolution service identity/version/health using selected metadata only. Initial discovery found only Evolution Redis/Postgres services, not the API service. Do not equate dependencies running with API readiness.
-- [ ] Identify the approved provider URL, instance name, ownership and installed-version contract. Secure-input tools are required for missing credentials; never request a password/key in chat. Do not read chats or list other projects' instance payloads.
+- [x] Reconcile the intended existing shared service and dedicated `romani` instance from the pinned Curemed operator contract and deployed pairing slice. Earlier broad discovery did not establish API absence. Do not repeat inventory/provisioning.
+- [ ] Wait for SA-forwarded verification of Curemed's approved LOG_LEVEL patch/reload before real QR/webhook activation; Q-8 itself is already ruled. No shared infrastructure changes in this lane.
+- [ ] Identify the approved provider URL, instance name, ownership and installed-version contract. Any future secret values are entered by Waleed through `request_secret` or the hub UI; never request a password/key in chat. Do not read/copy the provider private handoff or rerun old file-based helpers. Do not read chats or list other projects' instance payloads.
 - [ ] Pin the verified provider routes and sanitized response fixtures to the installed version. Upstream v2 instance routes are a reference, not installed-version evidence. If the service is unavailable, continue local adapter/outbox/UI work against the loopback fixture; real pairing/activation remains blocked only.
 
 Provider interface used by the following tasks:
 
 ```ts
-export type ConnectionState = 'unconfigured' | 'disconnected' | 'connecting' | 'connected' | 'unavailable';
+export type ConnectionState = 'unconfigured' | 'disconnected' | 'connecting' | 'connected' | 'unknown';
 export type SendOutcome =
   | { kind: 'provider_accepted'; messageId: string }
   | { kind: 'retryable_failed'; code: string; retryAfterSeconds?: number }
   | { kind: 'permanent_failed'; code: string }
   | { kind: 'unknown'; code: string };
 export interface WhatsAppTransport {
-  status(): Promise<{ state: ConnectionState; senderNumber?: string }>;
-  connect(): Promise<{ state: ConnectionState; qrBase64?: string }>;
+  status(): Promise<{ configured: boolean; state: ConnectionState }>; // Reuse PairingClient.status().
   sendText(phone: string, text: string): Promise<SendOutcome>;
 }
 ```
@@ -78,9 +79,9 @@ assert.equal(normalizeWhatsAppPhone('group@g.us'), null);
 - [ ] Add literal string-equality tests for both owner templates and the reviewed company fallback. Dates must be `DD/MM/YYYY`; optional missing names produce a validation failure/skip, not another employee's name.
 - [ ] Select document IDs with their employee/company relationships and current expiry directly from SQLite. Include existing residency-date items as the fixed label `الإقامة`; preserve existing selected thresholds and include-item settings. Do not add driving-license reminders.
 - [ ] Build one delivery candidate per due item and canonical destination. Management receives all eligible configured items; employee candidates require that same employee's current opt-in, active state and valid current `mobile_no`.
-- [ ] Collapse overlap at the canonical destination: a management recipient who is also the subject employee receives one management-template message for that item/occurrence.
+- [ ] Collapse overlap at the canonical destination: a management recipient who is also the subject employee receives one management-template message for that item/expiry/bucket.
 - [ ] In the future reminder recipient-mutation transaction, recompute/reclassify any unsent pending/retryable job when the number changes employee→management or management→employee. Keep identity/attempt count; cancel only if no audience is eligible, and never resend accepted/unknown outcomes. Add both transition regressions.
-- [ ] Keep pre-expiry `occurrence=''`; expired repetition uses the current scheduled UTC date. Include current expiry in every identity so a changed expiry creates a new cycle without erasing old evidence.
+- [ ] Identity is `(instance,itemType,itemId,expiryDate,bucket,recipient)` for both pre-expiry and expired reminders. Do not add a day/occurrence field. Include expiry so renewal changes the identity while preserving historical attempts. Repeated days cannot recreate an accepted/unknown expired job.
 - [ ] Add boundary tests for 90/30/15/7/1, expiry day, overdue, no intervals, inactive employees, malformed mobile, same-number overlap, company-only documents and renewed dates. Run `node --import tsx --test scripts/verify-whatsapp-selection.test.mjs`; expect no network traffic.
 
 Contract example:
@@ -92,22 +93,21 @@ export interface ReminderIdentity {
   itemId: string;
   expiryDate: string;
   bucket: number;
-  occurrence: string;
   recipient: string;
 }
 ```
 
-## Task 3 — Fixed-host Evolution adapter and secure connection routes
+## Task 3 — Extend fixed-host transport with reminder sending and admin routes
 
-**Create:** `server/notifications/whatsapp/evolutionClient.ts`, `server/routes/whatsapp.ts`, `scripts/verify-whatsapp-provider.test.mjs`, `scripts/verify-whatsapp-auth.test.mjs`.
+**Create:** `server/whatsapp/messageClient.ts`, `server/notifications/whatsapp/routes.ts`, `scripts/verify-whatsapp-provider.test.mjs`, `scripts/verify-whatsapp-auth.test.mjs`.
 
-**Modify:** `server/config.ts`, `server/app.ts`, `server/index.ts`, `.env.example`.
+**Modify:** `server/app.ts`, `server/index.ts`; reuse existing `server/whatsapp/config.ts`, `pairingClient.ts`, `routes.ts`, `server/config.ts` and `.env.example` instead of duplicating configuration/QR routes.
 
 - [ ] Use optional server-only `ROMANI_EVOLUTION_URL`, `ROMANI_EVOLUTION_API_KEY`, `ROMANI_EVOLUTION_INSTANCE`, `ROMANI_EVOLUTION_WEBHOOK_SECRET` configuration, as implemented by the authorized pairing slice. Missing provider configuration leaves the existing application/email usable; global WhatsApp activation is rejected with an actionable code until complete. Never invent configuration values.
 - [ ] Bind the adapter to the verified fixed host and approved instance. Reject user-supplied URLs/instance overrides; disallow redirects. Use encoded instance path segments, a 15-second timeout, capped response reads and no raw provider-body logging.
-- [ ] Implement the verified installed-version QR/state/send contracts behind `WhatsAppTransport`. `connect()` must return existing connected state without logout/restart; an unknown instance produces a setup error rather than silently provisioning it.
+- [ ] Reuse deployed `PairingClient.status()` and preserve its explicit unknown-state guard and existing QR routes. Add only the pinned-source send contract in `messageClient.ts`. Verify the custom installed-version send request/response fixture before implementing it; no upstream/main assumption, discovery, provisioning or QR rewrite.
 - [ ] Classify documented non-acceptance versus ambiguous outcomes. A successful HTTP status without a valid provider message ID is not accepted. Do not retry network uncertainty automatically.
-- [ ] Mount every WhatsApp route behind authentication and `requireAdmin`. QR responses use `Cache-Control: no-store`; no QR/key/session response is persisted or exposed to viewers. Return current envelope `{data,error}` with fixed codes and sanitized messages.
+- [ ] Mount new reminder/browser routes behind authentication and `requireAdmin`. Preserve the existing separately authenticated connection-only webhook; do not move it behind a cookie or accept body API keys. QR responses use `Cache-Control: no-store`; no QR/key/session response is persisted or exposed to viewers. Return current envelope `{data,error}` with fixed codes and sanitized messages.
 - [ ] Test through a loopback HTTP provider fixture that records requested paths/methods and headers in memory. Assert no contacts/chat/history calls and no incoming-message subscription writes. Tests must not print the fixture API key.
 - [ ] Prove viewer requests cause zero provider calls and zero DB writes for status, connect, recipient mutation, retry and log endpoints. Prove unknown provider/401/429/timeout/malformed response behavior separately.
 - [ ] Run `node --import tsx --test scripts/verify-whatsapp-provider.test.mjs scripts/verify-whatsapp-auth.test.mjs`; commit reviewed adapter/API changes.
@@ -126,9 +126,9 @@ Expected route surface is exactly spec section 11; no arbitrary free-text send o
 - [ ] Use a partial unique index for logical identities where state is not cancelled. Preserve cancelled audit rows but allow one fresh live row after unsent expiry A→B→A or recipient remove/re-add; accepted/unknown rows still block a duplicate. Test both resurrection cases with competing enqueue calls.
 - [ ] Before each future handoff, atomically save refreshed names/audience/text in the immutable attempt while marking sending; transmit that stored text. Test a name edit after enqueue and prove actual transport bytes equal the recorded attempt snapshot; historical attempts stay unchanged.
 - [ ] Start a durable attempt before `sendText`. Known safe rejections may retry at +5/+15/+60 minutes, four attempts total, or a longer provider delay. Credentials/invalid-number/version errors fail permanently. Interrupted `sending` rows become `unknown` on startup; unknown never automatically replays.
-- [ ] Cancel stale daily occurrences and no-longer-current threshold jobs before dispatch. A reconnect must not flush a backlog of yesterday's expired notices.
+- [ ] Cancel superseded expiry/obsolete threshold/invalid-recipient jobs before dispatch. Keep a still-current never-handed-off expired job across day rollover; reconnect must reuse it, not create a daily replacement. Drain a bounded batch and preserve accepted/unknown identity suppression.
 - [ ] Implement `NotificationCoordinator.runExclusive<T>(action: () => Promise<T>): Promise<T>` as the shared in-process gate. The dispatcher holds it from final eligibility read through the bounded provider handoff; mutations in Task 5 use the same instance. Do not hold a SQLite transaction while awaiting HTTP.
-- [ ] Run real temporary-DB tests with deterministic clock injection and the loopback provider. Include competing drains, restart after claim, provider acceptance followed by lost response, timeout uncertainty, daily UTC rollover and destination-specific retry. Run an accelerated real node-cron firing separately from directly invoking a handler.
+- [ ] Run real temporary-DB tests with deterministic clock injection and the loopback provider. Include competing drains, restart after claim, provider acceptance followed by lost response, timeout uncertainty, day rollover without expired re-enqueue and destination-specific retry. Run an accelerated real node-cron firing separately from directly invoking a handler.
 
 Core acceptance assertions:
 
@@ -164,12 +164,11 @@ Commands: `node --import tsx --test scripts/verify-whatsapp-dispatch.test.mjs` t
 - `src/components/settings/WhatsAppConnectionCard.tsx`
 - `src/components/settings/WhatsAppRecipientsCard.tsx`
 - `src/components/settings/WhatsAppLogCard.tsx`
-- `src/lib/api/whatsapp.ts`
 
-**Modify:** `src/pages/Settings.tsx`, `src/lib/api/index.ts`, `src/lib/api/endpoints.ts`, `src/pages/Employees.tsx`, `src/pages/EmployeeProfile.tsx`, `src/components/employees/EmployeeFormFields.tsx`, `src/components/employees/employeeTypes.ts`, `src/translations/ar/settings.ts`, `src/translations/en/settings.ts`, `src/translations/ar/employees.ts`, `src/translations/en/employees.ts`.
+**Modify:** `src/lib/api/whatsapp.ts`, `src/components/settings/WhatsAppPairingSettings.tsx`, `src/pages/Settings.tsx`, `src/lib/api/index.ts`, `src/lib/api/endpoints.ts`, `src/pages/Employees.tsx`, `src/pages/EmployeeProfile.tsx`, `src/components/employees/EmployeeFormFields.tsx`, `src/components/employees/employeeTypes.ts`, `src/translations/ar/settings.ts`, `src/translations/en/settings.ts`, `src/translations/ar/employees.ts`, `src/translations/en/employees.ts`.
 
-- [ ] Define API client methods matching spec section 11; keep transport/error handling consistent with `src/lib/api/http.ts`. Add bounded pagination and safe query encoding for logs.
-- [ ] Add the WhatsApp Settings tab with disabled/unconfigured/connected states, sender status and QR action. QR data stays in component memory; remove it on dialog close/unmount and refresh only by explicit reconnect/rescan action. Do not place API credentials in any frontend field.
+- [ ] Extend the existing `src/lib/api/whatsapp.ts` and deployed `WhatsAppPairingSettings.tsx` contracts, preserving their authorization/QR guards. Define API client methods matching spec section 11; keep transport/error handling consistent with `src/lib/api/http.ts`. Add bounded pagination and safe query encoding for logs.
+- [ ] Extend the already deployed WhatsApp Settings tab with reminder controls; preserve the existing unconfigured/unknown/connected states and explicit QR action. QR data stays in component memory; remove it on dialog close/unmount and refresh only by explicit reconnect/rescan action. Do not place API credentials in any frontend field.
 - [ ] Add named recipient CRUD with canonical duplicate errors and per-number switches. No arbitrary recipient can be sent a test message through an unreviewed UI action.
 - [ ] Implement administrator outgoing log, fixed Arabic reminder text, attempt/state display and safe known-failure retry. Use “Accepted by provider” rather than “Delivered” for acceptance. Unknown rows explain uncertainty and have no resend button.
 - [ ] Add employee opt-in to add/edit/profile flows; validate mobile only when opting in, and preserve a false default for new people. Verify round-trip API shapes and server validation, not UI-only enforcement.
@@ -212,7 +211,7 @@ Expected: all commands exit 0; capture actual counts/full SHA. Preserve prior te
 - [ ] Send the exact-head diff/checks/full-thread/rollback/schema compatibility packet to the existing SA session with `mode:auto`; record messageId/delivery. System receipt is not approval.
 - [ ] Before proposing production migration, take a private verified pre-migration backup and rehearse additive migration/old-image readability on an isolated copy. Preserve Goal-B images and KEEP. Do not apply a production down-migration or replace the production DB to roll back this feature.
 - [ ] Obtain the concrete release disposition, provider service/instance ownership and secure configuration readiness. Keep WhatsApp off until the designated sender scans the QR and explicitly designated recipient test numbers are ready.
-- [ ] After approved match-head merge/deployment, verify actual new image/compiled modules/health/sanitized logs and unchanged reminder expression/timezone. Pair only the approved Romani instance; no shared instance reset or global provider reconfiguration.
+- [ ] After approved match-head merge/deployment, verify actual new image/compiled modules/health/sanitized logs and unchanged reminder expression/timezone. Live release still needs its exact source/migration/rollback disposition, even though QR/status was deployed. Pair only the approved Romani instance; no shared instance reset or global provider reconfiguration.
 - [ ] Controlled live proof uses one owner-designated administrator recipient and an authorized synthetic employee recipient/record, never inferred staff numbers. Record provider acceptance separately from actual recipient receipt. Prove old-date cancellation with the same authorized record; delete only that record if separately authorized. No mass catch-up or activation to every employee.
 - [ ] Final W1–W9 receipt identifies feature/commit/image, real and isolated journeys, provider privacy limits, rollback and unresolved prerequisites. Freeze the new scope only after accepted evidence; do not stop the production service/scheduler merely to record a freeze.
 

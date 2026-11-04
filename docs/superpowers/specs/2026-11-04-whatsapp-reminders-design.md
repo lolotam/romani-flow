@@ -1,6 +1,6 @@
 # Evolution WhatsApp reminders — feature specification
 
-Status: reminder defaults remain proposed for review. Current implementation covers only shared-service/two-isolated-instance QR/status, described in `docs/WHATSAPP_PAIRING.md`; production release and real pairing remain separately gated. This document describes requirements and evidence, not execution authority. No unrelated reminder default is treated as approved.
+Status: the owner confirmed the three reminder choices on 2026-11-04: use the current employee mobile with country code; send once in the expired bucket; include company documents and employee residency. This revised reminder design awaits focused SA review before reminder implementation. QR/status is already deployed as described in `docs/WHATSAPP_PAIRING.md`; real pairing, webhook activation and reminder release remain separate gates. This document describes requirements and evidence, not execution authority.
 
 ## 1. Outcome and baseline
 
@@ -8,12 +8,14 @@ Add WhatsApp expiry reminders alongside the existing email automation. Romani sc
 
 The accepted Goal-B release remains `4c9fc35bfb86b9585aa0e83ede45891ad883619b`, image `sha256:438582f0ee35ed218fc1e6c7279ad60788a1b100979d14cae5ffebc015d22d0a`. This is a new feature scope, not a reopening of Goal B. Preserve its rollback, KEEP, audit, fixture and data assets.
 
+The separate QR/status and login releases are now deployed at `6b48727b383f7123d150affd2b82c16b7acfa783`, following login merge `68e1ca3b66ef33849f13f4bd2f2359fab9b72e10`. This is the reminder implementation source baseline; Goal-B receipts remain historically attributed. No reminder schema or send worker is implemented yet.
+
 Observed code baseline:
 
 - `server/services/expiryService.ts` selects eligible documents and employee residency dates; current email deduplication includes item, expiry date, threshold and recipient.
 - `server/services/intervals.ts` defines 90/30/15/7/1-day thresholds and an expired bucket. Existing email sends once per bucket, including the expired bucket.
 - `server/services/cronService.ts` runs the automation and currently has an email-oriented daily completion guard.
-- Employee forms use `mobile_no`; legacy records can also contain `phone`. There is no WhatsApp opt-in field or integration yet.
+- Employee forms use `mobile_no`; legacy records can also contain `phone`. There is no WhatsApp employee opt-in or reminder-delivery integration yet; QR/status is implemented separately.
 - Documents have an internal UUID and title, but no separate business document-number column. The owner's final templates use name and expiry, not an invented document number.
 
 ## 2. Confirmed owner requirements
@@ -27,15 +29,15 @@ Observed code baseline:
 7. A permitted administrator can renew a document by uploading its replacement and changing its expiry. Old-expiry reminders must stop and the new expiry starts a new reminder cycle.
 8. Show the platform's outgoing reminders and attempts in an audit log, without a personal WhatsApp inbox or conversation-history screen.
 
-## 3. Proposed defaults requiring review with this specification
+## 3. Owner-confirmed choices and safe implementation defaults
 
-These choices make the plan executable without presenting unanswered questions as confirmed owner decisions:
+The owner explicitly selected the current mobile field with country code, a single expired reminder, and both company-document and residency coverage. These choices supersede the earlier daily-overdue proposal. The remaining disabled-by-default and privacy constraints below are implementation safeguards, not permission to activate production sends:
 
-| Decision | Proposed behavior |
+| Decision | Required behavior |
 | --- | --- |
 | Employee destination | Reuse `employees.mobile_no`; no separate WhatsApp number field. Never silently fall back to `phone`. Require an explicit country code when enabling delivery. |
 | Reminder unit | One fixed message per document per eligible destination, replacing the earlier management-summary suggestion. |
-| Expired repetition | WhatsApp repeats once per existing scheduled day while overdue, until renewal. Pre-expiry thresholds remain once per expiry/threshold/recipient. Existing email repetition semantics remain unchanged. |
+| Expired repetition | Send once when the item enters the expired bucket, per item/expiry/bucket/canonical recipient, not daily. Repeated scheduler runs, restarts and reconnects cannot resend a provider-accepted or unknown identity. Pre-expiry thresholds remain once per expiry/threshold/recipient. A successfully changed expiry starts a new eligible identity; old-expiry pending jobs are cancelled. Existing email semantics remain unchanged. |
 | Company-only documents | Notify enabled management recipients using the company template below; never send to an employee. |
 | Existing employee residency reminders | Preserve eligibility and represent them as the fixed document label `الإقامة`; use the same opt-in and renewal rules against `residency_expiry_date`. Do not invent additional driving-license automation. |
 | Initial activation | WhatsApp disabled globally; every existing/new employee opt-in false. Management numbers are added explicitly, never inferred from email addresses or account details. |
@@ -52,7 +54,7 @@ Employee:
 > أهلاً بيك «{اسم الموظف}»،
 > تذكير: وثيقة «{اسم الوثيقة}» تاريخ انتهائها {تاريخ الانتهاء}. يُرجى متابعة التجديد مع الإدارة.
 
-Proposed management-only company fallback, subject to the review defaults above:
+Management-only company template for the owner-confirmed company-document coverage:
 
 > تذكير: وثيقة «{اسم الوثيقة}» الخاصة بالشركة «{اسم الشركة}»، تاريخ انتهائها {تاريخ الانتهاء}. يُرجى متابعة التجديد.
 
@@ -63,7 +65,7 @@ Render dates as `DD/MM/YYYY`. Use stored names as plain text, not executable mar
 Keep the existing email controls. Add a WhatsApp Settings tab with:
 
 - Global enable switch and a clear disabled/unconfigured/disconnected/connected state.
-- Sender display number and connection state, available to administrators only.
+- Existing sanitized connection state, available to administrators only. Do not add account-profile discovery or invent a sender display number; the fixed instance and account-holder confirmation establish the sender.
 - “Connect / Show QR” action; display the transient QR with a rescan action when it expires. Reopening Settings must not reconnect or log out an already connected account.
 - Named management recipients: add, edit, enable/disable and remove. Normalize international numbers; reject duplicates after normalization. Accept `+` or `00` country prefix, remove spaces/dashes, store canonical `+` plus 8–15 digits, reject national-only, malformed, group and broadcast destinations. Do not guess a country.
 - Shared reminder-threshold controls explicitly linked to the existing thresholds and scheduler. No second user-defined schedule.
@@ -76,7 +78,7 @@ QR payloads are transient sensitive connection material: administrator-only, `Ca
 
 ## 6. Integration and privacy boundary
 
-The browser calls authenticated Romani backend routes only. The backend calls a fixed, operator-approved Evolution URL and fixed Romani-dedicated instance. The UI cannot supply arbitrary hosts, instance names or outbound URLs. Environment-only server configuration: `ROMANI_EVOLUTION_URL`, `ROMANI_EVOLUTION_API_KEY`, `ROMANI_EVOLUTION_INSTANCE`, `ROMANI_EVOLUTION_WEBHOOK_SECRET`; no secret in ordinary settings, exports, frontend bundles or chat.
+The browser calls authenticated Romani backend routes only. The backend calls a fixed, operator-approved Evolution URL and fixed Romani-dedicated instance. The UI cannot supply arbitrary hosts, instance names or outbound URLs. Environment-only server configuration: `ROMANI_EVOLUTION_URL`, `ROMANI_EVOLUTION_API_KEY`, `ROMANI_EVOLUTION_INSTANCE`, `ROMANI_EVOLUTION_WEBHOOK_SECRET`; no secret in ordinary settings, exports, frontend bundles or chat. Future value entry is performed by Waleed through `request_secret` or the hub UI. The manager must not read or copy the provider private handoff file; do not rerun earlier file-based configuration helpers.
 
 Never select an arbitrary first instance, reuse another project's connected sender, restart/logout/delete another instance, or overwrite shared provider/webhook configuration. A dedicated instance can use the shared API service once its ownership and version are verified.
 
@@ -102,17 +104,17 @@ Use an additive migration after `006_form_defaults.sql`:
 
 - `employees.whatsapp_notifications_enabled INTEGER NOT NULL DEFAULT 0 CHECK (... IN (0,1))`.
 - `whatsapp_recipients`: ID, label, canonical phone, enabled, timestamps; unique canonical phone.
-- `whatsapp_jobs`: identity, item type/ID, expiry snapshot, threshold, occurrence key, recipient snapshot, audience/template, state, attempt count, next attempt time, provider ID and timestamps. Persist the intended text privately for audit. Unique logical reminder identity.
+- `whatsapp_jobs`: identity, item type/ID, expiry snapshot, threshold, recipient snapshot, audience/template, state, attempt count, next attempt time, provider ID and timestamps. Persist the intended text privately for audit. Unique logical reminder identity.
 - `whatsapp_attempts`: durable per-attempt records, start/end, state, sanitized code, provider ID. Do not overwrite historical attempts.
 - Ordinary setting `whatsapp.enabled=false`; integration secrets remain outside SQLite.
 
-Logical identity: `(instance, item_type, item_id, expiry_date, bucket, occurrence, canonical_recipient)`. `occurrence` is empty for pre-expiry thresholds and the scheduled UTC date for expired daily repetition. Channel independence follows separate WhatsApp state: an email success never suppresses WhatsApp, and a WhatsApp failure never resends successful email. The same canonical number configured as both management and the document's employee gets one management-template reminder for that item/occurrence.
+Logical identity: `(instance, item_type, item_id, expiry_date, bucket, canonical_recipient)`. There is no calendar-date occurrence column or daily expired identity. The expired bucket is `0`, matching the existing selector, and is eligible once for the same expiry and recipient. Channel independence follows separate WhatsApp state: an email success never suppresses WhatsApp, and a WhatsApp failure never resends successful email. The same canonical number configured as both management and the document's employee gets one management-template reminder for that item/expiry/bucket.
 
-Draft outbox clarification (not implemented by the QR-only slice): enforce identity uniqueness for non-cancelled jobs only. A retained cancelled row is immutable audit history and does not prevent a fresh job for a currently eligible identity. Concurrent re-enqueue creates exactly one live job. An existing `provider_accepted` or `unknown` identity still suppresses another handoff. This covers an unsent expiry A→B→A and recipient removal/re-addition without erasing history or duplicating an accepted/uncertain occurrence.
+Draft outbox clarification (not implemented by the QR-only slice): enforce identity uniqueness for non-cancelled jobs only. A retained cancelled row is immutable audit history and does not prevent a fresh job for a currently eligible identity. Concurrent re-enqueue creates exactly one live job. An existing `provider_accepted` or `unknown` identity still suppresses another handoff. This covers an unsent expiry A→B→A and recipient removal/re-addition without erasing history or duplicating an accepted/uncertain identity.
 
 When a canonical destination gains or loses management status, recompute the winning audience in the same transaction as the recipient mutation. Reclassify a still-unsent eligible pending/retryable job to the winning template without changing its identity or attempt count; do not cancel a still-valid employee destination merely because its management row was removed. Cancel only if neither audience remains eligible. Accepted/unknown attempts are not reclassified or resent. Test employee→management and management→employee transitions explicitly when implementing the reminder outbox.
 
-The existing global `cron.last_run_date` cannot serve as a shared delivery-success flag. Keep email's current completion tracking; give WhatsApp enqueue a separate day checkpoint. Evaluate both channels even if email is disabled, lacks recipients, fails or was already processed. A single worker checks due jobs every 60 seconds; this is transport retry processing, not a change to reminder cadence. Both channels disabled means no delivery. No unbounded queues or catch-up bursts.
+The existing global `cron.last_run_date` cannot serve as a shared delivery-success flag. Keep email's current completion tracking; give WhatsApp enqueue a separate day checkpoint. The checkpoint controls selection work only; changing the day must not change logical job identity or resend accepted/unknown expired reminders. Evaluate both channels even if email is disabled, lacks recipients, fails or was already processed. A single worker checks due jobs every 60 seconds; this is transport retry processing, not a change to reminder cadence. Both channels disabled means no delivery. No unbounded queues or catch-up bursts.
 
 ## 9. Renewal, eligibility and race handling
 
@@ -124,7 +126,7 @@ Update expiry and cancel unsent old-expiry jobs in the same database transaction
 
 An already-handed-off message cannot be recalled. Guarantee: once a successful renewal/disable mutation commits, no new old-snapshot handoff begins. A provider request initiated before that commit can finish afterward and remains truthfully logged. The mutation may wait for the bounded in-flight handoff to finish; apply a 15-second HTTP timeout and show normal saving feedback.
 
-Do not replay yesterday's expired reminders after reconnecting. Cancel obsolete daily occurrences and obsolete threshold jobs before dispatch; send the currently eligible occurrence only.
+On reconnect, cancel jobs for a superseded expiry, obsolete threshold or no-longer-eligible destination. A still-current, never-handed-off expired job remains eligible across day boundaries as the same single job; do not cancel it merely because the calendar day changed or enqueue a daily replacement. Drain a bounded batch without a catch-up burst. Previously accepted/unknown expired identities remain suppressed.
 
 ## 10. Failures and retry policy
 
@@ -132,11 +134,11 @@ States: `pending`, `sending`, `provider_accepted`, `retryable_failed`, `permanen
 
 Insert the attempt and mark `sending` before network I/O. Accept success only with a valid response and provider message ID. A documented rejection known not to have accepted the message can retry after 5, 15 and 60 minutes, bounded to four attempts total and still-current eligibility. Respect an explicit provider retry delay if longer. Invalid credentials, invalid numbers and unsupported version are permanent configuration failures; show an actionable administrator error without raw provider bodies.
 
-Network timeout/reset after handoff, malformed ambiguous success, or process restart while `sending` becomes `unknown`: do not blindly resend. Evolution acceptance can precede a lost response. Exactly-once external delivery is not promised; v1 favors visible uncertainty over automatic duplicates. Never manufacture success or handset delivery. Disconnected instances defer pending jobs without consuming send attempts; stale daily jobs expire as described above.
+Network timeout/reset after handoff, malformed ambiguous success, or process restart while `sending` becomes `unknown`: do not blindly resend. Evolution acceptance can precede a lost response. Exactly-once external delivery is not promised; v1 favors visible uncertainty over automatic duplicates. Never manufacture success or handset delivery. Disconnected instances defer pending jobs without consuming send attempts; revalidate current eligibility on reconnect without inventing daily identities.
 
 ## 11. API boundary
 
-Every `/api/whatsapp/*` route requires an active authenticated administrator. Viewer denial occurs before QR generation, provider contact, retries or writes.
+Every browser/operator `/api/whatsapp/*` route requires an active authenticated administrator. The existing connection-only `/api/whatsapp/webhook` instead uses its dedicated constant-time header authentication plus exact project/event filtering; it never authenticates with a cookie or body API key. Viewer denial occurs before QR generation, provider contact, retries or writes.
 
 | Route | Contract |
 | --- | --- |
@@ -151,6 +153,8 @@ Every `/api/whatsapp/*` route requires an active authenticated administrator. Vi
 
 Global WhatsApp enable is written through the existing validated administrator settings route. Disabling takes effect before another handoff. No user-facing arbitrary provider URL/key input.
 
+Shared logging prerequisite: the Curemed manager owns the approved LOG_LEVEL patch/reload. Q-8 is already ruled; actual execution verification is still required. Keep webhooks off and defer real QR/account-holder pairing until the verified receipt. After that receipt, perform the holder QR, dedicated webhook activation and scoped smoke one step at a time. Local reminder work uses loopback fixtures only. No live customer messaging is authorized by these design choices.
+
 ## 12. Acceptance and rollout
 
 | ID | Required proof |
@@ -158,11 +162,11 @@ Global WhatsApp enable is written through the existing validated administrator s
 | W1 | Administrator can connect the fixed instance by QR; viewer cannot request QR/status/log/mutations or trigger provider traffic. |
 | W2 | Multiple named canonical recipients persist, duplicates rejected; Arabic RTL/English labels and switches work. |
 | W3 | Employee opt-in defaults false, validates mobile when enabled, persists on edit and never carries across new employees; no colleague data reaches an employee. |
-| W4 | Exact fixed texts render per item; company routing and residency behavior match reviewed defaults. |
-| W5 | Existing scheduled pre-expiry/expired selection works; both channels independent; successful destinations do not repeat, confirmed failures retry alone. |
+| W4 | Exact fixed texts render per item; company documents reach management only, and residency uses the employee's opt-in/current mobile plus enabled management recipients. |
+| W5 | Existing scheduled pre-expiry/expired selection works; both channels independent; accepted/unknown expired identities do not repeat across days/restarts/reconnects, and confirmed failures retry alone. |
 | W6 | Successful renewal cancels unsent old-expiry jobs, new date creates a new cycle; replacement-only and failed renewal do not reset; race/in-flight boundary proven. Unsent A→B→A and recipient remove/re-add enqueue exactly one current job; accepted/unknown identities still block duplicates. Audience transitions and name changes preserve the intended recipient and exact audit/dispatch text. |
 | W7 | Durable logs distinguish provider acceptance, failure and uncertainty; no personal incoming chats, QR, key or raw provider data leak into API/export/logs. |
-| W8 | Restart/disconnect/stale occurrence/duplicate worker claims are tested; existing email, forms, backup and isolated restore regressions pass. |
+| W8 | Restart/disconnect/stale threshold/duplicate worker claims and once-only expired delivery are tested; existing email, forms, backup and isolated restore regressions pass. |
 | W9 | Exact-head build/typecheck/lint/tests, review threads and approved release packet; preserve old image and private pre-migration backup. Controlled QR/live reminder proof uses explicitly designated sender and recipients, never guessed employee/customer numbers. |
 
 Implement and test locally with a loopback fake Evolution HTTP server and synthetic employees before real pairing. Fake provider tests prove application contracts, not real WhatsApp delivery. Real scan/send, production environment changes, instance provisioning and deployment remain gated by the reviewed rollout packet and explicit scope; this documentation request performs none of them.
