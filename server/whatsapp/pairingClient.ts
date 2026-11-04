@@ -82,6 +82,7 @@ export class PairingClient {
     const status = await this.status();
     if (!status.configured) throw new PairingError('whatsapp_not_configured');
     if (status.state === 'connected') return status;
+    if (status.state === 'unknown') throw new PairingError('connection_state_unknown');
     const payload = await this.call('connect');
     if ('instanceName' in payload && payload.instanceName !== this.config.instance) throw new PairingError('project_mismatch', 502);
     if ('instance' in payload) {

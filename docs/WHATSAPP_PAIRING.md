@@ -78,6 +78,8 @@ Only fixed backend calls are implemented:
 - `GET /instance/connectionState/romani`, instance-scoped `apikey` header.
   Require exact returned `instance.instanceName`; map open/close/closed/connecting.
   Missing/unrecognized native state is `unknown`, not connected/disconnected evidence.
+  Pairing is disabled/rejected until a known closed/connecting state is obtained;
+  uncertainty never triggers a new native connect request.
 - `GET /instance/connect/romani` only when not already connected. Native close/
   connecting response is a flat QR object without instanceName; authority comes
   from fixed path plus scoped token, no invented response identity. If identity

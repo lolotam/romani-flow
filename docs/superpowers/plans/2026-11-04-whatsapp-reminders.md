@@ -1,6 +1,6 @@
 # Evolution WhatsApp Reminders Implementation Plan
 
-> **For agentic workers:** Execute this plan task-by-task in the current approved lane. Use `superpowers:executing-plans` if available. Do not spawn agents, change models, purchase services, pair a number, send real messages or deploy merely because this plan exists.
+> Planning document for human review, not execution authority. Scope, credentials, operations and release decisions are governed by the current project approvals outside this document.
 
 **Goal:** Add QR-linked, fixed-template WhatsApp expiry reminders with named management recipients, employee opt-in, durable outgoing logs and cancellation on renewal, alongside existing email.
 
@@ -12,7 +12,7 @@
 
 **Baseline:** `origin/main` fetched at `4c9fc35bfb86b9585aa0e83ede45891ad883619b`. Preserve dirty local `AGENTS.md`, untracked `supabase/`, Goal-B audit/fixtures, KEEP and rollback images. No cleanup.
 
-**Later owner-authorized execution slice:** Implement the project-isolated QR/status provider portion now, without waiting for unrelated reminder defaults. The concrete implemented slice and pinned shared-service contract are in `docs/WHATSAPP_PAIRING.md`. The rest of this reminder plan remains proposed; no daily-overdue/company/residency default is silently accepted.
+**Current implementation scope:** The project-isolated QR/status portion is described in `docs/WHATSAPP_PAIRING.md`. The rest of this reminder plan remains proposed; daily-overdue/company/residency defaults remain unresolved. This paragraph is a scope description, not a grant of authority.
 
 ## Task 0 — Resolve design defaults and provider prerequisites
 
@@ -230,4 +230,4 @@ Expected: all commands exit 0; capture actual counts/full SHA. Preserve prior te
 | W8 restart/stale jobs/recovery/regressions | 4, 5, 7 |
 | W9 review/release/live proof/rollback | 7, 8 |
 
-Execution is inline by default. A blocked Evolution deployment does not block local implementation, but it does block honest claims of live QR/send readiness. This plan does not itself authorize secrets/environment changes, provider provisioning, real WhatsApp sends or production deployment.
+The implementation method is outside this document. Local fixture verification and actual Evolution QR/send readiness are separate evidence categories. This plan does not authorize secrets/environment changes, provider provisioning, real WhatsApp sends or production deployment.

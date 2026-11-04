@@ -139,13 +139,14 @@ test('simultaneous QR requests have one provider handoff', () => fixture(async f
   assert.equal(f.calls.filter(c => c.path.includes('/connect/')).length, 1);
 }));
 
-test('missing native state is unknown, and flat QR without identity is still fixed-route bound', () => fixture(async f => {
+test('missing or unfamiliar native state stays unknown and cannot start pairing', () => fixture(async f => {
   for (const state of [undefined, 'native-new-state']) {
     f.mode.state = state;
     assert.equal((await f.request('/api/whatsapp/status')).json.data.state, 'unknown');
   }
   const r = await f.request('/api/whatsapp/connect', { method: 'POST', body: {} });
-  assert.equal(r.status, 200); assert.equal(r.json.data.qr, PNG);
+  assert.equal(r.status, 503); assert.equal(r.json.error.code, 'connection_state_unknown');
+  assert.equal(f.calls.filter(c => c.path.includes('/connect/')).length, 0);
 }));
 
 test('account opening between status and connect returns connected without requiring a QR', () => fixture(async f => {
@@ -220,14 +221,21 @@ test('integration credentials are absent from settings and business export', () 
   assert.equal(f.calls.length, 0);
 }));
 
-test('malformed webhook JSON cannot leak its body to the exception log', () => fixture(async f => {
+test('malformed and oversized bodies retain stable codes without leaking to the exception log', () => fixture(async f => {
   const logged = [];
   const original = console.error;
   console.error = (...args) => logged.push(args);
   try {
-    const r = await fetch(f.base + '/api/whatsapp/webhook', { method: 'POST',
-      headers: { 'content-type': 'application/json' }, body: '{"transientSecret":"synthetic-not-for-logs",' });
-    assert.equal(r.status, 400); assert.equal((await r.json()).error.code, 'invalid_body');
+    const probe = randomBytes(24).toString('hex');
+    const cases = [
+      { body: '{"probe":' + JSON.stringify(probe) + ',', status: 400, code: 'invalid_json' },
+      { body: JSON.stringify({ probe, padding: 'a'.repeat(2 * 1024 * 1024) }), status: 413, code: 'payload_too_large' },
+    ];
+    for (const c of cases) {
+      const r = await fetch(f.base + '/api/whatsapp/webhook', { method: 'POST',
+        headers: { 'content-type': 'application/json' }, body: c.body });
+      assert.equal(r.status, c.status); assert.equal((await r.json()).error.code, c.code);
+    }
     assert.equal(logged.length, 0); assert.equal(f.calls.length, 0);
   } finally { console.error = original; }
 }));

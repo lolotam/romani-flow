@@ -50,15 +50,6 @@ export function errorHandler(
   res: Response,
   _next: NextFunction,
 ): void {
-  // Body-parser errors may carry the original body (including transient QR or
-  // webhook credentials). Never pass them to the generic exception logger.
-  const parseType = (error as { type?: unknown } | null)?.type;
-  if (parseType === 'entity.parse.failed' || parseType === 'entity.too.large') {
-    res.status(parseType === 'entity.too.large' ? 413 : 400).json({
-      data: null, error: { message: 'Invalid request body.', code: 'invalid_body' },
-    });
-    return;
-  }
   if (error instanceof RepositoryError) {
     res.status(error.status).json({
       data: null,
@@ -137,8 +128,6 @@ export function errorHandler(
     return;
   }
 
-  console.error('[api] unhandled error:', error);
-
   // Express body-parser errors arrive with a `type` property.
   if (typeof error === 'object' && error !== null && 'type' in error) {
     const type = String((error as { type: string }).type);
@@ -158,6 +147,9 @@ export function errorHandler(
     }
   }
 
+  // Parser errors above may carry raw credentials/QR in their body. Keep their
+  // stable public codes, but never pass them to the generic exception logger.
+  console.error('[api] unhandled error:', error);
   res.status(500).json({
     data: null,
     error: { message: 'Internal server error.', code: 'internal_error' },

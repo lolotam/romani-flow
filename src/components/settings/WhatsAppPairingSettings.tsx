@@ -82,7 +82,7 @@ export default function WhatsAppPairingSettings() {
           <Button type="button" disabled={busy} variant="outline" onClick={() => void loadConnection('status')}>
             <RefreshCw aria-hidden="true" className="h-4 w-4 me-2" />{t('settings.whatsapp.refresh')}
           </Button>
-          <Button type="button" disabled={busy || !status?.configured || status.state === 'connected'} onClick={() => void loadConnection('connect')}>
+          <Button type="button" disabled={busy || !status?.configured || status.state === 'connected' || status.state === 'unknown'} onClick={() => void loadConnection('connect')}>
             {busy ? t('settings.whatsapp.loading') : t('settings.whatsapp.showQr')}
           </Button>
           {qr && <Button type="button" variant="outline" onClick={() => setQr(null)}>{t('settings.whatsapp.hideQr')}</Button>}

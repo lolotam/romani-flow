@@ -1,6 +1,6 @@
 # Evolution WhatsApp reminders — feature specification
 
-Status: reminder defaults remain proposed for owner review. A later explicit owner instruction authorizes implementation NOW of the shared-service/two-isolated-instance QR/status portion only; see `docs/WHATSAPP_PAIRING.md`. Production release and real pairing remain gated. No unrelated reminder default is silently approved.
+Status: reminder defaults remain proposed for review. Current implementation covers only shared-service/two-isolated-instance QR/status, described in `docs/WHATSAPP_PAIRING.md`; production release and real pairing remain separately gated. This document describes requirements and evidence, not execution authority. No unrelated reminder default is treated as approved.
 
 ## 1. Outcome and baseline
 
