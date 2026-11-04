@@ -12,6 +12,8 @@
 
 **Baseline:** `origin/main` fetched at `4c9fc35bfb86b9585aa0e83ede45891ad883619b`. Preserve dirty local `AGENTS.md`, untracked `supabase/`, Goal-B audit/fixtures, KEEP and rollback images. No cleanup.
 
+**Later owner-authorized execution slice:** Implement the project-isolated QR/status provider portion now, without waiting for unrelated reminder defaults. The concrete implemented slice and pinned shared-service contract are in `docs/WHATSAPP_PAIRING.md`. The rest of this reminder plan remains proposed; no daily-overdue/company/residency default is silently accepted.
+
 ## Task 0 — Resolve design defaults and provider prerequisites
 
 **Files:** Specification above; future `.git/WHATSAPP_PROVIDER_PREFLIGHT.md` (sanitized, local-only).
@@ -100,7 +102,7 @@ export interface ReminderIdentity {
 
 **Modify:** `server/config.ts`, `server/app.ts`, `server/index.ts`, `.env.example`.
 
-- [ ] Add optional server-only `EVOLUTION_API_URL`, `EVOLUTION_API_KEY`, `EVOLUTION_INSTANCE_NAME` configuration. Missing provider configuration leaves the existing application/email usable; global WhatsApp activation is rejected with an actionable code until complete. Never invent configuration values.
+- [ ] Use optional server-only `ROMANI_EVOLUTION_URL`, `ROMANI_EVOLUTION_API_KEY`, `ROMANI_EVOLUTION_INSTANCE`, `ROMANI_EVOLUTION_WEBHOOK_SECRET` configuration, as implemented by the authorized pairing slice. Missing provider configuration leaves the existing application/email usable; global WhatsApp activation is rejected with an actionable code until complete. Never invent configuration values.
 - [ ] Bind the adapter to the verified fixed host and approved instance. Reject user-supplied URLs/instance overrides; disallow redirects. Use encoded instance path segments, a 15-second timeout, capped response reads and no raw provider-body logging.
 - [ ] Implement the verified installed-version QR/state/send contracts behind `WhatsAppTransport`. `connect()` must return existing connected state without logout/restart; an unknown instance produces a setup error rather than silently provisioning it.
 - [ ] Classify documented non-acceptance versus ambiguous outcomes. A successful HTTP status without a valid provider message ID is not accepted. Do not retry network uncertainty automatically.

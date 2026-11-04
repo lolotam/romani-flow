@@ -1,6 +1,6 @@
 # Evolution WhatsApp reminders — feature specification
 
-Status: proposed specification for owner review; no runtime implementation or production activation authorized by this document.
+Status: reminder defaults remain proposed for owner review. A later explicit owner instruction authorizes implementation NOW of the shared-service/two-isolated-instance QR/status portion only; see `docs/WHATSAPP_PAIRING.md`. Production release and real pairing remain gated. No unrelated reminder default is silently approved.
 
 ## 1. Outcome and baseline
 
@@ -76,7 +76,7 @@ QR payloads are transient sensitive connection material: administrator-only, `Ca
 
 ## 6. Integration and privacy boundary
 
-The browser calls authenticated Romani backend routes only. The backend calls a fixed, operator-approved Evolution URL and fixed Romani-dedicated instance. The UI cannot supply arbitrary hosts, instance names or outbound URLs. Environment-only server configuration: `EVOLUTION_API_URL`, `EVOLUTION_API_KEY`, `EVOLUTION_INSTANCE_NAME`; no secret in ordinary settings, exports, frontend bundles or chat.
+The browser calls authenticated Romani backend routes only. The backend calls a fixed, operator-approved Evolution URL and fixed Romani-dedicated instance. The UI cannot supply arbitrary hosts, instance names or outbound URLs. Environment-only server configuration: `ROMANI_EVOLUTION_URL`, `ROMANI_EVOLUTION_API_KEY`, `ROMANI_EVOLUTION_INSTANCE`, `ROMANI_EVOLUTION_WEBHOOK_SECRET`; no secret in ordinary settings, exports, frontend bundles or chat.
 
 Never select an arbitrary first instance, reuse another project's connected sender, restart/logout/delete another instance, or overwrite shared provider/webhook configuration. A dedicated instance can use the shared API service once its ownership and version are verified.
 
@@ -86,7 +86,7 @@ This application boundary does not make a QR-linked Evolution session technicall
 
 Primary references consulted: [Evolution instance routes](https://github.com/evolution-foundation/evolution-api/blob/main/src/api/routes/instance.router.ts) and [Evolution webhook events](https://github.com/evolution-foundation/evolution-docs/blob/main/docs/02-Configuration/Webhooks.md). Upstream main is not proof of the installed API version. Pin adapter contracts to the verified installed version before enabling real provider calls.
 
-Read-only server discovery on 2026-11-04 found Evolution-named Redis and Postgres services at 1/1, but no Evolution API container/service in the Docker name/image inventory. This does not rule out a differently managed external process. Service URL, exact version, reachability, dedicated instance ownership and credential availability remain deployment prerequisites, not claimed readiness. No provider authentication, QR, message or server mutation was performed for this discovery.
+Initial 2026-11-04 name/image discovery matched Evolution Redis/Postgres but did not establish API absence. A later exact managed-service receipt and narrow exact-ID read confirmed healthy `curemedkw-evultionapi-wrtdxe`, custom2.3.7/sourcef1100ad/imagebe2cbdef..., with dedicated allocation `romani` separate from `curemed`. See `docs/WHATSAPP_PAIRING.md` for identity/contract. Native isolation, provisioning, private credentials and real QR readiness remain separate gates. Shared infrastructure is coordinated by the Curemed manager, not duplicated by Romani.
 
 ## 7. Architecture choice
 

@@ -15,6 +15,7 @@ import { createHealthRouter, createRootHealthRouter } from './routes/health.js';
 import { createResourceRouter } from './routes/resources.js';
 import { createSettingsRouter } from './routes/settings.js';
 import { createFormDefaultsRouter } from './routes/formDefaults.js';
+import { createPairingRouter, createPairingWebhook } from './whatsapp/routes.js';
 import type { CronService } from './services/cronService.js';
 import type { DocumentService } from './services/documentService.js';
 import type { Mailer } from './services/mailer.js';
@@ -68,9 +69,11 @@ export function createApp(deps: AppDependencies): Express {
   app.use('/health', createRootHealthRouter(db, () => mailer.isConfigured()));
   app.use('/api/health', createHealthRouter(db));
   app.use('/api/auth', createAuthRouter(config, db));
+  app.use('/api/whatsapp/webhook', createPairingWebhook(config.whatsapp));
 
   // Everything below requires a session.
   const authenticated = requireAuth(config, db);
+  app.use('/api/whatsapp', authenticated, createPairingRouter(config.whatsapp));
   app.use('/api/form-defaults', authenticated, createFormDefaultsRouter(db));
 
   app.use('/api/settings', authenticated, createSettingsRouter(config, db, cron));

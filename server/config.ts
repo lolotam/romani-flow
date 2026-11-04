@@ -1,4 +1,5 @@
 import path from 'node:path';
+import { readPairingConfig, type PairingConfig } from './whatsapp/config.js';
 
 /**
  * Central configuration for the API server.
@@ -29,6 +30,7 @@ export interface AppConfig {
   jwtTtlSeconds: number;
   cookieName: string;
   smtp: SmtpConfig;
+  whatsapp: PairingConfig;
   maxUploadBytes: number;
   maxEmailAttachmentBytes: number;
   /** The size of the encoded MIME message, which is larger than the raw files. */
@@ -173,6 +175,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     jwtSecret: readOptionalString(env, 'JWT_SECRET'),
     jwtTtlSeconds: readInt(env, 'JWT_TTL_SECONDS', 12 * 60 * 60),
     cookieName: readString(env, 'SESSION_COOKIE_NAME', 'romani_session'),
+    whatsapp: readPairingConfig(env),
     smtp: {
       host: readFirst(env, SMTP_HOST_KEYS, smtpUser || smtpPass || smtpFrom ? 'smtp.gmail.com' : ''),
       port: readFirstInt(env, SMTP_PORT_KEYS, 587),
