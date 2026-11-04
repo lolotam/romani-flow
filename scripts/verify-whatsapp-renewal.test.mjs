@@ -62,6 +62,16 @@ test('W5 real CronService selects WhatsApp when email is disabled or already com
  assert.equal(f.db.prepare('SELECT COUNT(*) n FROM email_log').get().n,0);
 }));
 
+test('PR8 manual email report never enqueues WhatsApp or consumes its daily selection checkpoint',()=>reminderApi(async f=>{
+ const {setSetting}=await import('../server/repositories/settings.ts');
+ await f.request('/api/employees/'+f.employee.id,{method:'PATCH',body:{whatsapp_notifications_enabled:true,residency_expiry_date:null}});
+ setSetting(f.db,'email.enabled',false);setSetting(f.db,'cron.enabled',false);
+ const response=await f.request('/api/email/expiry-report',{method:'POST',body:{}});assert.equal(response.status,200);
+ assert.equal(f.db.prepare('SELECT count(*) n FROM whatsapp_jobs').get().n,0);
+ assert.equal(f.db.prepare("SELECT value FROM settings WHERE key='whatsapp.last_enqueue_date'").get(),undefined);assert.equal(f.calls.length,0);
+ await f.cron.run('cron');assert.equal(f.reminders.store.due().length,1);
+}));
+
 test('a real isolated cron timer enqueues reminders without changing production cadence',()=>reminderApi(async f=>{
  const {setSetting}=await import('../server/repositories/settings.ts');
  await f.request('/api/employees/'+f.employee.id,{method:'PATCH',body:{whatsapp_notifications_enabled:true,residency_expiry_date:null}});

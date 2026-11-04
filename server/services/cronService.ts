@@ -80,7 +80,7 @@ export class CronService {
     this.inFlight = true;
     try {
       // WhatsApp owns its checkpoint; an email success/disable must not suppress it.
-      if (this.reminderEnqueue) {
+      if (source === 'cron' && this.reminderEnqueue) {
         try { await this.reminderEnqueue(); }
         catch { console.error('[whatsapp] scheduled selection failed; details suppressed'); }
       }
