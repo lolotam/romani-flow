@@ -4,6 +4,12 @@ WhatsApp reminder migration, queue/unknown states, private credentials and isola
 recovery safeguards are documented in [WHATSAPP.md](WHATSAPP.md). Do not merge its
 additive migration into auto-deploying main before the production release gate.
 
+Waleed is the release decision owner for this migration/deployment. The exact-head
+review/check/backup/rollback packet and his disposition are recorded in the
+existing project conversation. Historical Super Admin reviews retain their
+original source attribution; they are not current release approval. Successful
+bot checks do not authorize a migration or auto-deploying merge on their own.
+
 ## Deployment and identity
 
 Production is the Dockerfile/direct Node deployment at https://romani.curemedkw.com.

@@ -161,6 +161,23 @@ remain required regressions. Preserve original assertions and exact-head receipt
 
 ## Reminder readiness and shutdown
 
+Employee opt-in writes reject a canonical mobile already used by another opted-in
+employee, including inactive opted-in records. Validation and the business write
+share the same transaction/coordinator. Legacy collisions bypassing that path
+fail closed for employee delivery during selection/reconciliation; existing safe
+unsent employee jobs are cancelled. Explicit management recipients retain their
+separately authorized management routing and precedence. No legacy record is
+silently rewritten or opted out.
+
+Saving an already-enabled WhatsApp value does not require provider connectivity;
+unrelated settings can be saved while disconnected. Only a stored false-to-true
+transition checks send readiness and connection, inside the shared coordinator
+before atomic settings commit. Pending delivery still waits for connection.
+
+Acceptance requires HTTP 201 with bounded self-sent key.id and exact matching
+key.remoteJid. A missing destination is unknown/no resend. This conservative
+Romani policy is stronger than the pinned native minimal success contract.
+
 Reminder enablement and send use the same configuration predicate: exact instance
 `romani` and a canonical HTTP/HTTPS origin-only `ROMANI_EVOLUTION_URL` (optional
 trailing slash, no base prefix, query, fragment or credentials). Pairing's broader

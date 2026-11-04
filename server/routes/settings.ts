@@ -6,7 +6,6 @@ import { asyncHandler } from '../middleware/errorHandler.js';
 import { requireAdmin } from '../middleware/auth.js';
 import {
   readAllSettings,
-  setSettings,
   type SettingValue,
 } from '../repositories/settings.js';
 import { NOTIFICATION_INTERVALS } from '../services/intervals.js';
@@ -182,10 +181,7 @@ export function createSettingsRouter(config: AppConfig, db: Db, cron: CronServic
         return;
       }
 
-      if (accepted['whatsapp.enabled'] === true) {
-        await reminders.assertCanEnable();
-      }
-      await reminders.mutate(() => setSettings(db, accepted));
+      await reminders.saveSettings(accepted);
       cron.reschedule();
 
       res.json({ data: { updated: Object.keys(accepted), rejected: [] }, error: null });

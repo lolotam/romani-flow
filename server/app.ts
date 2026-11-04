@@ -195,7 +195,7 @@ export function createApp(deps: AppDependencies): Express {
     createResourceRouter(db, 'employees', {
       defaultRelations: ['companies'],
       managedFields: ['photo_path', 'photo_mime_type'],
-      transformWrite: (payload, _db, existing) => prepareEmployee(payload, existing),
+      transformWrite: (payload, db, existing) => prepareEmployee(payload, db, existing),
       aroundWrite: action => reminders.aroundWrite(action),
       afterWrite: () => reminders.reconcile(),
       transformRead: (row) => ({

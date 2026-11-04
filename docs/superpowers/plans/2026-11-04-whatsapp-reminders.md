@@ -208,7 +208,7 @@ Expected: all commands exit 0; capture actual counts/full SHA. Preserve prior te
 **Artifacts:** `.git/WHATSAPP_RELEASE_PACKET.md`, future `docs/WHATSAPP.md` receipts section.
 
 - [ ] Open the feature PR only when implementation/checks are concrete; immediately link it using the full URL. Answer findings, resolve all thread pages and preserve exact-head review provenance. Do not start paid reviews or change model lanes without authority.
-- [ ] Send the exact-head diff/checks/full-thread/rollback/schema compatibility packet to the existing SA session with `mode:auto`; record messageId/delivery. System receipt is not approval.
+- [ ] Record the exact-head diff/checks/full-thread/rollback/schema compatibility packet and obtain Waleed's direct release disposition in the existing project conversation. Historical review provenance and current deployment approval are separate evidence.
 - [ ] Before proposing production migration, take a private verified pre-migration backup and rehearse additive migration/old-image readability on an isolated copy. Preserve Goal-B images and KEEP. Do not apply a production down-migration or replace the production DB to roll back this feature.
 - [ ] Obtain the concrete release disposition, provider service/instance ownership and secure configuration readiness. Keep WhatsApp off until the designated sender scans the QR and explicitly designated recipient test numbers are ready.
 - [ ] After approved match-head merge/deployment, verify actual new image/compiled modules/health/sanitized logs and unchanged reminder expression/timezone. Live release still needs its exact source/migration/rollback disposition, even though QR/status was deployed. Pair only the approved Romani instance; no shared instance reset or global provider reconfiguration.
@@ -272,8 +272,20 @@ query-override isolation disposition do not authorize reminder activation.
 - [x] Match log retry availability to permanent-job queue capacity, retain retry of already queued jobs, and state that deferred overflow is re-evaluated at its current bucket rather than promised at its original threshold.
 - [x] Restrict specification automatic-retry wording to the pinned pre-HTTP DNS/refused allowlist. No remote retry hint or unclassified HTTP permits resend.
 
-Waleed authorized this bounded batch directly after the five-batch escalation.
-Super Admin and its automations are frozen; project execution continues and
-release decisions route directly to Waleed. This is not production migration,
+Approval record (2026-11-04): Waleed authorized this bounded batch directly after
+the five-batch escalation. The project's release decision owner is Waleed;
+earlier Super Admin coordination is historical. This is not production migration,
 merge/deployment, enablement, webhook or live-send approval. Holder scan remains
 deferred. Exact-head results and review provenance belong in the release receipt.
+
+## Owner-approved privacy/settings correction batch (2026-11-04)
+
+- [x] Reject canonical mobile collisions across opted-in employees atomically on create/enable/mobile edit, including concurrent API requests. Leave opt-outs and explicitly authorized management overlap available. Legacy employee collisions fail closed in selection/reconciliation without modifying business records.
+- [x] Apply connection/readiness checks only to the stored false-to-true WhatsApp transition, under the same coordinator as settings commit. Preserve disabled-first-enable refusal and atomic unrelated settings rollback; allow already-enabled settings save while disconnected.
+- [x] Require exact key.remoteJid for Romani provider acceptance; missing destination becomes unknown/no resend. Document this as a stricter owner-approved project policy, not a changed pinned source contract.
+- [x] Replace conflicting historical release-routing wording with the current direct-owner release workflow, and clarify the reviewed fixed production domain without trusting Host headers or adding runtime configuration.
+
+This batch contains local synthetic verification only. Production migration007,
+auto-deploying merge, enablement, QR/webhook and live sends retain their separate
+owner release/activation gates. No production data or credential changes are
+part of this correction.

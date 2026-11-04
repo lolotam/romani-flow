@@ -25,8 +25,8 @@ test('native broad400,429,5xx and redirects are uncertain, not safe retries',()=
  for(const status of [401,403]){f.mode.status=status;assert.deepEqual(await f.client.sendText(EMPLOYEE_PHONE,'Synthetic'),{kind:'permanent_failed',code:'provider_unauthorized'});}
 }));
 
-test('missing IDs, wrong destination, foreign instance, malformed and oversized success remain unknown',()=>provider(async f=>{
- for(const payload of [{},{key:{id:'id',fromMe:false}},{key:{id:'id',fromMe:true,remoteJid:'99900000002@s.whatsapp.net'}},{instanceName:'curemed',key:{id:'id',fromMe:true}},null]){f.mode.payload=payload;assert.equal((await f.client.sendText(EMPLOYEE_PHONE,'Synthetic')).kind,'unknown');}
+test('missing IDs or destination, wrong destination, foreign instance, malformed and oversized success remain unknown',()=>provider(async f=>{
+ for(const payload of [{},{key:{id:'id',fromMe:false}},{key:{id:'id',fromMe:true}},{key:{id:'id',fromMe:true,remoteJid:'99900000002@s.whatsapp.net'}},{instanceName:'curemed',key:{id:'id',fromMe:true,remoteJid:'99900000001@s.whatsapp.net'}},null]){f.mode.payload=payload;assert.equal((await f.client.sendText(EMPLOYEE_PHONE,'Synthetic')).kind,'unknown');}
  for(const raw of ['{',JSON.stringify({key:{id:'id',fromMe:true},extra:'x'.repeat(70000)})]){f.mode.raw=raw;assert.equal((await f.client.sendText(EMPLOYEE_PHONE,'Synthetic')).kind,'unknown');}
 }));
 

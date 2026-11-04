@@ -1,6 +1,6 @@
 import type { Db } from '../../db/connection.js';
 import { RepositoryError } from '../../repositories/base.js';
-import { getBoolean, getString, setSetting } from '../../repositories/settings.js';
+import { getBoolean, getString, setSetting, setSettings, type SettingValue } from '../../repositories/settings.js';
 import { NotificationCoordinator } from '../coordinator.js';
 import type { SendOutcome, WhatsAppTransport } from './contracts.js';
 import { atomic, ReminderStore } from './repository.js';
@@ -63,8 +63,17 @@ export class WhatsAppReminders {
   }
 
   async setEnabled(enabled: boolean): Promise<void> {
-    if (enabled) await this.assertCanEnable();
-    await this.mutate(() => setSetting(this.db, 'whatsapp.enabled', enabled));
+    await this.saveSettings({ 'whatsapp.enabled': enabled });
+  }
+
+  async saveSettings(settings: Record<string, SettingValue>): Promise<void> {
+    await this.aroundWrite(async () => {
+      if (settings['whatsapp.enabled'] === true && !getBoolean(this.db, 'whatsapp.enabled')) await this.assertCanEnable();
+      atomic(this.db, () => {
+        setSettings(this.db, settings);
+        this.reconcile();
+      });
+    });
   }
 
   async assertCanEnable(): Promise<void> {

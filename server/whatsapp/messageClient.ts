@@ -44,7 +44,7 @@ export class MessageClient implements WhatsAppTransport {
       const body = JSON.parse(Buffer.concat(chunks).toString('utf8'));
       const key = body?.key;
       if (body?.error || (typeof body?.status === 'number' && body.status >= 400) || typeof key?.id !== 'string' || !/^[A-Za-z0-9_-]{1,128}$/.test(key.id) || key.fromMe !== true ||
-          (key.remoteJid !== undefined && key.remoteJid !== `${phone.slice(1)}@s.whatsapp.net`) ||
+          key.remoteJid !== `${phone.slice(1)}@s.whatsapp.net` ||
           (body.instanceName !== undefined && body.instanceName !== this.config.instance)) {
         return { kind: 'unknown', code: 'invalid_provider_response' };
       }

@@ -57,7 +57,10 @@ share, or an object-storage mount — SQLite needs proper `fcntl` locking there.
 2. **Create Application → Dockerfile** (or "Compose" if you prefer the file below).
 3. Point the build context at the repository root (`romani-flow`) and leave the
    Dockerfile as `Dockerfile`.
-4. **Domain**: add the domain you want, e.g. `romani.curemed.iq`. Traefik
+4. **Domain**: use `romani.curemedkw.com` for this reviewed release. WhatsApp admin
+   writes use the server-fixed public origin `https://romani.curemedkw.com`.
+   Another domain requires a reviewed origin-policy change, not browser-supplied
+   Host/forwarded-header authority. Traefik
    terminates TLS and routes it to the container's port `3000`.
 
 ### Using the compose file instead
@@ -165,7 +168,7 @@ approved seed mounted; it does not claim production migration `007` has run:
 Then check:
 
 ```bash
-curl -fsS https://romani.curemed.iq/api/health
+curl -fsS https://romani.curemedkw.com/api/health
 # {"status":"healthy","database":"ok","smtp":true,"timestamp":"…"}
 ```
 

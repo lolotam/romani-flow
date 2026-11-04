@@ -2,6 +2,52 @@
 import {reminderApi} from './fixtures/whatsapp-api.mjs';
 import {EMPLOYEE_PHONE,MANAGER_PHONE} from './fixtures/whatsapp.mjs';
 
+test('employee writes reject canonical opt-in collisions atomically, including concurrent creation',()=>reminderApi(async f=>{
+ const first='/api/employees/'+f.employee.id;
+ assert.equal((await f.request(first,{method:'PATCH',body:{whatsapp_notifications_enabled:true,residency_expiry_date:null}})).status,200);
+ await f.reminders.schedule();const job=f.db.prepare('SELECT id,state FROM whatsapp_jobs').get();
+ const duplicate=await f.request('/api/employees',{method:'POST',body:{name:'Duplicate synthetic',mobile_no:'00999 0000-0001',whatsapp_notifications_enabled:true}});
+ assert.equal(duplicate.status,409);assert.equal(duplicate.json.error.code,'duplicate_employee_whatsapp_phone');
+ const added=await f.request('/api/employees',{method:'POST',body:{name:'Separate synthetic',mobile_no:MANAGER_PHONE}});
+ assert.equal(added.status,201);const second='/api/employees/'+added.json.data[0].id;
+ const rejected=await f.request(second,{method:'PATCH',body:{mobile_no:EMPLOYEE_PHONE,whatsapp_notifications_enabled:true}});
+ assert.equal(rejected.status,409);
+ const unchanged=(await f.request(second)).json.data;assert.equal(unchanged.mobile_no,MANAGER_PHONE);assert.equal(unchanged.whatsapp_notifications_enabled,false);
+ assert.equal((await f.request(second,{method:'PATCH',body:{whatsapp_notifications_enabled:true}})).status,200);
+ assert.equal((await f.request(second,{method:'PATCH',body:{mobile_no:EMPLOYEE_PHONE}})).status,409);
+ const concurrent=await Promise.all([1,2].map(n=>f.request('/api/employees',{method:'POST',body:{name:'Concurrent synthetic '+n,mobile_no:'+99900000004',whatsapp_notifications_enabled:true}})));
+ assert.deepEqual(concurrent.map(response=>response.status).sort(),[201,409]);
+ assert.equal(f.db.prepare("SELECT count(*) n FROM employees WHERE mobile_no='+99900000004' AND whatsapp_notifications_enabled=1").get().n,1);
+ assert.deepEqual(f.db.prepare('SELECT id,state FROM whatsapp_jobs WHERE id=?').get(job.id),job);assert.equal(f.calls.length,0);
+}));
+
+test('legacy opted-in mobile collisions cancel employee work but preserve explicit management routing',()=>reminderApi(async f=>{
+ const {insertRow}=await import('../server/repositories/base.ts');
+ await f.request('/api/employees/'+f.employee.id,{method:'PATCH',body:{whatsapp_notifications_enabled:true,residency_expiry_date:null}});
+ await f.reminders.schedule();const first=f.db.prepare('SELECT id FROM whatsapp_jobs').get().id;
+ await f.reminders.mutate(()=>{
+  const other=insertRow(f.db,'employees',{name:'Legacy synthetic',mobile_no:'00999 0000-0001',whatsapp_notifications_enabled:true,residency_expiry_date:'2026-01-01'});
+  insertRow(f.db,'documents',{title:'Legacy synthetic document',employee_id:other.id,document_type_id:f.type.id,expiry_date:'2026-01-01'});
+ });
+ assert.equal(f.db.prepare('SELECT state FROM whatsapp_jobs WHERE id=?').get(first).state,'cancelled');
+ assert.equal(await f.reminders.drain(),0);assert.equal(f.calls.length,0);
+ const manager=await f.request('/api/whatsapp/recipients',{method:'POST',body:{label:'Explicit synthetic manager',phone:EMPLOYEE_PHONE,enabled:true}});
+ assert.equal(manager.status,201);f.clock.now=new Date('2026-01-03T08:00:00Z');await f.reminders.schedule();
+ const pending=f.db.prepare("SELECT audience FROM whatsapp_jobs WHERE state='pending'").all();assert.equal(pending.length,3);assert.ok(pending.every(job=>job.audience==='management'));
+ assert.equal(await f.reminders.drain(),3);assert.equal(f.calls.length,3);
+}));
+
+test('disconnected already-enabled settings save succeeds; false-to-true still refuses atomically',()=>reminderApi(async f=>{
+ const {getBoolean}=await import('../server/repositories/settings.ts');
+ assert.equal((await f.request('/api/settings',{method:'PUT',body:{settings:{'whatsapp.enabled':true,'cron.include_documents':false}}})).status,200);
+ assert.equal(getBoolean(f.db,'cron.include_documents'),false);
+ assert.equal((await f.request('/api/settings',{method:'PUT',body:{settings:{'whatsapp.enabled':false}}})).status,200);
+ const rejected=await f.request('/api/settings',{method:'PUT',body:{settings:{'whatsapp.enabled':true,'cron.include_documents':true}}});
+ assert.equal(rejected.status,409);assert.equal(rejected.json.error.code,'whatsapp_not_connected');
+ assert.equal(getBoolean(f.db,'whatsapp.enabled'),false);assert.equal(getBoolean(f.db,'cron.include_documents'),false);
+ assert.equal(f.calls.length,0);assert.equal(f.db.prepare('SELECT count(*) n FROM whatsapp_jobs').get().n,0);
+},{status:async()=>({configured:true,state:'disconnected'}),sendText:async()=>{throw Error('Unexpected synthetic send');}}));
+
 test('owner phone-change policy replaces only prepared unsent work on the same day, including A-to-B-to-A',()=>reminderApi(async f=>{
  const employeePath='/api/employees/'+f.employee.id;
  await f.request(employeePath,{method:'PATCH',body:{whatsapp_notifications_enabled:true,residency_expiry_date:null}});

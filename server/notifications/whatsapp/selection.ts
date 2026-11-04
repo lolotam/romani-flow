@@ -6,11 +6,13 @@ import { daysUntil, normalizeDate } from '../../utils/dates.js';
 import type { ReminderCandidate } from './contracts.js';
 import { normalizeWhatsAppPhone } from './phone.js';
 import { reminderText } from './templates.js';
+import { optedPhoneCounts } from './employeePolicy.js';
 
 export function selectReminders(db: Db, instance: string, now: Date): ReminderCandidate[] {
   if (!getBoolean(db, 'whatsapp.enabled')) return [];
   const intervals = parseIntervals(getRawList(db, 'email.notification_intervals'));
   const employees = new Map((db.prepare('SELECT * FROM employees').all() as Row[]).map(row => [String(row.id), row]));
+  const phoneCounts = optedPhoneCounts(employees.values());
   const companies = new Map((db.prepare('SELECT * FROM companies').all() as Row[]).map(row => [String(row.id), String(row.name_ar || row.name)]));
   const managers = db.prepare('SELECT label,phone FROM whatsapp_recipients WHERE enabled=1').all() as { label: string; phone: string }[];
   const candidates: ReminderCandidate[] = [];
@@ -24,7 +26,7 @@ export function selectReminders(db: Db, instance: string, now: Date): ReminderCa
     const destinations = new Map<string, { label: string; audience: 'employee' | 'management' }>();
     if (employee?.is_active === 1 && employee.whatsapp_notifications_enabled === 1) {
       const phone = normalizeWhatsAppPhone(employee.mobile_no);
-      if (phone) destinations.set(phone, { label: owner, audience: 'employee' });
+      if (phone && phoneCounts.get(phone) === 1) destinations.set(phone, { label: owner, audience: 'employee' });
     }
     for (const manager of managers) destinations.set(manager.phone, { label: manager.label, audience: 'management' });
     for (const [recipient, destination] of destinations) candidates.push({
