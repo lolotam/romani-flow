@@ -299,3 +299,13 @@ test('invalid-number failure forbids old-identity retry but keeps safe phone-edi
  assert.equal(f.db.prepare('SELECT state FROM whatsapp_jobs WHERE id=?').get(claim.job.id).state,'cancelled');
  assert.equal(f.reminders.store.due().length,1);assert.equal(f.reminders.store.due()[0].recipient,MANAGER_PHONE);assert.equal(f.calls.length,0);
 }));
+
+test('shared management destination retains employee provenance for safe unsent phone replacement',()=>reminderApi(async f=>{
+ await f.request('/api/employees/'+f.employee.id,{method:'PATCH',body:{whatsapp_notifications_enabled:true,residency_expiry_date:null}});
+ await f.request('/api/whatsapp/recipients',{method:'POST',body:{label:'Shared synthetic manager',phone:EMPLOYEE_PHONE,enabled:true}});
+ await f.reminders.schedule();assert.equal(f.reminders.store.due().length,1);
+ await f.request('/api/employees/'+f.employee.id,{method:'PATCH',body:{mobile_no:MANAGER_PHONE}});
+ const jobs=f.reminders.store.due();assert.equal(jobs.length,2);
+ assert.ok(jobs.some(job=>job.recipient===EMPLOYEE_PHONE&&job.audience==='management'));
+ assert.ok(jobs.some(job=>job.recipient===MANAGER_PHONE&&job.audience==='employee'));assert.equal(f.calls.length,0);
+}));
