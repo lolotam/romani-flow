@@ -5,6 +5,7 @@ import { pairingConfiguration } from './config.js';
 import { PairingClient, PairingError } from './pairingClient.js';
 import { requireAdmin } from '../middleware/auth.js';
 import type { NodeEnv } from '../config.js';
+import type { WhatsAppReminders } from '../notifications/whatsapp/service.js';
 
 function fail(res: Response, status: number, code: string): void {
   res.status(status).json({ data: null, error: { code, message: 'WhatsApp connection request could not be completed.' } });
@@ -15,11 +16,12 @@ function emptyInput(req: Request): boolean {
     (req.body === undefined || (typeof req.body === 'object' && req.body !== null && !Array.isArray(req.body) && Object.keys(req.body).length === 0));
 }
 
-export function createPairingRouter(config: PairingConfig, env: NodeEnv): Router {
+export function createPairingRouter(config: PairingConfig, env: NodeEnv, reminders: WhatsAppReminders): Router {
   const router = Router();
   const client = new PairingClient(config);
   let connecting = false;
   let lastConnectAt = 0;
+  let lastDisconnectAt = 0;
   router.use(requireAdmin, (_req, res, next) => {
     res.setHeader('Cache-Control', 'no-store');
     res.setHeader('Referrer-Policy', 'no-referrer');
@@ -29,6 +31,20 @@ export function createPairingRouter(config: PairingConfig, env: NodeEnv): Router
     if (!emptyInput(req)) { fail(res, 400, 'project_override_forbidden'); return; }
     try { res.json({ data: await client.status(), error: null }); }
     catch (error) { const e = error instanceof PairingError ? error : new PairingError('provider_unavailable'); fail(res, e.status, e.code); }
+  });
+  router.post('/disconnect', async (req, res) => {
+    if (!emptyInput(req)) { fail(res, 400, 'project_override_forbidden'); return; }
+    const expected = env === 'production' ? 'https://romani.curemedkw.com' : `${req.protocol}://${req.get('host')}`;
+    if (req.get('origin') && req.get('origin') !== expected) { fail(res, 403, 'origin_forbidden'); return; }
+    if (connecting || Date.now() - lastDisconnectAt < 15_000) { fail(res, 429, 'pairing_rate_limited'); return; }
+    connecting = true;
+    lastDisconnectAt = Date.now();
+    try {
+      await reminders.setEnabled(false);
+      const status = await reminders.coordinator.runExclusive(() => client.disconnect());
+      res.json({ data: status, error: null });
+    } catch (error) { const e = error instanceof PairingError ? error : new PairingError('provider_unavailable'); fail(res, e.status, e.code); }
+    finally { connecting = false; }
   });
   router.post('/connect', async (req, res) => {
     if (!emptyInput(req)) { fail(res, 400, 'project_override_forbidden'); return; }

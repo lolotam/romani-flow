@@ -52,6 +52,7 @@ export const settings = {
     disconnected: 'Not connected', connecting: 'Waiting for QR scan', connected: 'Connected',
     unavailable: 'Connection status unavailable', loading: 'Please wait…',
     error: 'Check the dedicated project setup or refresh the status. No other account was changed.',
+    disconnect: 'Disconnect account', disconnectConfirm: 'Disconnect this project account and stop WhatsApp reminders? You can then scan a new QR with another account. Existing reminder audit is retained. Sending will require deliberate re-enable.',
     refresh: 'Check connection', showQr: 'Show / renew QR', hideQr: 'Hide QR',
     qrAlt: 'QR code for the Romani WhatsApp connection',
     scan: 'The account holder scans this code from WhatsApp → Linked devices.',

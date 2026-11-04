@@ -39,6 +39,7 @@ async function fixture(run, overrides = {}) {
     if (mode.errorBody) { res.end(JSON.stringify({ error: 'must-not-leak', instance: { instanceName: mode.instance, state: 'open' } })); return; }
     if (req.url.includes('/connectionState/')) res.end(JSON.stringify({ instance: { instanceName: mode.instance, state: mode.state }, apikey: apiKey, chats: ['must-not-leak'] }));
     else if (req.url.includes('/connect/')) res.end(JSON.stringify(mode.connectResponse ?? { base64: mode.qr, code: 'must-not-leak', pairingCode: 'must-not-leak', apikey: apiKey }));
+    else if (req.url.includes('/logout/') && req.method === 'DELETE') { mode.state = mode.logoutState ?? 'close'; res.end(JSON.stringify({status:'SUCCESS',error:false,response:{message:'Instance logged out'}})); }
     else { res.end('{}'); }
   });
   await listen(provider);
@@ -264,3 +265,28 @@ test('TLS-terminated production accepts only its fixed HTTPS public origin over 
   const r = await f.request('/api/whatsapp/connect', { method: 'POST', body: {}, headers: { origin: 'https://romani.curemedkw.com' } });
   assert.equal(r.status, 200); assert.equal(r.json.data.qr, PNG);
 }, { NODE_ENV: 'production' }));
+
+test('admin disconnect stops reminders, uses only scoped logout and permits a fresh QR without deleting audit',()=>fixture(async f=>{
+ const {setSetting,getBoolean}=await import('../server/repositories/settings.ts');
+ f.mode.state='open';setSetting(f.db,'whatsapp.enabled',true);
+ const before=f.calls.length;
+ for(const [role,status] of [['viewer',403],[null,401]])assert.equal((await f.request('/api/whatsapp/disconnect',{method:'POST',body:{},role})).status,status);
+ assert.equal((await f.request('/api/whatsapp/disconnect',{method:'POST',body:{},headers:{origin:'https://foreign.example.invalid'}})).status,403);
+ assert.equal((await f.request('/api/whatsapp/disconnect?instance=curemed',{method:'POST',body:{}})).status,400);
+ assert.equal(f.calls.length,before);assert.equal(getBoolean(f.db,'whatsapp.enabled'),true);
+ const response=await f.request('/api/whatsapp/disconnect',{method:'POST',body:{}});
+ assert.equal(response.status,200);assert.equal(response.json.data.state,'disconnected');assert.equal(response.headers.get('cache-control'),'no-store');
+ assert.equal(getBoolean(f.db,'whatsapp.enabled'),false);
+ const writes=f.calls.filter(call=>call.method==='DELETE');assert.equal(writes.length,1);assert.equal(writes[0].path,'/api/instance/logout/romani-fixture');assert.equal(writes[0].authorized,true);
+ assert.equal(f.calls.some(call=>call.path.includes('/delete/')||call.path.includes('curemed')),false);
+ const qr=await f.request('/api/whatsapp/connect',{method:'POST',body:{}});assert.equal(qr.status,200);assert.equal(qr.json.data.state,'connecting');
+ assert.equal(getBoolean(f.db,'whatsapp.enabled'),false);
+}));
+
+test('logout acknowledgement without actual closed state never reports successful disconnection',()=>fixture(async f=>{
+ const {setSetting,getBoolean}=await import('../server/repositories/settings.ts');
+ f.mode.state='open';f.mode.logoutState='open';setSetting(f.db,'whatsapp.enabled',true);
+ const response=await f.request('/api/whatsapp/disconnect',{method:'POST',body:{}});
+ assert.equal(response.status,409);assert.equal(response.json.error.code,'disconnect_pending');assert.equal(response.json.data,null);
+ assert.equal(getBoolean(f.db,'whatsapp.enabled'),false);assert.equal(f.calls.filter(call=>call.method==='DELETE').length,1);
+}));
