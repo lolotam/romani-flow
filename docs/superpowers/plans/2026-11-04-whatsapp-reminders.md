@@ -12,20 +12,20 @@
 
 **Baseline:** deployed QR/status plus login release `6b48727b383f7123d150affd2b82c16b7acfa783` (PR6 after PR7). The historical accepted Goal-B baseline is `4c9fc35bfb86b9585aa0e83ede45891ad883619b`. Preserve dirty local `AGENTS.md`, untracked `supabase/`, Goal-B audit/fixtures, KEEP and rollback images. No cleanup.
 
-**Current implementation scope:** The project-isolated QR/status portion is described in `docs/WHATSAPP_PAIRING.md`. The owner has confirmed current `mobile_no` with country code, once-only expired reminders, and both company-document/residency coverage. SA accepted the revised reminder design at9db4cc9a for local implementation. Production migration and sending remain separately gated. This paragraph is a scope description, not a grant of authority.
+**Current implementation scope:** The project-isolated QR/status portion is described in `docs/WHATSAPP_PAIRING.md`. The owner has confirmed current `mobile_no` with country code, once-only expired reminders, and both company-document/residency coverage. SA accepted the revised reminder design at `9db4cc9a` for local implementation. Production migration and sending remain separately gated. This paragraph is a scope description, not a grant of authority.
 
 ## Task 0 — Resolve design defaults and provider prerequisites
 
 **Files:** Specification above; future `.git/WHATSAPP_PROVIDER_PREFLIGHT.md` (sanitized, local-only).
 
 - [x] Record the owner's three explicit choices: use `mobile_no` with country code and no `phone` fallback; one reminder in the expired bucket per item/expiry/bucket/recipient, not daily; management-only company documents plus employee residency coverage. Revised specification is the source of these contracts.
-- [x] Obtain focused SA review of the revised reminder design at9db4cc9a. QR/status approval does not substitute for review of the outbox/schema/sending design.
+- [x] Obtain focused SA review of the revised reminder design at `9db4cc9a`. QR/status approval does not substitute for review of the outbox/schema/sending design.
 - [x] Compare direct cron sends against durable in-process outbox; retain the outbox architecture unless the owner changes the fixed audit/retry requirements.
 - [x] Preserve the approved baseline; implementation branch `feat/whatsapp-reminders` includes the accepted docs commit and intentional local changes. Do not stage `AGENTS.md`, `supabase/`, `.env` or `.git` audit artifacts.
 - [x] Reconcile the intended existing shared service and dedicated `romani` instance from the pinned Curemed operator contract and deployed pairing slice. Earlier broad discovery did not establish API absence. Do not repeat inventory/provisioning.
 - [x] Read and hash-verify SA-forwarded Q8 execution receipt `262fd084465a61b891ab219f7178cf5caf9d332dcbbbeed3d3c381d7434dd813`. This is Curemed operator evidence, not a Romani server rerun. Holder QR, webhook and connection-only smoke are separately sequenced; native query-override disposition and reminder release remain pre-send gates. No shared infrastructure changes in this lane.
 - [x] Identify the approved provider URL, instance name, ownership and installed-version contract from the deployed pairing slice. Any future secret values are entered by Waleed through `request_secret` or the hub UI; never request a password/key in chat. Do not read/copy the provider private handoff or rerun old file-based helpers. Do not read chats or list other projects' instance payloads.
-- [x] Pin the verified provider routes and sanitized response fixtures to the installed version: [WHATSAPP_SEND_CONTRACT.md](../../WHATSAPP_SEND_CONTRACT.md), exactsourcef1100ad viaGitHub, no live probe. Upstream v2 instance routes are a reference, not installed-version evidence. If the service is unavailable, continue local adapter/outbox/UI work against the loopback fixture; real pairing/activation remains blocked only.
+- [x] Pin the verified provider routes and sanitized response fixtures to the installed version: [WHATSAPP_SEND_CONTRACT.md](../../WHATSAPP_SEND_CONTRACT.md), exact source `f1100ad` via GitHub, no live probe. Upstream v2 instance routes are a reference, not installed-version evidence. If the service is unavailable, continue local adapter/outbox/UI work against the loopback fixture; real pairing/activation remains blocked only.
 
 Provider interface used by the following tasks:
 
@@ -245,7 +245,7 @@ per planning task.
 The local built-frontend/compiled-backend browser used actual admin form submits,
 SQLite and a loopback HTTP provider: recipient add/edit/disable, global switch,
 employee opt-in/save, fixed reminder log/filter/text, Arabic RTL/English LTR and
-calendar renewal with persisted GET readback. Actual viewer login received403
+calendar renewal with persisted GET readback. Actual viewer login received 403
 for recipient/log reads. No QR was generated. The fixture's direct CronService
 run is not timer-firing evidence; a separate accelerated real timer test covers
 that path. Synthetic config/auth/origin differ from production. Audit receipts
@@ -260,6 +260,6 @@ catch boundaries either persist uncertainty, defer sending, or emit a fixed
 sanitized worker/selection failure; they never fabricate provider success.
 
 Exact-head tests/reviews remain a release receipt, not checkboxes granting a
-production migration. The new additive007 is not applied to production. Global
+production migration. The new additive migration `007` is not applied to production. Global
 delivery and new opt-ins remain false by default; holder pairing and native
 query-override isolation disposition do not authorize reminder activation.

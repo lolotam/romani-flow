@@ -7,7 +7,6 @@ export function useWhatsAppSettings() {
   const { user } = useAuth();
   const identity = user?.role === 'admin' ? user.id : null;
   const active = useRef<string | null>(identity);
-  active.current = identity;
   const generation = useRef(0);
   const [recipientOffset, setRecipientOffset] = useState(0);
   const [filter, setFilter] = useState<WhatsAppLogFilter>({});
@@ -33,7 +32,7 @@ export function useWhatsAppSettings() {
     setEnabled(settings.data?.settings['whatsapp.enabled'] === true); setError('');
   }, [identity, recipientOffset, filter]);
   const latestLoad = useRef(load);
-  latestLoad.current = load;
+  useEffect(() => { latestLoad.current = load; }, [load]);
 
   useEffect(() => {
     active.current = identity;

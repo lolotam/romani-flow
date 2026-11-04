@@ -9,13 +9,13 @@ employee residency. The shared-service QR/status integration is described in
 
 ## Release and activation boundaries
 
-Migration007 is additive: an employee opt-in column, named recipients, durable
+Migration `007` is additive: an employee opt-in column, named recipients, durable
 jobs and attempts. The global switch and every employee opt-in default false.
 No recipients are inferred from accounts/email/legacy phone fields. Existing
 email settings and completion history remain independent.
 
 The server migrates during startup. Therefore merging this feature while main
-auto-deploys would also apply007 to production. Exact-head reviews and an explicit
+auto-deploys would also apply `007` to production. Exact-head reviews and an explicit
 production migration/release disposition are required before merge. Local tests,
 source approval or an accepted earlier QR release are not that disposition.
 
@@ -105,7 +105,7 @@ handoff begins. A message handed off before that commit cannot be recalled.
 Changing to multiple application replicas requires a coordination review.
 
 The attempt and exact text are durable before the send. 201 with a valid self-sent
-message ID means `provider_accepted`, not delivered/read. A native400 may occur
+message ID means `provider_accepted`, not delivered/read. A native 400 may occur
 after send and is uncertain. Lost response, timeout, malformed/oversized success
 or restart while sending becomes `unknown`; no automatic/manual resend. Proven
 pre-HTTP DNS failure (`ENOTFOUND`/`EAI_AGAIN`) or `ECONNREFUSED` can retry at
