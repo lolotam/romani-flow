@@ -12,7 +12,8 @@ import { useToast } from '@/hooks/use-toast';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { api, endpoints } from '@/lib/api';
 import { Layout } from '@/components/Layout';
-import { Mail, Moon, Building2, FileText, UserCog, Shield, Database } from 'lucide-react';
+import { useAuth } from '@/hooks/useAuth';
+import { Mail, Moon, Building2, FileText, UserCog, Shield, Database, QrCode } from 'lucide-react';
 
 import type { Company, DocumentType, Ministry, Position } from '@/components/settings/types';
 import EmailSettingsComponent from '@/components/settings/EmailSettings';
@@ -22,9 +23,11 @@ import PositionsSettings from '@/components/settings/PositionsSettings';
 import DocumentTypesSettings from '@/components/settings/DocumentTypesSettings';
 import MinistriesSettings from '@/components/settings/MinistriesSettings';
 import BackupSettings from '@/components/settings/BackupSettings';
+import WhatsAppPairingSettings from '@/components/settings/WhatsAppPairingSettings';
 
 export default function Settings() {
   const { t, isRTL } = useLanguage();
+  const { user } = useAuth();
   const { toast } = useToast();
   const { theme, toggleTheme } = useTheme();
   const [activeTab, setActiveTab] = useState('email');
@@ -207,8 +210,9 @@ export default function Settings() {
 
         <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }}>
           <Tabs dir={isRTL ? 'rtl' : 'ltr'} value={activeTab} onValueChange={setActiveTab} className="space-y-6">
-            <TabsList className="grid h-auto w-full grid-cols-2 sm:grid-cols-3 xl:grid-cols-7 gap-1">
+            <TabsList className="grid h-auto w-full grid-cols-2 sm:grid-cols-3 xl:grid-cols-4 gap-1">
               <TabsTrigger value="email" className="flex items-center gap-2"><Mail className="h-4 w-4" /><span>{t('settings.tabs.email')}</span></TabsTrigger>
+              {user?.role === 'admin' && <TabsTrigger value="whatsapp" className="flex items-center gap-2"><QrCode className="h-4 w-4" /><span>{t('settings.tabs.whatsapp')}</span></TabsTrigger>}
               <TabsTrigger value="appearance" className="flex items-center gap-2"><Moon className="h-4 w-4" /><span>{t('settings.tabs.appearance')}</span></TabsTrigger>
               <TabsTrigger value="companies" className="flex items-center gap-2"><Building2 className="h-4 w-4" /><span>{t('settings.tabs.companies')}</span></TabsTrigger>
               <TabsTrigger value="positions" className="flex items-center gap-2"><UserCog className="h-4 w-4" /><span>{t('settings.tabs.positions')}</span></TabsTrigger>
@@ -220,6 +224,7 @@ export default function Settings() {
             <TabsContent value="email">
               <EmailSettingsComponent />
             </TabsContent>
+            {user?.role === 'admin' && <TabsContent value="whatsapp"><WhatsAppPairingSettings /></TabsContent>}
 
             <TabsContent value="appearance">
               <AppearanceSettings darkMode={theme === 'dark'} onToggleDarkMode={toggleDarkMode} />

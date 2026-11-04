@@ -128,8 +128,6 @@ export function errorHandler(
     return;
   }
 
-  console.error('[api] unhandled error:', error);
-
   // Express body-parser errors arrive with a `type` property.
   if (typeof error === 'object' && error !== null && 'type' in error) {
     const type = String((error as { type: string }).type);
@@ -149,6 +147,9 @@ export function errorHandler(
     }
   }
 
+  // Parser errors above may carry raw credentials/QR in their body. Keep their
+  // stable public codes, but never pass them to the generic exception logger.
+  console.error('[api] unhandled error:', error);
   res.status(500).json({
     data: null,
     error: { message: 'Internal server error.', code: 'internal_error' },

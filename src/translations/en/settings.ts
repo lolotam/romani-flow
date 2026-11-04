@@ -5,6 +5,7 @@ export const settings = {
 
   // Tabs
   tabs: {
+    whatsapp: 'WhatsApp',
     email: 'Email',
     appearance: 'Appearance',
     companies: 'Companies',
@@ -15,6 +16,21 @@ export const settings = {
   },
 
   // Email Settings
+  whatsapp: {
+    title: 'Connect Romani WhatsApp',
+    description: 'Link the Romani account to its dedicated project connection.',
+    unconfigured: 'The server integration has not been configured.',
+    disconnected: 'Not connected', connecting: 'Waiting for QR scan', connected: 'Connected',
+    unavailable: 'Connection status unavailable', loading: 'Please wait…',
+    error: 'Check the dedicated project setup or refresh the status. No other account was changed.',
+    refresh: 'Check connection', showQr: 'Show / renew QR', hideQr: 'Hide QR',
+    qrAlt: 'QR code for the Romani WhatsApp connection',
+    scan: 'The account holder scans this code from WhatsApp → Linked devices.',
+    expiry: 'The code is hidden after 60 seconds or when this page is hidden. Request a new code if needed.',
+    expired: 'QR hidden or expired. Request a new code to continue.',
+    privacy: 'This page does not display or import personal conversations. Evolution manages the linked session on the server.',
+    scope: 'Connecting does not enable reminders or send messages. Reminder settings are a separate feature.',
+  },
   email: {
     title: 'Email Settings',
     description: 'Configure email service for sending notifications',

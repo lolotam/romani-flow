@@ -3,6 +3,10 @@
 A bilingual (Arabic / English) web application for managing employees and their
 documents, with expiry reminders delivered by email.
 
+Administrator-only [WhatsApp QR pairing](docs/WHATSAPP_PAIRING.md) connects a
+dedicated Romani instance on the shared Evolution service. Pairing does not send
+messages or enable the separately proposed WhatsApp reminder automation.
+
 The application is a **Vite + React SPA served by a small Node API**. The API
 owns a **SQLite database** and a **file bucket** that lives on a mounted volume
 outside the container, so the data survives every rebuild.
