@@ -5,7 +5,7 @@ import {drainApplication,SHUTDOWN_DEADLINE_MS} from '../server/shutdown.ts';
 import {reminderFixture,MANAGER_PHONE} from './fixtures/whatsapp.mjs';
 import {WhatsAppReminders} from '../server/notifications/whatsapp/service.ts';
 
-test('shutdown stops claims before slow HTTP drain and retains DB until the active handoff settles',async()=>{
+for(const first of ['send','http'])test(`shutdown stops claims and retains DB with ${first} finishing before the other drain`,async()=>{
  const f=reminderFixture();let releaseSend,sendEntered,releaseHttp,httpEntered;
  const sending=new Promise(resolve=>sendEntered=resolve),sendBlocked=new Promise(resolve=>releaseSend=resolve);
  const httpStarted=new Promise(resolve=>httpEntered=resolve),httpBlocked=new Promise(resolve=>releaseHttp=resolve);
@@ -22,9 +22,17 @@ test('shutdown stops claims before slow HTTP drain and retains DB until the acti
   reminders.store.saveRecipient({label:'Synthetic manager',phone:MANAGER_PHONE,enabled:true});await reminders.schedule();
   const draining=reminders.drain();await Promise.all([sending,httpStarted]);
   const shutdown=drainApplication({server,stopReminders:()=>reminders.stop(),closeDatabase:()=>{dbClosed=true;},exit:code=>exits.push(code)});
-  assert.ok(SHUTDOWN_DEADLINE_MS>15_000);releaseHttp();await request;
-  await new Promise(resolve=>setImmediate(resolve));assert.equal(dbClosed,false);assert.deepEqual(exits,[]);
-  releaseSend();await draining;await shutdown;
+  assert.ok(SHUTDOWN_DEADLINE_MS>15_000);
+  if(first==='send'){
+   releaseSend();await draining;
+   assert.equal(calls.length,1);assert.equal(dbClosed,false);assert.deepEqual(exits,[]);
+   releaseHttp();await request;
+  }else{
+   releaseHttp();await request;await new Promise(resolve=>setImmediate(resolve));
+   assert.equal(dbClosed,false);assert.deepEqual(exits,[]);
+   releaseSend();await draining;
+  }
+  await shutdown;
   assert.equal(calls.length,1);assert.equal(dbClosed,true);assert.deepEqual(exits,[0]);
   assert.equal(f.db.prepare("SELECT count(*) n FROM whatsapp_jobs WHERE state='pending'").get().n,1);
   assert.equal(f.db.prepare("SELECT count(*) n FROM whatsapp_jobs WHERE state='provider_accepted'").get().n,1);
