@@ -57,3 +57,24 @@ test('queue capacity commits what fits and selects deferred work after next-day 
   assert.ok(f.db.prepare('SELECT id FROM whatsapp_jobs WHERE recipient=?').get(candidates.at(-1).recipient));
  }finally{f.close();}
 });
+
+test('seeded near-full queue keeps existing rows, commits only remaining capacity and logs the overflow count',async t=>{
+ const {reminderFixture}=await import('./fixtures/whatsapp.mjs');const {ReminderStore}=await import('../server/notifications/whatsapp/repository.ts');const {selectReminders}=await import('../server/notifications/whatsapp/selection.ts');
+ const f=reminderFixture();try{f.db.prepare('UPDATE employees SET whatsapp_notifications_enabled=1').run();const base=selectReminders(f.db,'romani-fixture',f.clock.now)[0];const store=new ReminderStore(f.db,'romani-fixture',()=>f.clock.now);
+  const candidates=Array.from({length:2003},(_,n)=>({...base,recipient:'+999'+String(n).padStart(8,'0')}));
+  assert.equal(store.enqueue(candidates.slice(0,1998)),1998);
+  const seeded=f.db.prepare('SELECT id FROM whatsapp_jobs').all();assert.equal(seeded.length,1998);
+  const warnings=[];t.mock.method(console,'warn',message=>warnings.push(message));
+  assert.equal(store.enqueue(candidates),2);
+  const rows=f.db.prepare('SELECT id,recipient FROM whatsapp_jobs').all(),ids=new Set(rows.map(row=>row.id));
+  assert.equal(rows.length,2000);assert.ok(seeded.every(row=>ids.has(row.id)));
+  for(const candidate of candidates.slice(1998,2000))assert.ok(rows.some(row=>row.recipient===candidate.recipient));
+  for(const candidate of candidates.slice(2000))assert.equal(rows.some(row=>row.recipient===candidate.recipient),false);
+  assert.equal(warnings.length,1);assert.match(warnings[0],/\b3 eligible jobs deferred\b/);
+  assert.equal(warnings[0].includes('+999'),false);assert.equal(warnings[0].includes(base.owner_name),false);
+  const claim=store.claim(store.due()[0].id);store.finish(claim.job,claim.attemptId,{kind:'permanent_failed',code:'provider_unauthorized'});
+  assert.equal(store.enqueue(candidates),1);
+  assert.throws(()=>store.retry(claim.job.id),error=>error.code==='whatsapp_queue_full'&&error.status===409);
+  assert.equal(f.db.prepare("SELECT count(*) n FROM whatsapp_jobs WHERE state IN ('pending','retryable_failed','sending')").get().n,2000);
+ }finally{f.close();}
+});
