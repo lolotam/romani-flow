@@ -60,6 +60,12 @@ and cross-origin connect requests. Unimplemented instance-addressed actions have
 no provider effect. QR/status use `Cache-Control: no-store`; connect is serialized
 and limited to one request per15seconds in the single application process.
 
+Production explicitly permits browser Origin `https://romani.curemedkw.com`,
+independent of the internal HTTP hop and without trusting forwarded scheme/host.
+Other origins, HTTP downgrade, opaque/null and malformed values are rejected.
+Development uses the actual request origin; Vite preserves Host for `/api` so
+its same-origin proxy works. No alternate production domain is silently trusted.
+
 QR is transient React memory only, PNG-only, hidden on explicit hide/navigation/
 page hiding/60seconds. The account holder scans from WhatsApp → Linked devices.
 “Check connection” reads the provider; showing QR never invents connection success.

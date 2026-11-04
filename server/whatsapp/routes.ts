@@ -4,6 +4,7 @@ import type { PairingConfig } from './config.js';
 import { pairingConfiguration } from './config.js';
 import { PairingClient, PairingError } from './pairingClient.js';
 import { requireAdmin } from '../middleware/auth.js';
+import type { NodeEnv } from '../config.js';
 
 function fail(res: Response, status: number, code: string): void {
   res.status(status).json({ data: null, error: { code, message: 'WhatsApp connection request could not be completed.' } });
@@ -14,7 +15,7 @@ function emptyInput(req: Request): boolean {
     (req.body === undefined || (typeof req.body === 'object' && req.body !== null && !Array.isArray(req.body) && Object.keys(req.body).length === 0));
 }
 
-export function createPairingRouter(config: PairingConfig): Router {
+export function createPairingRouter(config: PairingConfig, env: NodeEnv): Router {
   const router = Router();
   const client = new PairingClient(config);
   let connecting = false;
@@ -32,7 +33,10 @@ export function createPairingRouter(config: PairingConfig): Router {
   router.post('/connect', async (req, res) => {
     if (!emptyInput(req)) { fail(res, 400, 'project_override_forbidden'); return; }
     const origin = req.get('origin');
-    if (origin && origin !== `${req.protocol}://${req.get('host')}`) { fail(res, 403, 'origin_forbidden'); return; }
+    // Production terminates TLS upstream; its public origin is server-fixed,
+    // independent of untrusted forwarded scheme/host and the internal HTTP hop.
+    const expectedOrigin = env === 'production' ? 'https://romani.curemedkw.com' : `${req.protocol}://${req.get('host')}`;
+    if (origin && origin !== expectedOrigin) { fail(res, 403, 'origin_forbidden'); return; }
     if (connecting || Date.now() - lastConnectAt < 15_000) {
       res.setHeader('Retry-After', '15'); fail(res, 429, 'pairing_rate_limited'); return;
     }

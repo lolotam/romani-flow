@@ -247,3 +247,12 @@ test('actual development proxy preserves same-origin pairing and still rejects a
     assert.equal(f.calls.length, before);
   } finally { await vite.close(); }
 }));
+
+test('TLS-terminated production accepts only its fixed HTTPS public origin over the HTTP backend', () => fixture(async f => {
+  for (const origin of ['https://curemed.example.invalid', 'http://romani.curemedkw.com', 'null', 'malformed']) {
+    assert.equal((await f.request('/api/whatsapp/connect', { method: 'POST', body: {}, headers: { origin } })).status, 403);
+  }
+  assert.equal(f.calls.length, 0);
+  const r = await f.request('/api/whatsapp/connect', { method: 'POST', body: {}, headers: { origin: 'https://romani.curemedkw.com' } });
+  assert.equal(r.status, 200); assert.equal(r.json.data.qr, PNG);
+}, { NODE_ENV: 'production' }));

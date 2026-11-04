@@ -108,11 +108,17 @@ Use an additive migration after `006_form_defaults.sql`:
 
 Logical identity: `(instance, item_type, item_id, expiry_date, bucket, occurrence, canonical_recipient)`. `occurrence` is empty for pre-expiry thresholds and the scheduled UTC date for expired daily repetition. Channel independence follows separate WhatsApp state: an email success never suppresses WhatsApp, and a WhatsApp failure never resends successful email. The same canonical number configured as both management and the document's employee gets one management-template reminder for that item/occurrence.
 
+Draft outbox clarification (not implemented by the QR-only slice): enforce identity uniqueness for non-cancelled jobs only. A retained cancelled row is immutable audit history and does not prevent a fresh job for a currently eligible identity. Concurrent re-enqueue creates exactly one live job. An existing `provider_accepted` or `unknown` identity still suppresses another handoff. This covers an unsent expiry A→B→A and recipient removal/re-addition without erasing history or duplicating an accepted/uncertain occurrence.
+
+When a canonical destination gains or loses management status, recompute the winning audience in the same transaction as the recipient mutation. Reclassify a still-unsent eligible pending/retryable job to the winning template without changing its identity or attempt count; do not cancel a still-valid employee destination merely because its management row was removed. Cancel only if neither audience remains eligible. Accepted/unknown attempts are not reclassified or resent. Test employee→management and management→employee transitions explicitly when implementing the reminder outbox.
+
 The existing global `cron.last_run_date` cannot serve as a shared delivery-success flag. Keep email's current completion tracking; give WhatsApp enqueue a separate day checkpoint. Evaluate both channels even if email is disabled, lacks recipients, fails or was already processed. A single worker checks due jobs every 60 seconds; this is transport retry processing, not a change to reminder cadence. Both channels disabled means no delivery. No unbounded queues or catch-up bursts.
 
 ## 9. Renewal, eligibility and race handling
 
 Before every dispatch, load current item, expiry, employee, global enablement, employee opt-in and management-recipient state. Cancel the job if deleted, renewed, disabled, no longer due or addressed to an old phone. Re-render from current names when still valid. A replaced file without a changed expiry does not reset deduplication. A failed renewal transaction leaves the old date and its eligibility unchanged.
+
+For a still-valid job whose names/audience changed, atomically save the new rendered text and item/recipient/audience snapshots with the new immutable attempt before marking it `sending`. Dispatch exactly that stored attempt text; log/history displays the attempt snapshot, never a later re-rendered job. Earlier attempts remain unchanged. A name-change regression must prove transmitted bytes equal the recorded attempt text.
 
 Update expiry and cancel unsent old-expiry jobs in the same database transaction. Apply equivalent cancellation to document deletion and employee residency-date changes. A phone or recipient-setting change cancels obsolete queued destinations. Serialize the final eligibility check/provider handoff with relevant document/employee/recipient mutations using one process-level notification gate; do not hold a SQLite transaction open across HTTP. The current deployment must remain a single application replica. A future multi-replica deployment requires a cross-process design review.
 
@@ -154,7 +160,7 @@ Global WhatsApp enable is written through the existing validated administrator s
 | W3 | Employee opt-in defaults false, validates mobile when enabled, persists on edit and never carries across new employees; no colleague data reaches an employee. |
 | W4 | Exact fixed texts render per item; company routing and residency behavior match reviewed defaults. |
 | W5 | Existing scheduled pre-expiry/expired selection works; both channels independent; successful destinations do not repeat, confirmed failures retry alone. |
-| W6 | Successful renewal cancels unsent old-expiry jobs, new date creates a new cycle; replacement-only and failed renewal do not reset; race/in-flight boundary proven. |
+| W6 | Successful renewal cancels unsent old-expiry jobs, new date creates a new cycle; replacement-only and failed renewal do not reset; race/in-flight boundary proven. Unsent A→B→A and recipient remove/re-add enqueue exactly one current job; accepted/unknown identities still block duplicates. Audience transitions and name changes preserve the intended recipient and exact audit/dispatch text. |
 | W7 | Durable logs distinguish provider acceptance, failure and uncertainty; no personal incoming chats, QR, key or raw provider data leak into API/export/logs. |
 | W8 | Restart/disconnect/stale occurrence/duplicate worker claims are tested; existing email, forms, backup and isolated restore regressions pass. |
 | W9 | Exact-head build/typecheck/lint/tests, review threads and approved release packet; preserve old image and private pre-migration backup. Controlled QR/live reminder proof uses explicitly designated sender and recipients, never guessed employee/customer numbers. |

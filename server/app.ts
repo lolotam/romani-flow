@@ -73,7 +73,7 @@ export function createApp(deps: AppDependencies): Express {
 
   // Everything below requires a session.
   const authenticated = requireAuth(config, db);
-  app.use('/api/whatsapp', authenticated, createPairingRouter(config.whatsapp));
+  app.use('/api/whatsapp', authenticated, createPairingRouter(config.whatsapp, config.env));
   app.use('/api/form-defaults', authenticated, createFormDefaultsRouter(db));
 
   app.use('/api/settings', authenticated, createSettingsRouter(config, db, cron));
