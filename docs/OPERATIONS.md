@@ -172,9 +172,11 @@ do not down-migrate, wipe or replace the production database to undo this featur
 
 Capture sanitized status/error counts, exact head and merge SHA, image ID and
 timestamps. Keep customer names, file contents, account emails and secrets out of
-public receipts. Send concrete blockers/results directly to SA; tool acceptance is
-not SA approval. Freeze only when the accepted B1–B8 ledger has journey and
-operating evidence and the final release is accepted.
+public receipts. Record concrete blockers/results and the exact-head release
+disposition directly with Waleed in the existing project conversation. Historical
+Super Admin reviews retain their source attribution only. Goal B's accepted
+B1–B8 ledger remains frozen; acceptance/freeze of the separate WhatsApp W1–W9
+scope requires its own completed evidence and owner disposition.
 
 
 ## Reminder shutdown and business-erasure retention
