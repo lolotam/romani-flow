@@ -30,11 +30,14 @@ export interface CronStatus {
 export class CronService {
   private task: ScheduledTask | null = null;
   private inFlight = false;
+  private reminderEnqueue: (() => Promise<unknown>) | null = null;
 
   constructor(
     private readonly db: Db,
     private readonly mailer: Mailer,
   ) {}
+
+  setReminderEnqueue(action: () => Promise<unknown>): void { this.reminderEnqueue = action; }
 
   /** Reads the schedule from the database and (re)arms the scheduler. */
   reschedule(): CronStatus {
@@ -74,12 +77,16 @@ export class CronService {
       return { sent: false, skipped: 'already_running' };
     }
 
-    if (source === 'cron' && shouldSkipAutomatedRun(this.db)) {
-      return { sent: false, skipped: 'already_run_today' };
-    }
-
     this.inFlight = true;
     try {
+      // WhatsApp owns its checkpoint; an email success/disable must not suppress it.
+      if (this.reminderEnqueue) {
+        try { await this.reminderEnqueue(); }
+        catch { console.error('[whatsapp] scheduled selection failed; details suppressed'); }
+      }
+      if (source === 'cron' && shouldSkipAutomatedRun(this.db)) {
+        return { sent: false, skipped: 'already_run_today' };
+      }
       const result = await sendExpiryReport(this.db, this.mailer, source);
 
       if (source === 'cron') {

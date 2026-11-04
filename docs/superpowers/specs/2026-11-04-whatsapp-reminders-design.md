@@ -1,6 +1,6 @@
 # Evolution WhatsApp reminders — feature specification
 
-Status: the owner confirmed the three reminder choices on 2026-11-04: use the current employee mobile with country code; send once in the expired bucket; include company documents and employee residency. This revised reminder design awaits focused SA review before reminder implementation. QR/status is already deployed as described in `docs/WHATSAPP_PAIRING.md`; real pairing, webhook activation and reminder release remain separate gates. This document describes requirements and evidence, not execution authority.
+Status: the owner confirmed the three reminder choices on 2026-11-04: use the current employee mobile with country code; send once in the expired bucket; include company documents and employee residency. SA accepted this revised design for local reminder implementation; production migration, enablement and the first live send remain separately gated. QR/status is already deployed as described in `docs/WHATSAPP_PAIRING.md`; real pairing, webhook activation and reminder release remain separate gates. This document describes requirements and evidence, not execution authority.
 
 ## 1. Outcome and baseline
 
@@ -8,7 +8,7 @@ Add WhatsApp expiry reminders alongside the existing email automation. Romani sc
 
 The accepted Goal-B release remains `4c9fc35bfb86b9585aa0e83ede45891ad883619b`, image `sha256:438582f0ee35ed218fc1e6c7279ad60788a1b100979d14cae5ffebc015d22d0a`. This is a new feature scope, not a reopening of Goal B. Preserve its rollback, KEEP, audit, fixture and data assets.
 
-The separate QR/status and login releases are now deployed at `6b48727b383f7123d150affd2b82c16b7acfa783`, following login merge `68e1ca3b66ef33849f13f4bd2f2359fab9b72e10`. This is the reminder implementation source baseline; Goal-B receipts remain historically attributed. No reminder schema or send worker is implemented yet.
+The separate QR/status and login releases are now deployed at `6b48727b383f7123d150affd2b82c16b7acfa783`, following login merge `68e1ca3b66ef33849f13f4bd2f2359fab9b72e10`. This is the reminder implementation source baseline; Goal-B receipts remain historically attributed. The separate local reminder implementation adds migration007 and the worker described in `docs/WHATSAPP.md`; none is claimed deployed to production.
 
 Observed code baseline:
 

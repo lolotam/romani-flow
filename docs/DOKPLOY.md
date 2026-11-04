@@ -1,5 +1,9 @@
 # Deploying ROMANI Flow on Dokploy
 
+For [WhatsApp reminders](WHATSAPP.md), merging main would apply additive migration007
+at startup. Keep the channel disabled and obtain the migration/release disposition
+before merge; QR/status approval alone does not permit reminder activation.
+
 The application runs as a **single container** that serves both the API and the
 built SPA. Everything that must survive a redeploy — the SQLite database and
 every uploaded file — lives in **one directory on the host**, mounted into the

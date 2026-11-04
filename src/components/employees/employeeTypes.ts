@@ -28,6 +28,7 @@ export interface EmployeeFormState {
   name: string;
   email: string;
   mobile_no: string;
+  whatsapp_notifications_enabled: boolean;
   position: string;
   hire_date: string;
   birth_date: string;
@@ -49,6 +50,7 @@ export const EMPTY_EMPLOYEE_FORM: EmployeeFormState = {
   name: '',
   email: '',
   mobile_no: '',
+  whatsapp_notifications_enabled: false,
   position: '',
   hire_date: '',
   birth_date: '',

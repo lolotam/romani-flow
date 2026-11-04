@@ -5,6 +5,10 @@ for(const [language,dict] of Object.entries({ar,en}))test(`all static settings l
  for(const file of files)for(const m of fs.readFileSync(file,'utf8').matchAll(/t\(['"](settings\.[^'"]+)['"]/g)){
  let value=dict;for(const key of m[1].split('.'))value=value?.[key];assert.equal(typeof value,'string',file+': '+m[1]);assert.ok(value.trim());
  }
+ for(const state of ['pending','sending','provider_accepted','retryable_failed','permanent_failed','unknown','cancelled']){
+  const label=dict.settings.whatsappReminders.states[state];assert.equal(typeof label,'string',language+': '+state);assert.ok(label.trim());
+ }
+ for(const key of ['optIn','help'])assert.ok(dict.employees.whatsapp[key].trim(),language+': employees.whatsapp.'+key);
 });
 import {restoreFormDate} from '../src/lib/formDefaults.ts';
 test('saved dates restore as local date-only values and invalid dates stay empty',()=>{

@@ -3,7 +3,7 @@ import type { Row } from './base.js';
 
 // Explicit form fields only: never retain attachments, new record ids, audit fields or credentials.
 const FIELDS: Record<string, readonly string[]> = {
-  employees: ['name', 'email', 'mobile_no', 'position', 'hire_date', 'birth_date', 'civil_id_no',
+  employees: ['name', 'email', 'position', 'hire_date', 'birth_date', 'civil_id_no',
     'residency_expiry_date', 'driving_license', 'driving_license_expiry_date', 'company_id', 'is_active'],
   documents: ['title', 'company_id', 'employee_id', 'document_type_id', 'ministry_id', 'issue_date', 'expiry_date', 'notes'],
   companies: ['name', 'name_ar', 'description'],
@@ -30,6 +30,10 @@ export function readSubmission(db: Db, userId: string, formKey: string): Row {
   const stored = db.prepare('SELECT values_json FROM form_defaults WHERE user_id=? AND form_key=?')
     .get(userId, formKey) as { values_json: string } | undefined;
   const values: Row = stored ? JSON.parse(stored.values_json) as Row : {};
+  if (formKey === 'employees') {
+    delete values.mobile_no;
+    delete values.whatsapp_notifications_enabled;
+  }
   if (formKey === 'employees' && values.position &&
       !db.prepare('SELECT id FROM positions WHERE value=?').get(String(values.position))) delete values.position;
   for (const [key, table] of Object.entries({ company_id: 'companies', employee_id: 'employees',

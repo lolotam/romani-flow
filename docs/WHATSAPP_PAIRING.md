@@ -8,7 +8,8 @@ website has its own authorized-admin QR/status flow. Sessions, instance tokens a
 webhook secrets are not shared. The Curemed manager coordinates infrastructure
 and provisioning; Romani does not create/delete/restart/logout another instance.
 
-This release implements **pairing and status only**, not messages or reminders.
+This pairing slice implements **pairing and status only**. The separate local
+[reminder implementation](WHATSAPP.md) remains migration/release-gated.
 The owner has confirmed the current employee mobile with country code, once-only
 expired reminders, company documents for management and employee residency in the
 broader reminder specification. Reminder implementation/release is separate from

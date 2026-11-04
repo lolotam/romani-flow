@@ -1,5 +1,6 @@
 // Employees Page
 export const employees = {
+  whatsapp: { optIn: 'Send WhatsApp reminders to this employee', help: 'Only their own documents and residency use the current mobile with country code, when WhatsApp reminders are enabled globally.' },
   title: 'Employee Management',
   registered: 'Total {{count}} registered employees',
   addEmployee: 'Add New Employee',

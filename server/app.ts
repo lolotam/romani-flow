@@ -20,6 +20,10 @@ import type { CronService } from './services/cronService.js';
 import type { DocumentService } from './services/documentService.js';
 import type { Mailer } from './services/mailer.js';
 import type { StorageService } from './services/storageService.js';
+import { WhatsAppReminders } from './notifications/whatsapp/service.js';
+import { MessageClient } from './whatsapp/messageClient.js';
+import { createReminderRouter } from './notifications/whatsapp/routes.js';
+import { prepareEmployee } from './notifications/whatsapp/employeePolicy.js';
 
 /**
  * Express application.
@@ -36,10 +40,14 @@ export interface AppDependencies {
   storage: StorageService;
   documents: DocumentService;
   staticDir: string;
+  reminders?: WhatsAppReminders;
 }
 
 export function createApp(deps: AppDependencies): Express {
   const { config, db, mailer, cron, storage, documents, staticDir } = deps;
+  const reminders = deps.reminders ?? new WhatsAppReminders(db, config.whatsapp.instance, new MessageClient(config.whatsapp));
+  documents.configureNotifications({ coordinator: reminders.coordinator, changed: () => reminders.reconcile() });
+  cron.setReminderEnqueue(() => reminders.schedule());
   const app = express();
 
   app.disable('x-powered-by');
@@ -74,12 +82,13 @@ export function createApp(deps: AppDependencies): Express {
   // Everything below requires a session.
   const authenticated = requireAuth(config, db);
   app.use('/api/whatsapp', authenticated, createPairingRouter(config.whatsapp, config.env));
+  app.use('/api/whatsapp', authenticated, createReminderRouter(reminders, config.env));
   app.use('/api/form-defaults', authenticated, createFormDefaultsRouter(db));
 
-  app.use('/api/settings', authenticated, createSettingsRouter(config, db, cron));
+  app.use('/api/settings', authenticated, createSettingsRouter(config, db, cron, reminders));
   app.use('/api/files', authenticated, createFilesRouter(config, db, storage, documents));
   app.use('/api/email', authenticated, createEmailRouter(config, db, mailer, cron, storage));
-  app.use('/api/backup', authenticated, createBackupRouter(db, documents));
+  app.use('/api/backup', authenticated, createBackupRouter(db, documents, reminders));
 
   app.get(
     '/api/cron/status',
@@ -186,14 +195,20 @@ export function createApp(deps: AppDependencies): Express {
     createResourceRouter(db, 'employees', {
       defaultRelations: ['companies'],
       managedFields: ['photo_path', 'photo_mime_type'],
+      transformWrite: (payload, _db, existing) => prepareEmployee(payload, existing),
+      aroundWrite: action => reminders.coordinator.runExclusive(action),
+      afterWrite: () => reminders.reconcile(),
       transformRead: (row) => ({
         ...row,
         is_active: Boolean(row.is_active),
         driving_license: Boolean(row.driving_license),
+        whatsapp_notifications_enabled: Boolean(row.whatsapp_notifications_enabled),
       }),
     }),
   );
-  app.use('/api/companies', authenticated, createResourceRouter(db, 'companies'));
+  app.use('/api/companies', authenticated, createResourceRouter(db, 'companies', {
+    aroundWrite: action => reminders.coordinator.runExclusive(action), afterWrite: () => reminders.reconcile(),
+  }));
   app.use('/api/ministries', authenticated, createResourceRouter(db, 'ministries'));
   app.use('/api/document-types', authenticated, createResourceRouter(db, 'document_types'));
   app.use('/api/positions', authenticated, createResourceRouter(db, 'positions'));

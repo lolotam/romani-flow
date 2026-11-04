@@ -57,6 +57,7 @@ export default function Employees() {
     name: formData.name,
     email: formData.email || null,
     mobile_no: formData.mobile_no || null,
+    whatsapp_notifications_enabled: formData.whatsapp_notifications_enabled,
     position: formData.position || null,
     hire_date: formData.hire_date || null,
     birth_date: formData.birth_date || null,
@@ -219,6 +220,7 @@ export default function Employees() {
       name: employee.name,
       email: employee.email || '',
       mobile_no: employee.mobile_no || '',
+      whatsapp_notifications_enabled: employee.whatsapp_notifications_enabled ?? false,
       position: employee.position || '',
       hire_date: formatDateForInput(employee.hire_date),
       birth_date: formatDateForInput(employee.birth_date),
@@ -293,7 +295,7 @@ export default function Employees() {
           const transformedEmployees = (employeesData || []).map(emp => ({
             ...emp,
             email: emp.email || '',
-            mobile_no: emp.mobile_no || emp.phone || '',
+            mobile_no: emp.mobile_no || '',
             is_active: emp.is_active !== undefined ? emp.is_active : true,
             document_count: 0, // Will be calculated separately
             // Ensure company object is populated

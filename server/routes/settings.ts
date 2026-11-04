@@ -11,6 +11,7 @@ import {
 } from '../repositories/settings.js';
 import { NOTIFICATION_INTERVALS } from '../services/intervals.js';
 import type { CronService } from '../services/cronService.js';
+import type { WhatsAppReminders } from '../notifications/whatsapp/service.js';
 
 /**
  * Settings endpoints.
@@ -102,6 +103,7 @@ function cronRule(): Rule {
 }
 
 const EDITABLE: Record<string, Rule> = {
+  'whatsapp.enabled': boolRule(),
   'email.enabled': boolRule(),
   'email.recipients': emailListRule(),
   'email.cc': emailListRule(),
@@ -116,7 +118,7 @@ const EDITABLE: Record<string, Rule> = {
   'cron.include_documents': boolRule(),
 };
 
-export function createSettingsRouter(config: AppConfig, db: Db, cron: CronService): Router {
+export function createSettingsRouter(config: AppConfig, db: Db, cron: CronService, reminders: WhatsAppReminders): Router {
   const router = Router();
 
   router.get('/', (_req, res) => {
@@ -180,9 +182,10 @@ export function createSettingsRouter(config: AppConfig, db: Db, cron: CronServic
         return;
       }
 
-      setSettings(db, accepted);
-
-      // The schedule may have changed, so the scheduler is re-armed immediately.
+      if (accepted['whatsapp.enabled'] === true) {
+        await reminders.assertCanEnable();
+      }
+      await reminders.mutate(() => setSettings(db, accepted));
       cron.reschedule();
 
       res.json({ data: { updated: Object.keys(accepted), rejected: [] }, error: null });

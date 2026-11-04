@@ -1,5 +1,9 @@
 # Romani Flow operating guide
 
+WhatsApp reminder migration, queue/unknown states, private credentials and isolated
+recovery safeguards are documented in [WHATSAPP.md](WHATSAPP.md). Do not merge its
+additive migration into auto-deploying main before the production release gate.
+
 ## Deployment and identity
 
 Production is the Dockerfile/direct Node deployment at https://romani.curemedkw.com.

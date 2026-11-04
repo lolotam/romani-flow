@@ -16,6 +16,21 @@ export const settings = {
   },
 
   // Email Settings
+  whatsappReminders: {
+    title: 'WhatsApp reminders', enabled: 'Enable WhatsApp reminders',
+    scheduleHelp: 'Uses the existing email reminder schedule and thresholds. The expired reminder is once per document, expiry and recipient, not daily. Email and WhatsApp are independent.',
+    recipients: 'Management numbers', label: 'Name', phone: 'WhatsApp number', phoneHelp: 'Include the country code with + or 00; no country code is guessed.',
+    recipientEnabled: 'Enable recipient', add: 'Add number', save: 'Save changes', cancel: 'Cancel', edit: 'Edit', remove: 'Remove',
+    removeConfirm: 'Remove this recipient and cancel their unsent reminders? Attempt history is retained.',
+    noRecipients: 'No management numbers added.', previous: 'Previous', next: 'Next',
+    log: 'WhatsApp reminder log', deliveryLimit: 'Provider acceptance does not prove delivery or reading. This log contains platform attempts, not personal conversations.',
+    state: 'Outcome', all: 'All', item: 'Document name', filter: 'Filter', noLog: 'No matching reminders.',
+    expiry: 'Expiry date', attempts: 'Attempts', retry: 'Retry sending',
+    unknownHelp: 'The provider may have accepted this message without a confirmed response. It is not resent automatically to avoid duplicates.',
+    refresh: 'Refresh log and settings', saving: 'Saving…', failed: 'The request failed. Check the international number and connection, then try again.',
+    duplicate: 'This number is already added.', connectFirst: 'Connect WhatsApp and verify its status before enabling reminders.',
+    states: { pending: 'Pending', sending: 'Handing off to provider', provider_accepted: 'Accepted by provider', retryable_failed: 'Failed; retry available', permanent_failed: 'Stopped; review configuration', unknown: 'Uncertain outcome', cancelled: 'Cancelled before sending' },
+  },
   whatsapp: {
     title: 'Connect Romani WhatsApp',
     description: 'Link the Romani account to its dedicated project connection.',
@@ -29,7 +44,7 @@ export const settings = {
     expiry: 'The code is hidden after 60 seconds or when this page is hidden. Request a new code if needed.',
     expired: 'QR hidden or expired. Request a new code to continue.',
     privacy: 'This page does not display or import personal conversations. Evolution manages the linked session on the server.',
-    scope: 'Connecting does not enable reminders or send messages. Reminder settings are a separate feature.',
+    scope: 'Connecting does not enable reminder sending automatically. Reminder controls and management numbers are below.',
   },
   email: {
     title: 'Email Settings',
