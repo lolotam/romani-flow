@@ -2,12 +2,17 @@ import { randomUUID } from 'node:crypto';
 import type { Db } from '../../db/connection.js';
 import { RepositoryError } from '../../repositories/base.js';
 import type { ReminderCandidate, ReminderJob, SendOutcome } from './contracts.js';
-import { reminderIdentity, sameReminderItem, isManualRetryFailure, isSafeUnsentFailure, isValidReminderText, MANUAL_RETRY_FAILURE_CODES } from './contracts.js';
+import { reminderIdentity, isManualRetryFailure, isSafeUnsentFailure, isValidReminderText, MANUAL_RETRY_FAILURE_CODES } from './contracts.js';
 import { normalizeWhatsAppPhone } from './phone.js';
 import type { DestinationReplacement } from './destinations.js';
 
 const FIELDS = ['instance', 'item_type', 'item_id', 'expiry_date', 'bucket', 'recipient', 'recipient_label', 'audience', 'item_name', 'owner_name', 'text'] as const;
 const SNAPSHOT = ['recipient_label', 'audience', 'item_name', 'owner_name', 'text'] as const;
+
+/** Date-independent lookup for prepared work at the previous destination. */
+function replacementKey(item: ReminderCandidate): string {
+  return JSON.stringify([item.instance, item.item_type, item.item_id, item.recipient]);
+}
 
 /** Savepoints also compose with an enclosing document/employee mutation transaction. */
 export function atomic<T>(db: Db, action: () => T): T {
@@ -33,7 +38,7 @@ export class ReminderStore {
 
   private reconcileJobs(jobs: ReminderJob[], candidates: ReminderCandidate[], replacements: DestinationReplacement[]): void {
     const current = new Map(candidates.map(candidate => [reminderIdentity(candidate), candidate]));
-    const replaceable = jobs.filter(job => job.state !== 'permanent_failed' || isSafeUnsentFailure(job.error_code));
+    const replaceable = new Set(jobs.filter(job => job.state !== 'permanent_failed' || isSafeUnsentFailure(job.error_code)).map(replacementKey));
     for (const job of jobs) {
       const candidate = current.get(reminderIdentity(job));
       if (!candidate) this.db.prepare("UPDATE whatsapp_jobs SET state='cancelled',error_code='no_longer_eligible',updated_at=? WHERE id=?").run(this.clock().toISOString(), job.id);
@@ -41,7 +46,7 @@ export class ReminderStore {
         .run(...SNAPSHOT.map(key => candidate[key]), this.clock().toISOString(), job.id);
     }
     // Match prepared work by source item and old destination, even after a date/bucket change.
-    this.admit(replacements.filter(pair => replaceable.some(job => sameReminderItem(job, pair.previous) && job.recipient === pair.previous.recipient)).map(pair => pair.current));
+    this.admit(replacements.filter(pair => replaceable.has(replacementKey(pair.previous))).map(pair => pair.current));
   }
 
   enqueue(candidates: ReminderCandidate[]): number {
