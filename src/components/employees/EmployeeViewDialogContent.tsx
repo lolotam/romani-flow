@@ -74,10 +74,10 @@ export function EmployeeViewDialogContent({
                   <p className="font-medium">{employee.email}</p>
                 </div>
               )}
-              {employee.mobile_no && (
+              {(employee.mobile_no || employee.phone) && (
                 <div className="space-y-2">
                   <Label className="text-muted-foreground">{t('employees.profile.mobile')}</Label>
-                  <p className="font-medium">{employee.mobile_no}</p>
+                  <p className="font-medium">{(employee.mobile_no || employee.phone)}</p>
                 </div>
               )}
               {employee.civil_id_no && (

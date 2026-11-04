@@ -60,11 +60,12 @@ must be explicitly designated. Local fixtures prove application behavior only.
    This does not change the existing email switch.
 5. Read the outgoing log, filter by outcome/international destination/document,
    and inspect immutable attempt text and recipient snapshots. Only safe known
-   failures offer retry. Proven authorization/local number, text or configuration
+   failures offer retry. Proven authorization/local text or configuration
    failures require correction and an explicit retry; they never retry
    automatically. The four-attempt limit and current eligibility still apply.
    Unknown, accepted and
    cancelled rows cannot be forced to resend.
+   Number correction uses a new destination identity; it never retries the old address.
 
 These controls and logs are administrator-only. The backend verifies the current
 database role before provider contact or mutation; client role headers grant no
@@ -216,3 +217,5 @@ ceiling is 90 seconds, not a delivery guarantee. A forced process/host terminati
 can still leave an email outcome uncertain; no exactly-once email claim is added.
 Verify actual managed stop grace exceeds this ceiling with margin before release;
 no production grace change or proof is implied by local lifecycle tests.
+
+Phone correction cancels the old destination identity and uses the approved safe-unsent replacement or scheduled selection. A locally invalid-number failure is not a same-identity manual retry; accepted/unknown work remains suppressed.

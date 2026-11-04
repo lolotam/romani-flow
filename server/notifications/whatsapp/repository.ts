@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import type { Db } from '../../db/connection.js';
 import { RepositoryError } from '../../repositories/base.js';
 import type { ReminderCandidate, ReminderJob, SendOutcome } from './contracts.js';
-import { reminderIdentity, isManualRetryFailure, isValidReminderText, MANUAL_RETRY_FAILURE_CODES } from './contracts.js';
+import { reminderIdentity, isManualRetryFailure, isSafeUnsentFailure, isValidReminderText, MANUAL_RETRY_FAILURE_CODES } from './contracts.js';
 import { normalizeWhatsAppPhone } from './phone.js';
 import type { DestinationReplacement } from './destinations.js';
 
@@ -21,13 +21,23 @@ export class ReminderStore {
   constructor(readonly db: Db, readonly instance: string, readonly clock: () => Date = () => new Date()) {}
 
   reconcile(candidates: ReminderCandidate[], replacements: DestinationReplacement[] = []): void {
-    const current = new Map(candidates.map(candidate => [reminderIdentity(candidate), candidate]));
     const jobs = this.db.prepare("SELECT * FROM whatsapp_jobs WHERE instance=? AND state IN ('pending','retryable_failed','permanent_failed')").all(this.instance) as unknown as ReminderJob[];
-    const replaceable = new Set(jobs.filter(job => job.state !== 'permanent_failed' || isManualRetryFailure(job.error_code)).map(reminderIdentity));
+    this.reconcileJobs(jobs, candidates, replacements);
+  }
+
+  reconcileClaim(id: string, candidates: ReminderCandidate[]): void {
+    const jobs = this.db.prepare("SELECT * FROM whatsapp_jobs WHERE id=? AND instance=? AND state IN ('pending','retryable_failed')")
+      .all(id, this.instance) as unknown as ReminderJob[];
+    this.reconcileJobs(jobs, candidates, []);
+  }
+
+  private reconcileJobs(jobs: ReminderJob[], candidates: ReminderCandidate[], replacements: DestinationReplacement[]): void {
+    const current = new Map(candidates.map(candidate => [reminderIdentity(candidate), candidate]));
+    const replaceable = new Set(jobs.filter(job => job.state !== 'permanent_failed' || isSafeUnsentFailure(job.error_code)).map(reminderIdentity));
     for (const job of jobs) {
       const candidate = current.get(reminderIdentity(job));
       if (!candidate) this.db.prepare("UPDATE whatsapp_jobs SET state='cancelled',error_code='no_longer_eligible',updated_at=? WHERE id=?").run(this.clock().toISOString(), job.id);
-      else this.db.prepare(`UPDATE whatsapp_jobs SET ${SNAPSHOT.map(key => `${key}=?`).join(',')},updated_at=? WHERE id=?`)
+      else if (SNAPSHOT.some(key => job[key] !== candidate[key])) this.db.prepare(`UPDATE whatsapp_jobs SET ${SNAPSHOT.map(key => `${key}=?`).join(',')},updated_at=? WHERE id=?`)
         .run(...SNAPSHOT.map(key => candidate[key]), this.clock().toISOString(), job.id);
     }
     this.admit(replacements.filter(pair => replaceable.has(reminderIdentity(pair.previous))).map(pair => pair.current));

@@ -241,6 +241,7 @@ export default function Employees() {
         employee.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
         employee.email?.toLowerCase().includes(searchTerm.toLowerCase()) ||
         employee.mobile_no?.includes(searchTerm) ||
+        employee.phone?.includes(searchTerm) ||
         employee.position?.toLowerCase().includes(searchTerm.toLowerCase());
 
       const matchesCompany = selectedCompany === 'all' || employee.company_id === selectedCompany;

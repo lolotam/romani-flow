@@ -273,3 +273,29 @@ test('W6 attachment-only replacement preserves accepted identity; failed upload 
  f.clock.now=new Date('2026-01-03T08:00:00Z');await f.reminders.schedule();assert.equal(await f.reminders.drain(),0);
  assert.deepEqual(f.db.prepare('SELECT id,state,expiry_date FROM whatsapp_jobs').get(),before);assert.equal(f.calls.length,1);
 }));
+
+test('unchanged reconciliation writes nothing and dispatch leaves permanent history for mutation refresh',()=>reminderApi(async f=>{
+ await f.request('/api/employees/'+f.employee.id,{method:'PATCH',body:{whatsapp_notifications_enabled:true,residency_expiry_date:null}});
+ await f.request('/api/whatsapp/recipients',{method:'POST',body:{label:'Synthetic manager',phone:MANAGER_PHONE,enabled:true}});
+ await f.reminders.schedule();const claim=f.reminders.store.claim(f.reminders.store.due()[0].id);
+ f.reminders.store.finish(claim.job,claim.attemptId,{kind:'permanent_failed',code:'invalid_text'});
+ const before=f.db.prepare('SELECT total_changes() n').get().n;f.reminders.reconcile();
+ assert.equal(f.db.prepare('SELECT total_changes() n').get().n,before);
+ const old=f.db.prepare('SELECT text FROM whatsapp_jobs WHERE id=?').get(claim.job.id).text;
+ f.db.prepare("UPDATE documents SET title='Changed synthetic title'").run();
+ assert.equal(await f.reminders.drain(),1);
+ assert.equal(f.db.prepare('SELECT text FROM whatsapp_jobs WHERE id=?').get(claim.job.id).text,old);
+ await f.reminders.mutate(()=>{});
+ assert.notEqual(f.db.prepare('SELECT text FROM whatsapp_jobs WHERE id=?').get(claim.job.id).text,old);
+}));
+
+test('invalid-number failure forbids old-identity retry but keeps safe phone-edit replacement',()=>reminderApi(async f=>{
+ await f.request('/api/employees/'+f.employee.id,{method:'PATCH',body:{whatsapp_notifications_enabled:true,residency_expiry_date:null}});
+ await f.reminders.schedule();const claim=f.reminders.store.claim(f.reminders.store.due()[0].id);
+ f.reminders.store.finish(claim.job,claim.attemptId,{kind:'permanent_failed',code:'invalid_number'});
+ const log=await f.request('/api/whatsapp/log');assert.equal(log.json.data.items[0].retry_allowed,false);
+ assert.equal((await f.request('/api/whatsapp/jobs/'+claim.job.id+'/retry',{method:'POST',body:{}})).status,409);
+ assert.equal((await f.request('/api/employees/'+f.employee.id,{method:'PATCH',body:{mobile_no:MANAGER_PHONE}})).status,200);
+ assert.equal(f.db.prepare('SELECT state FROM whatsapp_jobs WHERE id=?').get(claim.job.id).state,'cancelled');
+ assert.equal(f.reminders.store.due().length,1);assert.equal(f.reminders.store.due()[0].recipient,MANAGER_PHONE);assert.equal(f.calls.length,0);
+}));
