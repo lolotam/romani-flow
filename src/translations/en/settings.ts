@@ -17,6 +17,7 @@ export const settings = {
 
   // Email Settings
   whatsappReminders: {
+    loading: 'Loading WhatsApp settings…',
     enabledUnknown: 'The sending state is unavailable. Refresh before changing it.',
     failureReason: 'Reason',
     errors: {

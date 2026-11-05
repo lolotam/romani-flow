@@ -17,6 +17,7 @@ export const settings = {
 
   // Email Settings
   whatsappReminders: {
+    loading: 'جارٍ تحميل إعدادات واتساب…',
     enabledUnknown: 'حالة الإرسال غير متاحة. أعد التحميل قبل تغييرها.',
     failureReason: 'السبب',
     errors: {

@@ -14,15 +14,18 @@ export default function WhatsAppSettings() {
   const state = useWhatsAppSettings();
   if (user?.role !== 'admin') return null;
   return <div dir={isRTL ? 'rtl' : 'ltr'} className="space-y-5 text-start">
-    <Card><CardHeader><CardTitle>{t('settings.whatsappReminders.title')}</CardTitle></CardHeader><CardContent className="space-y-3">
-      <div className="flex items-center gap-3"><Switch id="wa-global-enabled" disabled={state.busy || state.loading || state.enabled === null} checked={state.enabled === true} onCheckedChange={value => void state.setEnabled(value)} /><Label htmlFor="wa-global-enabled">{t('settings.whatsappReminders.enabled')}</Label></div>
+    <Card aria-busy={state.loading}><CardHeader><CardTitle>{t('settings.whatsappReminders.title')}</CardTitle></CardHeader><CardContent className="space-y-3">
+      {state.loading && <p role="status">{t('settings.whatsappReminders.loading')}</p>}
+      <div hidden={state.loading}><div className="flex items-center gap-3"><Switch id="wa-global-enabled" disabled={state.busy || state.loading || state.enabled === null} checked={state.enabled === true} onCheckedChange={value => void state.setEnabled(value)} /><Label htmlFor="wa-global-enabled">{t('settings.whatsappReminders.enabled')}</Label></div></div>
       {!state.loading && state.enabled === null && <p role="status">{t('settings.whatsappReminders.enabledUnknown')}</p>}
       <p className="text-sm text-muted-foreground">{t('settings.whatsappReminders.scheduleHelp')}</p>
-      <Button type="button" variant="outline" disabled={state.busy} onClick={state.reload}>{t('settings.whatsappReminders.refresh')}</Button>
+      <Button type="button" variant="outline" disabled={state.busy || state.loading} onClick={state.reload}>{t('settings.whatsappReminders.refresh')}</Button>
       {state.busy && <p role="status">{t('settings.whatsappReminders.saving')}</p>}
       {state.error && <p role="alert" className="text-destructive">{t(`settings.whatsappReminders.${state.error}`)}</p>}
     </CardContent></Card>
-    <WhatsAppRecipientsCard state={state} />
-    <WhatsAppLogCard state={state} />
+    <div hidden={state.loading} className="space-y-5">
+      <WhatsAppRecipientsCard state={state} />
+      <WhatsAppLogCard state={state} />
+    </div>
   </div>;
 }
