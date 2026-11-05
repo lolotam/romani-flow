@@ -18,7 +18,5 @@ Email already supports email.language (ar/en) in its report rendering and an Eng
 ## Acceptance and tests
 Persist/reload independent channel choices; reject unsupported languages atomically; prove actual selection/text/subject/HTML language; preserve pending-vs-accepted/unknown semantics; verify viewer mutation denial; retain RTL, consent and existing scheduling tests. Run typecheck/build/lint and focused notification/API suites on the implementation head. Publish a separate reviewed PR; no deployment implied.
 
-## Authorized live test and present blocker
-Owner authorized a WhatsApp test to the two newly stored receivers. Verify fixed romani state=open, enumerate exactly two enabled management destinations without printing their full numbers, and perform one clearly labeled test per distinct canonical number. Persist sanitized outcomes, never equate provider acceptance with delivery, and never retry unknown outcomes. Do not enable the global scheduler or drain business backlog for this test. No email test has been requested in this turn.
-
-Current ssh-curemed-mcp list_connections returns: The connector is unavailable, changed, disabled, or requires authentication. Inspect the hub and refresh tools. No recipient read, provider call or message send was performed. Do not invent an alternate instance or consume the private handoff file.
+## Historical live-test context
+At planning time, the owner authorized a labeled test to stored WhatsApp recipients. SSH was unavailable then, so that planning attempt read no recipients and sent no message. Provider acceptance and recipient delivery are separate evidence. Scheduler activation, backlog delivery and private credential-file consumption were outside that test scope. Later execution evidence is retained separately in the private operator audit.

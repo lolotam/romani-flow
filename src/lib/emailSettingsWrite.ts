@@ -5,7 +5,7 @@ export function validEmailSettings(value: unknown): value is Record<string, unkn
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
   const settings = value as Record<string, unknown>;
   const booleans = ['email.enabled', 'cron.enabled', 'cron.include_employees', 'cron.include_documents'];
-  if (!booleans.every(key => typeof settings[key] === 'boolean')) return false;
+  if (!booleans.every(key => typeof settings[key] === 'boolean' || settings[key] === 'true' || settings[key] === 'false')) return false;
   const addresses = ['email.recipients', 'email.cc'];
   if (!addresses.every(key => Array.isArray(settings[key]) && (settings[key] as unknown[]).every(item => typeof item === 'string' && /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(item)))) return false;
   const intervals = settings['email.notification_intervals'];

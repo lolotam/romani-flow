@@ -114,7 +114,7 @@ export class Mailer {
       const accepted = (info.accepted ?? []).map((address: unknown) => String(address));
       const rejected = (info.rejected ?? []).map((address: unknown) => String(address));
 
-      const allRecipients = [...to, ...(message.cc ?? []), ...(message.bcc ?? [])];
+      const allRecipients = [...to, ...(cc ?? []), ...(bcc ?? [])];
       const missing = allRecipients.filter(
         (address) => !accepted.includes(address) && !rejected.includes(address),
       );
@@ -128,7 +128,7 @@ export class Mailer {
     } catch (error) {
       const detail = error instanceof Error ? error.message : String(error);
       const code = error && typeof error === 'object' && 'code' in error ? String(error.code) : '';
-      const provenUnsent = ['ENOTFOUND', 'EAI_AGAIN', 'ECONNREFUSED'].includes(code);
+      const provenUnsent = ['ENOTFOUND', 'EAI_AGAIN', 'ECONNREFUSED', 'EDNS'].includes(code);
       throw new MailError(`The message could not be sent: ${detail}`, provenUnsent ? 'connection_failed' : 'send_failed', 502);
     }
   }

@@ -70,10 +70,11 @@ test('malformed successful settings reads cannot unlock default writes', t => re
   const response = await f.request('/api/settings');
   const settings = response.json.data.settings;
   assert.equal(validEmailSettings(settings), true);
+  assert.equal(validEmailSettings({...settings, 'email.enabled':'false', 'cron.enabled':'true'}), true);
   let writes = 0;
   t.mock.method(globalThis, 'fetch', async () => { writes++; throw new Error('Unexpected write'); });
   for (const malformed of [{}, [], null, { ...settings, 'email.cc': [7] },
-    { ...settings, 'cron.enabled': 'true' }, { ...settings, 'cron.days': null },
+    { ...settings, 'cron.enabled': 'yes' }, { ...settings, 'cron.days': null },
     { ...settings, 'email.language': 'xx' }, { ...settings, 'email.notification_intervals': [{}] }]) {
     assert.equal(validEmailSettings(malformed), false);
     const result = await writeLoadedEmailSettings({ 'email.language': 'en' }, validEmailSettings(malformed));
@@ -151,11 +152,11 @@ test('a failed settings load cannot send default configuration writes; successfu
   assert.equal(saved.error, null); assert.equal(writes, 1); assert.equal(getString(f.db, 'email.language'), 'ar');
 }));
 
-for (const code of ['ETIMEDOUT','ECONNRESET','ECONNREFUSED']) test('SMTP failure '+code+' preserves uncertainty classification', t => withMail(t, async f => {
+for (const code of ['ETIMEDOUT','ECONNRESET','ECONNREFUSED','EDNS','ESOCKET','ECONNECTION']) test('SMTP failure '+code+' preserves uncertainty classification', t => withMail(t, async f => {
  f.db.prepare('UPDATE documents SET expiry_date=?').run(new Date().toISOString().slice(0,10));
  setSetting(f.db,'email.recipients',[TO[0]]);
  await sendExpiryReport(f.db,f.mailer,'cron');
- assert.equal(f.db.prepare("SELECT status FROM email_log WHERE kind='expiry_report' ORDER BY rowid DESC LIMIT 1").get().status,code==='ECONNREFUSED'?'failed':'unknown');
+ assert.equal(f.db.prepare("SELECT status FROM email_log WHERE kind='expiry_report' ORDER BY rowid DESC LIMIT 1").get().status,['ECONNREFUSED','EDNS'].includes(code)?'failed':'unknown');
 },()=>{throw Object.assign(new Error('Synthetic failure'),{code});}));
 test('insufficient SMTP admission budget leaves identities pending', t => withMail(t,async(f,calls)=>{
  setSetting(f.db,'email.recipients',[TO[0]]);
@@ -168,3 +169,5 @@ test('explicit null CC never falls back to saved recipients', t=>withMail(t,asyn
  await f.request('/api/email/test',{method:'POST',body:{to:[TO[0]],cc:null}});
  assert.equal(calls.some(mail=>mail.cc?.includes(CC)),false);
 }));
+
+test('blank CC and BCC entries cannot turn acceptance into partial', t=>withMail(t,async f=>{const result=await f.mailer.send({to:[TO[0]],cc:[' '],bcc:[''],subject:'Synthetic',text:'Synthetic'});assert.equal(result.status,'sent');assert.deepEqual(result.rejected,[]);}));
