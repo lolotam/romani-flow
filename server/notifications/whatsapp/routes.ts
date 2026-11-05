@@ -86,7 +86,8 @@ export function createReminderRouter(reminders: WhatsAppReminders, env: NodeEnv)
     } catch (error) { next(error); }
   });
   router.post('/jobs/:id/retry', asyncHandler(async (req, res) => {
-    if (Object.keys(body(req)).length || Object.keys(req.query).length) throw new RepositoryError('Retry accepts no overrides.', 'invalid_body', 400);
+    const payload = req.body === undefined ? {} : body(req);
+    if (Object.keys(payload).length || Object.keys(req.query).length) throw new RepositoryError('Retry accepts no overrides.', 'invalid_body', 400);
     await reminders.retry(String(req.params.id));
     res.json({ data: { queued: true }, error: null });
   }));

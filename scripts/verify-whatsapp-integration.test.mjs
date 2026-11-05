@@ -115,7 +115,10 @@ test('correcting a zero-fetch invalid-text failure permits only an explicit boun
  assert.equal((await f.request('/api/documents/'+f.document.id,{method:'PATCH',body:{title:'Corrected synthetic document'}})).status,200);
  assert.equal((await f.request('/api/whatsapp/log')).json.data.items[0].retry_allowed,true);
  assert.equal(await f.reminders.drain(),0);assert.equal(e.sends.length,0);
- assert.equal((await f.request('/api/whatsapp/jobs/'+job.id+'/retry',{method:'POST',body:{}})).status,200);
+ const beforeRetry=f.db.prepare('SELECT total_changes() n').get().n;
+ for(const body of [null,[],{instance:'foreign'},{text:'override'}])assert.equal((await f.request('/api/whatsapp/jobs/'+job.id+'/retry',{method:'POST',body})).status,400);
+ assert.equal(f.db.prepare('SELECT total_changes() n').get().n,beforeRetry);
+ assert.equal((await f.request('/api/whatsapp/jobs/'+job.id+'/retry',{method:'POST'})).status,200);
  assert.equal(await f.reminders.drain(),1);assert.equal(e.sends.length,1);
  const attempts=f.db.prepare('SELECT text,error_code,state FROM whatsapp_attempts WHERE job_id=? ORDER BY attempt').all(job.id);
  assert.equal(attempts.length,2);assert.ok(attempts[0].text.length>4096);assert.equal(attempts[0].error_code,'invalid_text');

@@ -18,7 +18,7 @@ test('closed async API admission rejects new document sends without an attempt o
  assert.equal(smtpCalls,0);assert.equal(f.db.prepare('SELECT count(*) n FROM email_log').get().n,0);
 }));
 
-for(const outcome of ['sent','failed'])test(`detached document SMTP handler persists ${outcome} before shutdown closes SQLite`,()=>reminderApi(async f=>{
+for(const [outcome,drainFails] of [['sent',false],['failed',false],['sent',true]])test(`detached SMTP persists ${outcome} before shutdown completes (drain failure: ${drainFails})`,()=>reminderApi(async f=>{
  const file=await f.storage.save(Buffer.from('%PDF-1.4\nSynthetic shutdown fixture\n%%EOF'),'synthetic.pdf','application/pdf');
  f.db.prepare('UPDATE documents SET file_path=?,file_name=?,mime_type=? WHERE id=?').run(file.relativePath,file.fileName,file.mimeType,f.document.id);
  let release,entered;
@@ -33,7 +33,7 @@ for(const outcome of ['sent','failed'])test(`detached document SMTP handler pers
   await started;controller.abort();await request;
   const socketsClosed=new Promise(resolve=>f.server.once('close',resolve));
   let dbClosed=false;const exits=[];
-  const shutdown=drainApplication({server:f.server,stopReminders:()=>f.reminders.stop(),stopCron:()=>f.cron.shutdown(),
+  const shutdown=drainApplication({server:f.server,stopReminders:async()=>{await f.reminders.stop();if(drainFails)throw Error('Synthetic failed drain');},stopCron:()=>f.cron.shutdown(),
    stopHandlers:()=>stopRequestWork(f.app),closeDatabase:()=>{
     assert.equal(f.db.prepare("SELECT status FROM email_log WHERE kind='documents'").get().status,outcome);dbClosed=true;
    },exit:code=>exits.push(code)});
@@ -41,7 +41,8 @@ for(const outcome of ['sent','failed'])test(`detached document SMTP handler pers
   assert.equal(dbClosed,false);assert.deepEqual(exits,[]);
   assert.equal(f.db.prepare("SELECT status FROM email_log WHERE kind='documents'").get().status,'sending');
   release();await shutdown;
-  assert.equal(dbClosed,true);assert.deepEqual(exits,[0]);
+  assert.equal(f.db.prepare("SELECT status FROM email_log WHERE kind='documents'").get().status,outcome);
+  assert.equal(dbClosed,!drainFails);assert.deepEqual(exits,[drainFails?1:0]);
  }finally{release();controller.abort();await request;}
 }));
 

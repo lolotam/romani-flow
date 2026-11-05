@@ -23,7 +23,8 @@ export async function drainApplication(options: ShutdownOptions): Promise<void> 
     options.server.close(error => error ? reject(error) : resolve());
   });
   try {
-    await Promise.all([remindersStopped, cronStopped, handlersStopped, httpClosed]);
+    const drains = await Promise.allSettled([remindersStopped, cronStopped, handlersStopped, httpClosed]);
+    if (drains.some(result => result.status === 'rejected')) throw new Error('Drain failed');
     options.closeDatabase();
     options.exit(0);
   } catch {
