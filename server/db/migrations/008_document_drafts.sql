@@ -8,6 +8,11 @@ CREATE TABLE document_drafts (
   PRIMARY KEY(user_id, scope)
 );
 
+-- Deletion triggers use scope and JSON references without scanning every draft.
+CREATE INDEX document_drafts_scope ON document_drafts(scope);
+CREATE INDEX document_drafts_employee ON document_drafts(json_extract(values_json,'$.employee_id'));
+CREATE INDEX document_drafts_company ON document_drafts(json_extract(values_json,'$.company_id'));
+
 CREATE TRIGGER invalidate_employee_drafts AFTER DELETE ON employees BEGIN
   UPDATE document_drafts SET values_json=NULL, revision=lower(hex(randomblob(16))), updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now')
   WHERE scope='employee:' || OLD.id OR json_extract(values_json,'$.employee_id')=OLD.id;

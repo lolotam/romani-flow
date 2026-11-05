@@ -61,7 +61,7 @@ function EmployeeDocumentFormContent({
   }, isOpen);
   useEffect(() => { if (isOpen) dirty.current = false; }, [isOpen, employeeId]);
   useLastSubmissionRestore('documents', isOpen && draft.status === 'saved' && !draft.hasDraft, (saved) => {
-    setFormData(current => ({ ...current, title: uploadedFile ? uploadedFile.name.replace(/\.[^/.]+$/, '') : String(saved.title ?? ''),
+    setFormData(current => ({ ...current, title: uploadedFile ? uploadedFile.name.replace(/\.[^/.]+$/, '').slice(0, 120) : String(saved.title ?? ''),
       document_type_id: String(saved.document_type_id ?? ''), ministry_id: String(saved.ministry_id ?? ''),
       notes: String(saved.notes ?? '') }));
   }, () => !dirty.current);
@@ -88,7 +88,7 @@ function EmployeeDocumentFormContent({
     if (isOpen && uploadedFile) {
       setFormData(prev => ({
         ...prev,
-        title: uploadedFile.name.replace(/\.[^/.]+$/, ''), // Remove file extension
+        title: uploadedFile.name.replace(/\.[^/.]+$/, '').slice(0, 120), // Remove file extension
       }));
     }
   }, [isOpen, uploadedFile]);
@@ -109,6 +109,7 @@ function EmployeeDocumentFormContent({
       return;
     }
 
+    if (formData.title.length > 120) { toast.error(t('documents.form.validation.titleMaxLength')); return; }
     if (formData.notes.length > 5000) { toast.error(t('documents.form.validation.notesTooLong')); return; }
     submitting.current = true;
     setIsSubmitting(true);
@@ -176,6 +177,7 @@ function EmployeeDocumentFormContent({
         <DocumentAttachment uploadedFile={uploadedFile ?? null} />
         <form onSubmit={handleSubmit} className="space-y-6">
           <fieldset disabled={isSubmitting} className="space-y-6">
+          {formData.title.length > 120 && <p role="alert" className="text-destructive">{t('documents.form.validation.titleMaxLength')}</p>}
           {formData.notes.length > 5000 && <p role="alert" className="text-destructive">{t('documents.form.validation.notesTooLong')}</p>}
           <DocumentDraftStatus status={draft.status} restored={draft.hasDraft} needsFile={!uploadedFile} onDiscard={() => void draft.session.current?.discard().catch(() => toast.error(t('documents.employeeDocumentForm.saveError')))} />
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">

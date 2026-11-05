@@ -312,3 +312,16 @@ test('closing during a delayed load flushes typed metadata against the real revi
   assert.equal(restored.length, 0);
   assert.equal((await api(url(scope))).data.values.notes, 'Last edit before close');
 }));
+
+test('draft deletion predicates use indexes for scope and JSON references',()=>reminderApi(async f=>{
+ for(const [scope,field] of [['employee:','employee_id'],['company:','company_id']]){
+  const plan=f.db.prepare("EXPLAIN QUERY PLAN UPDATE document_drafts SET values_json=NULL WHERE scope=? OR json_extract(values_json,'$."+field+"')=?").all(scope+'synthetic','synthetic');
+  assert.equal(plan.some(row=>row.detail==='SCAN document_drafts'),false);
+  assert.ok(plan.some(row=>row.detail.includes('INDEX')));
+ }
+}));
+test('file-derived titles fit drafts while existing titles remain visible for explicit correction',()=>{
+ const name='x'.repeat(150)+'.pdf';
+ assert.equal(employeeDocumentDraft(null,name).title.length,120);
+ assert.equal(employeeDocumentDraft({title:'y'.repeat(130)},name).title.length,130);
+});

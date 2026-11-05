@@ -60,7 +60,7 @@ function DocumentFormContent({
       expiry_date: new Date(editingDocument.expiry_date + 'T00:00:00'),
       notes: editingDocument.notes || '',
     } : {
-      title: fileName ? fileName.replace(/\.[^/.]+$/, '') : '', // Remove file extension
+      title: fileName ? fileName.replace(/\.[^/.]+$/, '').slice(0, 120) : '', // Remove file extension
       beneficiary_type: preselectedEmployeeId ? 'employee' : preselectedCompanyId ? 'company' : 'employee',
       company_id: preselectedCompanyId || '',
       employee_id: preselectedEmployeeId || (employees.length > 0 ? employees[0].id : ''),
@@ -96,7 +96,7 @@ function DocumentFormContent({
   const formIsDirty = form.formState.isDirty;
   useLastSubmissionRestore('documents', !editingDocument && draft.status === 'saved' && !draft.hasDraft, (saved) => {
     form.reset({ ...form.getValues(),
-      title: fileName ? fileName.replace(/\.[^/.]+$/, '') : String(saved.title ?? ''),
+      title: fileName ? fileName.replace(/\.[^/.]+$/, '').slice(0, 120) : String(saved.title ?? ''),
       beneficiary_type: preselectedEmployeeId ? 'employee' : preselectedCompanyId ? 'company' : saved.employee_id ? 'employee' : 'company',
       company_id: preselectedEmployeeId ? '' : preselectedCompanyId ?? String(saved.company_id ?? ''),
       employee_id: preselectedEmployeeId ?? String(saved.employee_id ?? ''),
@@ -151,6 +151,7 @@ function DocumentFormContent({
           <form onSubmit={form.handleSubmit(data => handleSubmit(data), () => toast.error(t('documents.form.validation.reviewFields')))} className="space-y-6">
             <fieldset disabled={isSubmitting} className="space-y-6">
             <DocumentDraftStatus status={draft.status} restored={draft.hasDraft} needsFile={!uploadedFile && !editingDocument} onDiscard={() => void draft.session.current?.discard().catch(() => toast.error(t('documents.messages.saveError')))} />
+            {(form.watch('title')?.length ?? 0) > 120 && <p role="alert" className="text-destructive">{t('documents.form.validation.titleMaxLength')}</p>}
             {(form.watch('notes')?.length ?? 0) > 5000 && <p role="alert" className="text-destructive">{t('documents.form.validation.notesTooLong')}</p>}
             {documentTypes.length === 0 && <p role="alert" className="text-destructive">{t('documents.form.validation.noDocumentTypes')}</p>}
             {form.watch('beneficiary_type') === 'employee' && employees.length === 0 &&
