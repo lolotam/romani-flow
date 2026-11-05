@@ -1,5 +1,5 @@
 import { useLastSubmissionState } from '@/hooks/useLastSubmission';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useTheme } from '@/contexts/ThemeProvider';
 import { motion } from 'framer-motion';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -32,6 +32,8 @@ export default function Settings() {
   const { toast } = useToast();
   const { theme, toggleTheme } = useTheme();
   const [activeTab, setActiveTab] = useState('email');
+  const [whatsappRefreshKey, setWhatsAppRefreshKey] = useState(0);
+  const refreshWhatsAppSettings = useCallback(() => setWhatsAppRefreshKey(value => value + 1), []);
   const [isLoading, setIsLoading] = useState(true);
 
   // Data state
@@ -225,7 +227,7 @@ export default function Settings() {
             <TabsContent value="email">
               <EmailSettingsComponent />
             </TabsContent>
-            {user?.role === 'admin' && <TabsContent value="whatsapp" className="space-y-5"><WhatsAppPairingSettings /><WhatsAppSettings /></TabsContent>}
+            {user?.role === 'admin' && <TabsContent value="whatsapp" className="space-y-5"><WhatsAppPairingSettings onDisconnectSettled={refreshWhatsAppSettings} /><WhatsAppSettings refreshKey={whatsappRefreshKey} /></TabsContent>}
 
             <TabsContent value="appearance">
               <AppearanceSettings darkMode={theme === 'dark'} onToggleDarkMode={toggleDarkMode} />
