@@ -119,3 +119,14 @@ export function relationForCompany(
   if (loaded) return loaded;
   return sources.find((source) => source.company_id === companyId && source.companies)?.companies ?? null;
 }
+
+const WHATSAPP_ERROR_KEYS: Record<string, string> = {
+  invalid_whatsapp_phone: 'employees.messages.whatsappPhoneInvalid',
+  duplicate_employee_whatsapp_phone: 'employees.messages.whatsappPhoneDuplicate',
+};
+
+/** Picks the translation key for a failed employee save: a specific WhatsApp reason, else the generic one. */
+export function employeeSaveErrorKey(error: unknown, fallbackKey: string): string {
+  const code = typeof (error as { code?: unknown } | null)?.code === 'string' ? (error as { code: string }).code : '';
+  return WHATSAPP_ERROR_KEYS[code] ?? fallbackKey;
+}
