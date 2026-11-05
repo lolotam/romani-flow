@@ -31,7 +31,13 @@ Every settled disconnect attempt also refreshes the sibling reminder settings,
 including failures after the backend may already have disabled sending.
 
 The browser polls the admin status GET every3seconds during visible pairing for
-a bounded period. No polling action generates QR or sends a message. Actual
+a single absolute 180-second window established when that pairing attempt starts.
+QR expiry/hiding, status errors and subscription cleanup do not renew the window;
+only an explicit new QR attempt can start a fresh window. Temporary network/provider
+status failures retain the still-visible, unexpired QR and allow the next check.
+Authentication, instance mismatch and invalid-response failures clear it and stop
+polling. A verified successful logout clears the prior connect cooldown; failed
+logout does not. No polling action generates QR or sends a message. Actual
 connected state clears QR and displays a green check/Connected control. Hidden
 pages discard QR and skip background checks; transient QR bytes are held only in
 the QR state, not duplicated into connection-status state or persisted. User/

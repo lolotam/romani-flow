@@ -273,6 +273,8 @@ test('TLS-terminated production accepts only its fixed HTTPS public origin over 
 
 test('admin disconnect stops reminders, uses only scoped logout and permits a fresh QR without deleting audit',()=>fixture(async f=>{
  const {setSetting,getBoolean}=await import('../server/repositories/settings.ts');
+ const initial=await f.request('/api/whatsapp/connect',{method:'POST',body:{}});
+ assert.equal(initial.status,200);assert.equal(initial.json.data.qr,PNG);
  f.mode.state='open';setSetting(f.db,'whatsapp.enabled',true);
  const before=f.calls.length;
  for(const [role,status] of [['viewer',403],[null,401]])assert.equal((await f.request('/api/whatsapp/disconnect',{method:'POST',body:{},role})).status,status);
@@ -290,10 +292,12 @@ test('admin disconnect stops reminders, uses only scoped logout and permits a fr
 
 test('logout acknowledgement without actual closed state never reports successful disconnection',()=>fixture(async f=>{
  const {setSetting,getBoolean}=await import('../server/repositories/settings.ts');
+ assert.equal((await f.request('/api/whatsapp/connect',{method:'POST',body:{}})).status,200);
  f.mode.state='open';f.mode.logoutState='open';setSetting(f.db,'whatsapp.enabled',true);
  const response=await f.request('/api/whatsapp/disconnect',{method:'POST',body:{}});
  assert.equal(response.status,409);assert.equal(response.json.error.code,'disconnect_pending');assert.equal(response.json.data,null);
  assert.equal(getBoolean(f.db,'whatsapp.enabled'),false);assert.equal(f.calls.filter(call=>call.method==='DELETE').length,1);
+ assert.equal((await f.request('/api/whatsapp/connect',{method:'POST',body:{}})).status,429);
 }));
 
 test('shutdown drains detached disconnect work and refuses further pairing provider calls',()=>fixture(async f=>{

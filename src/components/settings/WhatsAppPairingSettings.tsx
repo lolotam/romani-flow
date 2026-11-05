@@ -5,6 +5,7 @@ import { useAuth } from '@/hooks/useAuth';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { whatsappPairing, type WhatsAppPairingStatus } from '@/lib/api/whatsapp';
 import { CheckCircle2, LogOut, QrCode, RefreshCw } from 'lucide-react';
+import { isTransientPairingReadError, startPairingStatusPolling } from '@/lib/whatsappPairingPolling';
 
 /** Transient QR only. Never stores credentials, QR codes, chats or session data. */
 export default function WhatsAppPairingSettings({ onDisconnectSettled }: { onDisconnectSettled?: () => void }) {
@@ -19,6 +20,8 @@ export default function WhatsAppPairingSettings({ onDisconnectSettled }: { onDis
   const operation = useRef(0);
   const expiresAt = useRef(0);
   const requestBusy = useRef(false);
+  const pollDeadline = useRef(0);
+  const [pollingUntil, setPollingUntil] = useState(0);
 
   const loadConnection = useCallback(async (action: 'status' | 'connect' | 'disconnect') => {
     if (user?.role !== 'admin' || requestBusy.current) return;
@@ -26,21 +29,35 @@ export default function WhatsAppPairingSettings({ onDisconnectSettled }: { onDis
     const id = ++operation.current;
     setBusy(true);
     setError(false);
-    if (action !== 'status') { setQr(null); setExpired(false); }
+    if (action !== 'status') { setQr(null); setExpired(false); pollDeadline.current = 0; setPollingUntil(0); }
     if (action === 'disconnect') setStatus(null);
+    const failed = (error: unknown) => {
+      setError(true);
+      if (action === 'status' && Date.now() < pollDeadline.current && isTransientPairingReadError(error)) {
+        if (document.hidden || Date.now() >= expiresAt.current) { setQr(null); setExpired(true); }
+        return;
+      }
+      setQr(null); setStatus(null); setPollingUntil(0);
+    };
     try {
       const result = action === 'connect' ? await whatsappPairing.connect() : action === 'disconnect' ? await whatsappPairing.disconnect() : await whatsappPairing.status();
       if (!mounted.current || id !== operation.current) return;
-      if (result.error || !result.data) { setError(true); setQr(null); setStatus(null); return; }
+      if (result.error || !result.data) { failed(result.error); return; }
       setStatus({ configured: result.data.configured, state: result.data.state });
+      if (result.data.configured && result.data.state === 'connecting') {
+        if (pollDeadline.current === 0) {
+          pollDeadline.current = Date.now() + 180_000;
+          setPollingUntil(pollDeadline.current);
+        }
+      } else { setPollingUntil(0); setQr(null); }
       if (result.data.state === 'connected' || !result.data.configured) { setQr(null); setExpired(false); }
       if ('qr' in result.data && typeof result.data.qr === 'string') {
         if (document.hidden) { setQr(null); setExpired(true); return; }
         expiresAt.current = Date.now() + 60_000;
         setQr(result.data.qr);
       }
-    } catch {
-      if (mounted.current && id === operation.current) { setError(true); setQr(null); setStatus(null); }
+    } catch (error) {
+      if (mounted.current && id === operation.current) failed(error);
     } finally {
       if (id === operation.current) requestBusy.current = false;
       if (mounted.current && id === operation.current) {
@@ -53,7 +70,7 @@ export default function WhatsAppPairingSettings({ onDisconnectSettled }: { onDis
   useEffect(() => {
     mounted.current = true;
     void loadConnection('status');
-    return () => { mounted.current = false; operation.current += 1; requestBusy.current = false; setQr(null); setStatus(null); };
+    return () => { mounted.current = false; operation.current += 1; requestBusy.current = false; pollDeadline.current = 0; setPollingUntil(0); setQr(null); setStatus(null); };
   }, [loadConnection]);
 
   useEffect(() => {
@@ -66,16 +83,11 @@ export default function WhatsAppPairingSettings({ onDisconnectSettled }: { onDis
   }, [qr]);
 
   useEffect(() => {
-    if (user?.role !== 'admin' || (!qr && status?.state !== 'connecting')) return;
-    const until = Date.now() + 180_000;
-    const check = () => {
-      if (!document.hidden && Date.now() < until) void loadConnection('status');
-    };
-    const timer = window.setInterval(check, 3000);
-    const stop = window.setTimeout(() => window.clearInterval(timer), 180_000);
-    document.addEventListener('visibilitychange', check);
-    return () => { window.clearInterval(timer); window.clearTimeout(stop); document.removeEventListener('visibilitychange', check); };
-  }, [qr, status?.state, loadConnection, user?.role]);
+    if (user?.role !== 'admin' || !pollingUntil) return;
+    const polling = startPairingStatusPolling(pollingUntil, () => { void loadConnection('status'); }, () => !document.hidden);
+    document.addEventListener('visibilitychange', polling.check);
+    return () => { polling.stop(); document.removeEventListener('visibilitychange', polling.check); };
+  }, [pollingUntil, loadConnection, user?.role]);
 
   if (user?.role !== 'admin') return null;
   const stateText = {
