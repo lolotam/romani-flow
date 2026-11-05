@@ -116,11 +116,12 @@ When a canonical destination gains or loses management status, recompute the win
 
 Owner decision (2026-11-04): a phone edit to an existing employee or management
 recipient replaces already-prepared unsent work for the same still-eligible
-item/expiry/bucket on the same day, atomically with cancellation. Never derive a
+source item on the same day using its current eligible expiry/bucket, including
+combined phone/expiry edits and crossed buckets, atomically with cancellation. Never derive a
 replacement from accepted/unknown work. Pending/retryable and explicitly safe
 permanent failures qualify; new destinations remain subject to capacity and
 accepted/unknown identity suppression. This exception does not enqueue on a new
-audience/document, global enable or expiry change.
+audience/document, global enable or expiry-only change.
 
 The existing global `cron.last_run_date` cannot serve as a shared delivery-success flag. Keep email's current completion tracking; give WhatsApp enqueue a separate day checkpoint. The checkpoint controls selection work only; changing the day must not change logical job identity or resend accepted/unknown expired reminders. Evaluate both channels even if email is disabled, lacks recipients, fails or was already processed. A single worker checks due jobs every 60 seconds; this is transport retry processing, not a change to reminder cadence. Both channels disabled means no delivery. No unbounded queues or catch-up bursts. Admitted jobs and the enqueue checkpoint commit in the same outer SQLite transaction; the checkpoint advances only after admitted inserts succeed, with uniqueness making reruns idempotent.
 
@@ -166,6 +167,11 @@ Global WhatsApp enable is written through the existing validated administrator s
 Shared logging prerequisite: the Curemed manager owns the approved LOG_LEVEL patch/reload. SA accepted the Q8 execution verification receipt, SHA256 `262fd084465a61b891ab219f7178cf5caf9d332dcbbbeed3d3c381d7434dd813`; this satisfies the logging execution gate and is operator evidence, not a Romani server rerun. Holder QR has been separately authorized; its scan/open receipt remains pending. Keep webhooks off until that receipt, then perform connection-only webhook activation and scoped smoke as separate gated steps. The native query-override isolation gate remains open before any live send. Local reminder work uses loopback fixtures only; no live messaging is authorized here.
 
 ## 12. Acceptance and rollout
+
+Before live sending, require verified HTTPS or an explicitly owner-approved dedicated-network
+isolation disposition with runtime proof. Operator approval of a plain HTTP URL alone is insufficient.
+The private encrypted overlay maintenance receipt is separate from application release approval;
+native query-override isolation and the remaining release gates must still be satisfied.
 
 | ID | Required proof |
 | --- | --- |

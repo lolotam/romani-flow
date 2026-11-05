@@ -100,7 +100,7 @@ export class WhatsAppReminders {
     for (const pending of this.store.due(10)) {
       if (this.stopped) break;
       await this.coordinator.runExclusive(async () => {
-        atomic(this.db, () => this.store.reconcileClaim(pending.id, selectReminders(this.db, this.instance, this.clock())));
+        atomic(this.db, () => this.store.reconcileClaim(pending.id, selectReminders(this.db, this.instance, this.clock(), pending)));
         if (this.stopped || !getBoolean(this.db, 'whatsapp.enabled')) return;
         const claim = this.store.claim(pending.id);
         if (!claim) return;

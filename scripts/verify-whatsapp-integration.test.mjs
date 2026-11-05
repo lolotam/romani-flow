@@ -9,6 +9,47 @@ import {createReminderRuntime} from '../server/whatsapp/runtime.ts';
 import {createApp} from '../server/app.ts';
 import {signSession} from '../server/middleware/auth.ts';
 
+test('business erase with invalid sending config cancels only its unsent namespace and rolls back on failure',()=>reminderApi(async f=>{
+ await f.request('/api/whatsapp/recipients',{method:'POST',body:{label:'Synthetic manager',phone:MANAGER_PHONE,enabled:true}});
+ await f.request('/api/documents',{method:'POST',body:{title:'Another synthetic document',employee_id:f.employee.id,document_type_id:f.type.id,expiry_date:'2026-01-01'}});
+ await f.reminders.schedule();
+ for(const outcome of [{kind:'unknown',code:'transport_interrupted'},{kind:'provider_accepted',messageId:'synthetic-retained'}]){
+  const claim=f.reminders.store.claim(f.reminders.store.due()[0].id);f.reminders.store.finish(claim.job,claim.attemptId,outcome);
+ }
+ const {selectReminders}=await import('../server/notifications/whatsapp/selection.ts');
+ const other=new WhatsAppReminders(f.db,'other-isolated-fixture',{status:async()=>({configured:false,state:'unconfigured'}),sendText:async()=>{throw Error('No handoff allowed');}},()=>f.clock.now);
+ other.store.enqueue(selectReminders(f.db,other.instance,f.clock.now));
+ const original=f.db.prepare('SELECT * FROM whatsapp_jobs ORDER BY id').all(),attempts=f.db.prepare('SELECT * FROM whatsapp_attempts ORDER BY id').all();
+ const invalid=createReminderRuntime(f.db,{url:'',apiKey:'',instance:'',webhookSecret:''});
+ const app=createApp({config:f.config,db:f.db,mailer:f.mailer,cron:f.cron,storage:f.storage,documents:f.documents,reminders:invalid,staticDir:f.config.dataDir});
+ const server=app.listen(0,'127.0.0.1');await new Promise(resolve=>server.on('listening',resolve));
+ const cookie=f.config.cookieName+'='+signSession(f.config,{id:'admin',role:'admin',name:'Synthetic',email:'admin@example.invalid'});
+ const erase=()=>fetch('http://127.0.0.1:'+server.address().port+'/api/backup/erase',{method:'POST',headers:{cookie,'content-type':'application/json'},body:'{}'});
+ try{
+  f.db.exec("CREATE TRIGGER reject_invalid_erase BEFORE UPDATE ON whatsapp_jobs BEGIN SELECT RAISE(ABORT,'Synthetic cancellation rejection'); END;");
+  assert.equal((await erase()).status,500);assert.deepEqual(f.db.prepare('SELECT * FROM whatsapp_jobs ORDER BY id').all(),original);
+  assert.equal(f.db.prepare('SELECT count(*) n FROM employees').get().n,1);
+  assert.equal(f.db.prepare("SELECT value FROM settings WHERE key='whatsapp.enabled'").get().value,'true');
+  f.db.exec('DROP TRIGGER reject_invalid_erase');
+  assert.equal((await erase()).status,200);assert.equal(f.db.prepare('SELECT count(*) n FROM employees').get().n,0);
+  assert.equal(f.db.prepare("SELECT value FROM settings WHERE key='whatsapp.enabled'").get().value,'false');
+  assert.equal(f.db.prepare("SELECT count(*) n FROM whatsapp_jobs WHERE state='cancelled'").get().n,1);
+  assert.deepEqual(f.db.prepare("SELECT * FROM whatsapp_jobs WHERE instance!='romani' OR state IN ('provider_accepted','unknown') ORDER BY id").all(),original.filter(job=>job.instance!=='romani'||['provider_accepted','unknown'].includes(job.state)));
+  assert.deepEqual(f.db.prepare('SELECT * FROM whatsapp_attempts ORDER BY id').all(),attempts);
+  assert.equal(f.calls.length,0);
+ }finally{server.closeAllConnections();await new Promise(resolve=>server.close(resolve));}
+}));
+
+test('missing employee PATCH returns 404 before WhatsApp validation or write hooks',()=>reminderApi(async f=>{
+ await f.request('/api/employees/'+f.employee.id,{method:'PATCH',body:{whatsapp_notifications_enabled:true}});
+ const before=f.db.prepare('SELECT total_changes() n').get().n;
+ for(const mobile_no of ['',f.employee.mobile_no]){
+  const result=await f.request('/api/employees/nonexistent-synthetic-id',{method:'PATCH',body:{whatsapp_notifications_enabled:true,mobile_no}});
+  assert.equal(result.status,404);assert.equal(result.json.error.code,'not_found');
+ }
+ assert.equal(f.db.prepare('SELECT total_changes() n').get().n,before);assert.equal(f.calls.length,0);
+}));
+
 test('restart with invalid local configuration cannot admit jobs, replacements or a daily checkpoint',()=>loopbackEvolution(async e=>reminderApi(async f=>{
  await f.request('/api/employees/'+f.employee.id,{method:'PATCH',body:{whatsapp_notifications_enabled:true,residency_expiry_date:null}});
  await f.reminders.schedule();const original=f.db.prepare('SELECT * FROM whatsapp_jobs ORDER BY id').all();assert.equal(original.length,1);

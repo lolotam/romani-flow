@@ -6,6 +6,25 @@ import { reminderText } from '../server/notifications/whatsapp/templates.ts';
 import { setSetting } from '../server/repositories/settings.ts';
 import { insertRow } from '../server/repositories/base.ts';
 
+test('targeted claim selection matches full selection through audience, legacy collision and expiry changes',()=>{
+ const f=reminderFixture();try{
+  f.db.prepare('UPDATE employees SET whatsapp_notifications_enabled=1').run();
+  f.db.prepare("INSERT INTO whatsapp_recipients VALUES('manager','Synthetic manager',?,1,'x','x')").run(MANAGER_PHONE);
+  const companyDoc=insertRow(f.db,'documents',{title:'Company synthetic',company_id:f.company.id,document_type_id:f.type.id,expiry_date:'2026-01-01'});
+  const scopes=selectReminders(f.db,'romani',f.clock.now);
+  const compare=()=>{
+   const all=selectReminders(f.db,'romani',f.clock.now);
+   for(const job of scopes)assert.deepEqual(selectReminders(f.db,'romani',f.clock.now,job),all.filter(row=>row.item_type===job.item_type&&row.item_id===job.item_id&&row.recipient===job.recipient));
+  };
+  compare();
+  insertRow(f.db,'employees',{name:'Legacy collision',mobile_no:'00999 0000-0001',whatsapp_notifications_enabled:true});compare();
+  f.db.prepare("UPDATE whatsapp_recipients SET phone=? WHERE id='manager'").run(EMPLOYEE_PHONE);compare();
+  f.db.prepare('UPDATE documents SET expiry_date=? WHERE id=?').run('2030-01-01',f.document.id);compare();
+  f.db.prepare('DELETE FROM documents WHERE id=?').run(companyDoc.id);compare();
+  setSetting(f.db,'cron.include_employees',false);compare();setSetting(f.db,'whatsapp.enabled',false);compare();
+ }finally{f.close();}
+});
+
 test('two opted employees receive only their own documents and names, while management sees both',()=>{
  const f=reminderFixture();try{
   f.db.prepare('UPDATE employees SET whatsapp_notifications_enabled=1,residency_expiry_date=NULL').run();

@@ -237,3 +237,10 @@ Verify actual managed stop grace exceeds this ceiling with margin before release
 no production grace change or proof is implied by local lifecycle tests.
 
 Phone correction cancels the old destination identity and uses the approved safe-unsent replacement or scheduled selection. A locally invalid-number failure is not a same-identity manual retry; accepted/unknown work remains suppressed.
+
+Final handoff selection reads the claimed item and destination rather than rebuilding
+all document/residency candidates. Employee delivery still checks a minimal projection
+of opted-in mobile numbers to detect legacy canonical collisions; management-only
+claims do not require that projection. Daily selection and full mutation refresh remain.
+Business erase cancels unsent jobs in the fixed audit namespace inside its transaction,
+even when sending configuration is invalid; accepted/unknown and other namespaces survive.
