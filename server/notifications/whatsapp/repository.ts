@@ -80,7 +80,7 @@ export class ReminderStore {
   }
 
   queueSize(): number {
-    return Number(this.db.prepare("SELECT count(*) total FROM whatsapp_jobs WHERE state IN ('pending','retryable_failed','sending')").get()!.total);
+    return Number(this.db.prepare("SELECT count(*) total FROM whatsapp_jobs WHERE instance=? AND state IN ('pending','retryable_failed','sending')").get(this.instance)!.total);
   }
 
   due(limit = 10): ReminderJob[] {

@@ -18,7 +18,7 @@ import { EmployeeFormDialog } from '@/components/employees/EmployeeFormDialog';
 import { EmployeeViewDialogContent } from '@/components/employees/EmployeeViewDialogContent';
 import { EMPTY_EMPLOYEE_FORM } from '@/components/employees/employeeTypes';
 import type { EmployeeFormState } from '@/components/employees/employeeTypes';
-import { buildEmployeePayload, formatDateForInput, toEmployeeFlags } from '@/components/employees/employeeHelpers';
+import { buildEmployeePayload, formatDateForInput, relationForCompany, toEmployeeFlags } from '@/components/employees/employeeHelpers';
 
 export default function Employees() {
   const [employees, setEmployees] = useState<EmployeeWithRelations[]>([]);
@@ -112,18 +112,15 @@ export default function Employees() {
       if (error) throw error;
 
       // Update local state
-      const company = companies.find(c => c.id === formData.company_id);
       const updated = data ?? selectedEmployee;
       setEmployees(prev =>
-        prev.map(emp =>
-          emp.id === selectedEmployee.id
-            ? {
-                ...emp,
-                ...updated,
-                companies: company ?? emp.companies,
-              }
-            : emp,
-        ),
+        prev.map(emp => {
+          if (emp.id !== selectedEmployee.id) return emp;
+          const merged = { ...emp, ...updated };
+          // The relation follows the company id the server returned, never the
+          // (possibly stale) form value, so it can never contradict `company_id`.
+          return { ...merged, companies: relationForCompany(merged.company_id, [updated, emp], companies) };
+        }),
       );
 
       toast({
