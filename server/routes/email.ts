@@ -82,10 +82,14 @@ export function createEmailRouter(
     '/test',
     requireAdmin,
     asyncHandler(async (req, res) => {
-      const { valid, invalid } = parseAddressList(req.body?.to);
+      const { valid, invalid: invalidTo } = parseAddressList(req.body?.to);
       const recipients = valid.length > 0 ? valid : getStringList(db, 'email.recipients');
+      const copies = parseAddressList(req.body?.cc ?? getStringList(db, 'email.cc'));
+      const cc = [...new Set(copies.valid)].filter(address => !recipients.includes(address));
+      const invalid = [...invalidTo, ...copies.invalid];
+      const allRecipients = [...recipients, ...cc];
 
-      if (recipients.length === 0) {
+      if (allRecipients.length === 0) {
         res.status(400).json({
           data: null,
           error: { message: 'No recipients are configured.', code: 'no_recipients' },
@@ -94,7 +98,7 @@ export function createEmailRouter(
       }
 
       const logId = startEmailAttempt(db, {
-        kind: 'test', recipients, subject: 'ROMANI Flow — SMTP test', details: { invalid },
+        kind: 'test', recipients: allRecipients, subject: 'ROMANI Flow — SMTP test', details: { invalid },
       });
       const verification = await mailer.verify();
       if (!verification.ok) {
@@ -109,6 +113,7 @@ export function createEmailRouter(
       try {
         const result = await mailer.send({
           to: recipients,
+          cc,
           subject: 'ROMANI Flow — SMTP test',
           text: 'This is a test message from ROMANI Flow. SMTP is configured correctly.',
           html: '<p style="font-family:Segoe UI,Arial,sans-serif">This is a test message from <strong>ROMANI Flow</strong>. SMTP is configured correctly.</p>',
@@ -125,7 +130,7 @@ export function createEmailRouter(
             error: { message: 'The relay did not accept every test recipient.', code: 'partial_delivery' } });
           return;
         }
-        res.json({ data: { sent: true, recipients, invalid, messageId: result.messageId }, error: null });
+        res.json({ data: { sent: true, recipients: allRecipients, invalid, messageId: result.messageId }, error: null });
       } catch (error) {
         const detail = error instanceof Error ? error.message : String(error);
         finishEmailAttempt(db, logId, { status: 'failed', error: detail });

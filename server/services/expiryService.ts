@@ -249,6 +249,7 @@ export async function sendExpiryReport(
   const enabled = getBoolean(db, 'email.enabled');
   const recipients = getStringList(db, 'email.recipients');
   const cc = getStringList(db, 'email.cc');
+  const allRecipients = [...new Set([...recipients, ...cc])];
   const windowDays = getNumber(db, 'cron.days', 30);
   const includeEmployees = getBoolean(db, 'cron.include_employees');
   const includeDocuments = getBoolean(db, 'cron.include_documents');
@@ -267,7 +268,7 @@ export async function sendExpiryReport(
     return { sent: false, skipped: 'disabled', recipients, itemCount: 0 };
   }
 
-  if (recipients.length === 0) {
+  if (allRecipients.length === 0) {
     writeEmailLog(db, {
       kind: 'expiry_report',
       recipients: [],
@@ -306,6 +307,7 @@ export async function sendExpiryReport(
   let employees = report.employees;
   let documents = report.documents;
   let targetRecipients = recipients;
+  let targetCc = cc.filter(address => !recipients.includes(address));
 
   if (triggerSource === 'cron') {
     const pendingRecipients = new Set<string>();
@@ -316,13 +318,14 @@ export async function sendExpiryReport(
       expiryDate: string,
       intervalDays: number,
     ): boolean => {
-      for (const recipient of recipients) {
+      let pending = false;
+      for (const recipient of allRecipients) {
         if (!alreadyNotified(db, itemType, itemId, expiryDate, intervalDays, recipient)) {
           pendingRecipients.add(recipient);
-          return true;
+          pending = true;
         }
       }
-      return false;
+      return pending;
     };
 
     employees = employees.filter((item) =>
@@ -334,12 +337,13 @@ export async function sendExpiryReport(
 
     // Only the recipients that still miss a notification receive the report.
     targetRecipients = recipients.filter((recipient) => pendingRecipients.has(recipient));
+    targetCc = targetCc.filter(recipient => pendingRecipients.has(recipient));
   }
 
   const itemCount = employees.length + documents.length;
   const subject = expiryReportSubject({ ...report, employees, documents });
 
-  if (itemCount === 0 || targetRecipients.length === 0) {
+  if (itemCount === 0 || targetRecipients.length + targetCc.length === 0) {
     writeEmailLog(db, {
       kind: 'expiry_report',
       recipients,
@@ -356,7 +360,7 @@ export async function sendExpiryReport(
   // The attempt is recorded before the message is handed to SMTP.
   const logId = startEmailAttempt(db, {
     kind: 'expiry_report',
-    recipients: targetRecipients,
+    recipients: [...targetRecipients, ...targetCc],
     subject,
     triggerSource,
     details: {
@@ -370,7 +374,7 @@ export async function sendExpiryReport(
   try {
     const result = await mailer.send({
       to: targetRecipients,
-      cc: cc.length > 0 ? cc : undefined,
+      cc: targetCc.length > 0 ? targetCc : undefined,
       subject,
       text: expiryReportText(finalReport),
       html: expiryReportHtml(finalReport),
@@ -406,6 +410,8 @@ export async function sendExpiryReport(
     const status = result.status === 'partial' ? 'partial' : 'sent';
     finishEmailAttempt(db, logId, {
       status,
+      details: { employees: employees.length, documents: documents.length, windowDays, intervals,
+        messageId: result.messageId, accepted: result.accepted, rejected: result.rejected },
       error:
         result.rejected.length > 0
           ? `Rejected recipients: ${result.rejected.join(', ')}`
@@ -415,7 +421,7 @@ export async function sendExpiryReport(
     setSetting(db, 'email.last_sent_at', new Date().toISOString());
     setSetting(db, 'email.last_result', status);
 
-    return { sent: result.status === 'sent', recipients: targetRecipients, itemCount };
+    return { sent: result.status === 'sent', recipients: [...targetRecipients, ...targetCc], itemCount };
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error);
 

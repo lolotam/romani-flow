@@ -15,6 +15,7 @@
     "db:seed": "tsx --env-file-if-exists=.env server/scripts/seed.ts",
     "check:sizes": "node scripts/check-file-sizes.mjs",
     "verify:api": "node scripts/verify-api.mjs",
+    "test:email": "node --import tsx --test scripts/verify-email-delivery.test.mjs",
     "test:config": "node --import tsx --test scripts/verify-config.test.mjs",
     "test:operations": "node --import tsx --test scripts/verify-operations.test.mjs",
     "test:whatsapp-pairing": "node --import tsx --test scripts/verify-whatsapp-pairing.test.mjs scripts/verify-whatsapp-polling.test.mjs",

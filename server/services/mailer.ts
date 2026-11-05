@@ -85,7 +85,9 @@ export class Mailer {
   /** Sends one message. Rejects empty recipient lists before touching the network. */
   async send(message: MailMessage): Promise<MailResult> {
     const to = message.to.filter((address) => address.trim().length > 0);
-    if (to.length === 0) {
+    const cc = message.cc?.filter((address) => address.trim().length > 0);
+    const bcc = message.bcc?.filter((address) => address.trim().length > 0);
+    if (to.length === 0 && !cc?.length && !bcc?.length) {
       throw new MailError('At least one recipient is required.', 'no_recipients', 400);
     }
 
@@ -95,8 +97,8 @@ export class Mailer {
       const info = await transport.sendMail({
         from: this.config.smtp.from,
         to,
-        cc: message.cc?.filter((address) => address.trim().length > 0),
-        bcc: message.bcc?.filter((address) => address.trim().length > 0),
+        cc,
+        bcc,
         subject: message.subject,
         text: message.text,
         html: message.html,

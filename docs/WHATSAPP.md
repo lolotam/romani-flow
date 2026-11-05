@@ -252,3 +252,7 @@ Settings selects WhatsApp and Email languages independently (Arabic or English).
 Each channel shows a fixed synthetic text preview from the same server renderer used for delivery. The admin-only, no-store `GET /api/whatsapp/template-preview?channel=whatsapp|email&language=ar|en` endpoint reads no customer records and sends nothing. These are fixed templates, not a free-form message editor. Email remains the existing grouped management report.
 
 Changing language reconciles eligible pending snapshots under the notification coordinator. Accepted/unknown outcomes and prior attempt text remain unchanged; language is not a new deduplication identity and cannot cause a resend. Selecting a language never enables sending or changes the schedule.
+
+### Email recipient correctness
+
+The Email test includes configured CC when no explicit CC override is supplied; the settings UI submits both current To and CC lists. Automated report selection considers every configured To/CC address, retries only addresses the relay did not accept, and supports a CC-only retry without re-sending to previously accepted To addresses. Logs retain both accepted/rejected addresses and report counts. Relay acceptance still does not prove inbox delivery. Failed settings loads show a retry state and cannot save placeholder defaults or trigger sending.
