@@ -4,6 +4,7 @@ import type { PairingConfig } from './config.js';
 import { pairingConfiguration } from './config.js';
 import { PairingClient, PairingError } from './pairingClient.js';
 import { requireAdmin } from '../middleware/auth.js';
+import { asyncHandler } from '../middleware/errorHandler.js';
 import type { NodeEnv } from '../config.js';
 import type { WhatsAppReminders } from '../notifications/whatsapp/service.js';
 
@@ -27,12 +28,12 @@ export function createPairingRouter(config: PairingConfig, env: NodeEnv, reminde
     res.setHeader('Referrer-Policy', 'no-referrer');
     next();
   });
-  router.get('/status', async (req, res) => {
+  router.get('/status', asyncHandler(async (req, res) => {
     if (!emptyInput(req)) { fail(res, 400, 'project_override_forbidden'); return; }
     try { res.json({ data: await client.status(), error: null }); }
     catch (error) { const e = error instanceof PairingError ? error : new PairingError('provider_unavailable'); fail(res, e.status, e.code); }
-  });
-  router.post('/disconnect', async (req, res) => {
+  }));
+  router.post('/disconnect', asyncHandler(async (req, res) => {
     if (!emptyInput(req)) { fail(res, 400, 'project_override_forbidden'); return; }
     const expected = env === 'production' ? 'https://romani.curemedkw.com' : `${req.protocol}://${req.get('host')}`;
     if (req.get('origin') && req.get('origin') !== expected) { fail(res, 403, 'origin_forbidden'); return; }
@@ -45,8 +46,8 @@ export function createPairingRouter(config: PairingConfig, env: NodeEnv, reminde
       res.json({ data: status, error: null });
     } catch (error) { const e = error instanceof PairingError ? error : new PairingError('provider_unavailable'); fail(res, e.status, e.code); }
     finally { connecting = false; }
-  });
-  router.post('/connect', async (req, res) => {
+  }));
+  router.post('/connect', asyncHandler(async (req, res) => {
     if (!emptyInput(req)) { fail(res, 400, 'project_override_forbidden'); return; }
     const origin = req.get('origin');
     // Production terminates TLS upstream; its public origin is server-fixed,
@@ -61,7 +62,7 @@ export function createPairingRouter(config: PairingConfig, env: NodeEnv, reminde
     try { res.json({ data: await client.connect(), error: null }); }
     catch (error) { const e = error instanceof PairingError ? error : new PairingError('provider_unavailable'); fail(res, e.status, e.code); }
     finally { connecting = false; }
-  });
+  }));
   return router;
 }
 

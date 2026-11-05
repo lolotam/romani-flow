@@ -15,6 +15,7 @@ import { DocumentService } from '../server/services/documentService.ts';
 import { CronService } from '../server/services/cronService.ts';
 import { pairingConfiguration, readPairingConfig } from '../server/whatsapp/config.ts';
 import { createServer as createViteServer } from 'vite';
+import { stopRequestWork } from '../server/middleware/requestWork.ts';
 
 // Synthetic loopback provider only; no .env, production accounts or real QR scan.
 const PNG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jGDkAAAAASUVORK5CYII=';
@@ -31,6 +32,7 @@ async function fixture(run, overrides = {}) {
     calls.push({ path: req.url, method: req.method, authorized: req.headers.apikey === apiKey });
     // Emulate a project-scoped provider boundary; Curemed key cannot read Romani.
     if (req.headers.apikey !== apiKey || !req.url.endsWith('/romani-fixture')) { res.writeHead(403); res.end('not allowed'); return; }
+    if (mode.beforeResponse) await mode.beforeResponse(req);
     if (mode.delay) await new Promise(resolve => setTimeout(resolve, mode.delay));
     if (mode.redirect) { res.writeHead(302, { location: '/instance/connectionState/curemed' }); res.end(); return; }
     res.writeHead(mode.status, { 'content-type': 'application/json' });
@@ -67,7 +69,7 @@ async function fixture(run, overrides = {}) {
     assert.ok(!JSON.stringify(json).includes('must-not-leak'));
     return { status: res.status, headers: res.headers, json };
   };
-  try { await run({ request, config, db, mode, calls, cookie, webhookSecret, curemedKey, base }); }
+  try { await run({ request, config, db, mode, calls, cookie, webhookSecret, curemedKey, base, app }); }
   finally { cron.stop(); await stop(server); await stop(provider); db.close(); fs.rmSync(dir, { recursive: true, force: true }); }
 }
 
@@ -289,4 +291,30 @@ test('logout acknowledgement without actual closed state never reports successfu
  const response=await f.request('/api/whatsapp/disconnect',{method:'POST',body:{}});
  assert.equal(response.status,409);assert.equal(response.json.error.code,'disconnect_pending');assert.equal(response.json.data,null);
  assert.equal(getBoolean(f.db,'whatsapp.enabled'),false);assert.equal(f.calls.filter(call=>call.method==='DELETE').length,1);
+}));
+
+test('shutdown drains detached disconnect work and refuses further pairing provider calls',()=>fixture(async f=>{
+ f.mode.state='open';
+ let release,entered;
+ const blocked=new Promise(resolve=>release=resolve),started=new Promise(resolve=>entered=resolve);
+ f.mode.beforeResponse=async req=>{if(req.method==='DELETE'){entered();await blocked;}};
+ const controller=new AbortController();
+ const request=fetch(f.base+'/api/whatsapp/disconnect',{method:'POST',signal:controller.signal,
+  headers:{cookie:f.cookie(),'content-type':'application/json'},body:'{}'}).catch(error=>assert.equal(error.name,'AbortError'));
+ try{
+  await started;controller.abort();await request;
+  let drained=false;
+  const drain=stopRequestWork(f.app).then(()=>{drained=true;});
+  await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(drained,false,'a detached logout must remain admitted work until its provider operation finishes');
+  const before=f.calls.length;
+  for(const [url,method] of [['status','GET'],['connect','POST'],['disconnect','POST']]){
+   const response=await f.request('/api/whatsapp/'+url,{method,...(method==='POST'?{body:{}}:{})});
+   assert.equal(response.status,503);assert.equal(response.json.error.code,'shutting_down');
+  }
+  assert.equal(f.calls.length,before);
+  release();await drain;
+  assert.equal(drained,true);assert.equal(f.mode.state,'close');
+  assert.equal(f.calls.filter(call=>call.method==='DELETE').length,1);
+ }finally{release();controller.abort();await request;}
 }));

@@ -21,6 +21,9 @@ disconnect_pending rather than success unless state is closed. It never calls
 `/instance/delete`. Native query-override isolation is not waived; browser inputs
 cannot supply route/query/instance authority. Logout and connect share a mutation
 lock, with separate rate limits so successful logout permits immediate new QR.
+Pairing handlers participate in the application's shutdown drain, including
+disconnect work whose browser socket has already closed. Once shutdown closes
+admission, status/connect/disconnect return 503 without contacting the provider.
 
 The browser polls the admin status GET every3seconds during visible pairing for
 a bounded period. No polling action generates QR or sends a message. Actual
