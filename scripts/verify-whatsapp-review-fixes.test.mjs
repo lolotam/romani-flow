@@ -6,6 +6,7 @@ import { ReminderStore } from '../server/notifications/whatsapp/repository.ts';
 import { selectReminders } from '../server/notifications/whatsapp/selection.ts';
 import { NotificationCoordinator } from '../server/notifications/coordinator.ts';
 import { DocumentService } from '../server/services/documentService.ts';
+import { ownerKind, ownerName } from '../src/components/settings/ExpiryPreviewCard.tsx';
 import { relationForCompany } from '../src/components/employees/employeeHelpers.ts';
 
 const phone = (n) => '+999' + String(n).padStart(8, '0');
@@ -111,3 +112,12 @@ test('the audit log reads attempts once per page and keeps per-job order and con
   }
   assert.deepEqual(log.json.data.items.map((item) => item.attempts.length).sort(), [1, 1, 2]);
 }));
+
+test('the expiry preview names whether a document belongs to an employee or a company', () => {
+  assert.equal(ownerKind({ employeeName: 'Sara', companyName: 'Acme' }), 'employee');
+  assert.equal(ownerName({ employeeName: 'Sara', companyName: 'Acme' }), 'Sara');
+  assert.equal(ownerKind({ employeeName: null, companyName: 'Acme' }), 'company');
+  assert.equal(ownerName({ employeeName: null, companyName: 'Acme' }), 'Acme');
+  assert.equal(ownerKind({ employeeName: null, companyName: null }), null);
+  assert.equal(ownerName({}), null);
+});
