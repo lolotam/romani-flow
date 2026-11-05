@@ -91,3 +91,10 @@ export function finishDraft(db: Db, userId: string, raw: unknown, row: Row, docu
   if (ref.scope !== expected || (!documentId && ref.scope !== 'new' && ref.scope !== `employee:${row.employee_id}` && ref.scope !== `company:${row.company_id}`)) invalid();
   writeDraft(db, userId, ref, null);
 }
+
+/** Validate upload authority under the same coordinator used by erase, before file I/O. */
+export function assertCurrentDraft(db: Db, userId: string, ref: DraftReference): void {
+  if (ref.account !== userId || readDraft(db, userId, ref.scope).revision !== ref.revision) {
+    throw new RepositoryError('Draft changed before upload.', 'draft_conflict', 409);
+  }
+}

@@ -143,6 +143,7 @@ export const documents = {
     // Validation messages
     validation: {
       entityNameTooLong: 'اسم الجهة يجب ألا يتجاوز 100 حرف',
+      notesTooLong: 'الملاحظات تتجاوز 5000 حرف. اختصرها قبل حفظ المسودة أو الوثيقة.',
       reviewFields: 'راجع الأخطاء الموضحة في حقول النموذج قبل الحفظ.',
       noDocumentTypes: 'أضف نوع وثيقة من الإعدادات أولًا، ثم ارجع لإكمال الحفظ.',
       noEmployees: 'لا يوجد موظفون. أضف موظفًا أولًا أو اختر شركة كمستفيد.',

@@ -26,6 +26,7 @@ export class DocumentDraftSession {
   private failure: Error | null = null;
   private prepared: DraftValues | null = null;
   private discarding: Promise<void> | null = null;
+  private ready = false;
   hasDraft = false;
 
   constructor(readonly scope: string, private restore: (values: DraftValues | null) => void,
@@ -40,6 +41,7 @@ export class DocumentDraftSession {
     const result = await this.transport<{ revision: string; values: DraftValues | null }>(this.url);
     if (result.error || !result.data) { this.fail(result.error ?? new Error('Draft unavailable')); return; }
     this.revision = result.data.revision;
+    this.ready = true;
     this.hasDraft = result.data.values !== null;
     if (!this.disposed && !this.edited) {
       this.restoring = true;
@@ -86,6 +88,7 @@ export class DocumentDraftSession {
   }
 
   async prepare(values: DraftValues): Promise<DraftReference> {
+    if (!this.ready) throw new Error('Wait for the draft to load before saving.');
     this.change(values);
     await this.flush();
     this.paused = true;
@@ -98,11 +101,20 @@ export class DocumentDraftSession {
     if (this.prepared) {
       this.pending = this.prepared; this.prepared = null;
       if (error instanceof ApiRequestError && error.code === 'draft_conflict') this.fail(error);
-      else if (!this.failure) this.status('saving');
+      else if (error instanceof ApiRequestError && error.status >= 400 && error.status < 500) {
+        this.pending = null; this.status('saved');
+      } else this.fail(error instanceof Error ? error : new Error('Document save outcome is unknown.'));
     }
   }
 
   committed(): void { this.paused = true; this.pending = null; this.prepared = null; clearTimeout(this.timer); }
+
+  /** A successful Save & Add Next must read the new tombstone before editing again. */
+  async restart(): Promise<void> {
+    this.committed(); this.failure = null; this.edited = false; this.ready = false;
+    this.loaded = this.load(); await this.loaded;
+    this.paused = false;
+  }
 
   /** Closing after failure requires an explicit choice to drop only unsaved local changes. */
   async close(confirmDiscard: () => boolean): Promise<boolean> {

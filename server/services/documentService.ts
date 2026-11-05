@@ -9,6 +9,7 @@ import {
 import type { StorageService } from './storageService.js';
 import type { NotificationCoordinator } from '../notifications/coordinator.js';
 import { atomic } from '../notifications/whatsapp/repository.js';
+import { resolveDocumentEntity } from './documentEntity.js';
 
 /**
  * Document file lifecycle.
@@ -48,6 +49,19 @@ export class DocumentService {
 
   private serialize<T>(action: () => Promise<T>): Promise<T> {
     return this.notifications ? this.notifications.coordinator.runExclusive(action) : action();
+  }
+
+  /** Stage files under erase's coordinator and check the draft before writing any bytes. */
+  stageUploads(files: Array<{ buffer: Buffer; originalname: string; mimetype: string }>, guard?: () => void): Promise<StoredUpload[]> {
+    return this.serialize(async () => {
+      guard?.();
+      const uploads: StoredUpload[] = [];
+      for (const file of files) {
+        const stored = await this.storage.save(file.buffer, file.originalname, file.mimetype);
+        uploads.push(this.registerUpload({ fileName: stored.fileName, filePath: stored.relativePath, fileSize: stored.size, mimeType: stored.mimeType }));
+      }
+      return uploads;
+    });
   }
 
   /** Records a freshly uploaded file so a record can claim it. */
@@ -122,6 +136,7 @@ export class DocumentService {
 
     this.db.exec('BEGIN');
     try {
+      resolveDocumentEntity(this.db, fields);
       const storageFields: StorageFields | null = uploadId ? this.requireUpload(uploadId) : null;
       const expiry = typeof fields.expiry_date === 'string' ? fields.expiry_date : null;
 
@@ -174,6 +189,7 @@ export class DocumentService {
 
     this.db.exec('BEGIN');
     try {
+      resolveDocumentEntity(this.db, fields);
       const storageFields: StorageFields | null = uploadId ? this.requireUpload(uploadId) : null;
       const expiry =
         'expiry_date' in fields

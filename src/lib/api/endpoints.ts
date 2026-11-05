@@ -89,7 +89,7 @@ export interface SendDocumentsResult {
 }
 
 const files = {
-  upload: (selected: File[]) => uploadFiles<UploadedFile[]>('/api/files/upload', selected),
+  upload: (selected: File[], draft?: { scope: string; revision: string; account?: string }) => uploadFiles<UploadedFile[]>('/api/files/upload', selected, draft ? { draft: JSON.stringify(draft) } : {}),
   downloadUrl: (documentId: string) => `/api/files/${encodeURIComponent(documentId)}/download`,
   previewUrl: (documentId: string) => `/api/files/${encodeURIComponent(documentId)}/preview`,
   /** Swaps the attachment of an existing document for a staged upload. */

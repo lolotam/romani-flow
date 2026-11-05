@@ -143,6 +143,7 @@ export const documents = {
     // Validation messages
     validation: {
       entityNameTooLong: 'Entity name must not exceed 100 characters',
+      notesTooLong: 'Notes exceed 5000 characters. Shorten them before saving the draft or document.',
       reviewFields: 'Review the errors shown in the form fields before saving.',
       noDocumentTypes: 'Add a document type in Settings first, then return to save the document.',
       noEmployees: 'No employees are available. Add an employee first or select a company beneficiary.',

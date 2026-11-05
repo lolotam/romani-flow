@@ -8,6 +8,8 @@ import { createDocumentPreview } from '../src/lib/documentPreview.ts';
 import { createServer } from 'vite';
 import { employeeDocumentDraft } from '../src/lib/documentFormDrafts.ts';
 import { createDocumentSchema } from '../src/components/documents/documentFormSchema.ts';
+import fs from 'node:fs';
+import path from 'node:path';
 
 test('actual form preview components render authenticated PDF/image sources and keep fixed company selection disabled', async () => {
   const vite = await createServer({ server: { middlewareMode: true, hmr: false }, appType: 'custom', logLevel: 'error' });
@@ -73,6 +75,7 @@ test('concurrent discard clicks share one delete and do not manufacture a confli
 
 test('a document-save CAS conflict is visible and retains the prepared local values', () => reminderApi(async f => {
   const api = transport(f), states = [], session = new DocumentDraftSession('new', () => {}, state => states.push(state), api);
+  await session.flush();
   const prepared = await session.prepare({ notes: 'Prepared local values' });
   await api(url('new'), { method: 'PUT', body: { revision: prepared.revision, values: { notes: 'Newer device' } } });
   const response = await f.request('/api/documents', { method: 'POST', body: { title: 'Conflict', employee_id: f.employee.id, document_type_id: f.type.id, expiry_date: '2029-01-01', draft: { ...prepared, account: 'admin' } } });
@@ -84,11 +87,86 @@ test('a document-save CAS conflict is visible and retains the prepared local val
   session.dispose();
 }));
 
+test('draft-bound uploads are refused after erase before any file or pending row is written', () => reminderApi(async f => {
+  const api = transport(f);
+  const saved = await api(url('new'), { method: 'PUT', body: { revision: 'none', values: { notes: 'Before erase' } } });
+  await f.request('/api/backup/erase', { method: 'POST', body: {} });
+  const data = new FormData(); data.append('files', new Blob(['%PDF-1.4\nSynthetic'], { type: 'application/pdf' }), 'synthetic.pdf');
+  data.append('draft', JSON.stringify(ref('new', saved.data.revision)));
+  const cookie = f.config.cookieName + '=' + signSession(f.config, { id: 'admin', role: 'admin', name: 'Synthetic', email: 'admin@example.invalid' });
+  const response = await fetch(f.base + '/api/files/upload', { method: 'POST', headers: { cookie }, body: data });
+  assert.equal(response.status, 409);
+  assert.equal(f.db.prepare('SELECT count(*) n FROM pending_uploads').get().n, 0);
+  assert.equal(fs.readdirSync(f.config.uploadsDir, { recursive: true }).filter(file => fs.statSync(path.join(f.config.uploadsDir, file)).isFile()).length, 0);
+}));
+
+test('erase waits for an already-started draft upload and removes its pending bytes', t => reminderApi(async f => {
+  const api = transport(f);
+  const saved = await api(url('new'), { method: 'PUT', body: { revision: 'none', values: { notes: 'Before erase' } } });
+  let entered, release, received;
+  const enteredPromise = new Promise(resolve => { entered = resolve; });
+  const gate = new Promise(resolve => { release = resolve; });
+  const receivedPromise = new Promise(resolve => { received = resolve; });
+  const original = f.storage.save.bind(f.storage);
+  t.mock.method(f.storage, 'save', async (...args) => { entered(); await gate; return original(...args); });
+  const onRequest = req => { if (req.url === '/api/backup/erase') received(); };
+  f.server.on('request', onRequest);
+  const data = new FormData(); data.append('files', new Blob(['%PDF-1.4\nSynthetic'], { type: 'application/pdf' }), 'synthetic.pdf');
+  data.append('draft', JSON.stringify(ref('new', saved.data.revision)));
+  const cookie = f.config.cookieName + '=' + signSession(f.config, { id: 'admin', role: 'admin', name: 'Synthetic', email: 'admin@example.invalid' });
+  const uploading = fetch(f.base + '/api/files/upload', { method: 'POST', headers: { cookie }, body: data });
+  await enteredPromise;
+  const erasing = f.request('/api/backup/erase', { method: 'POST', body: {} });
+  try {
+    await receivedPromise; release();
+    assert.equal((await uploading).status, 201); assert.equal((await erasing).status, 200);
+    assert.equal(f.db.prepare('SELECT count(*) n FROM pending_uploads').get().n, 0);
+    assert.equal(fs.readdirSync(f.config.uploadsDir, { recursive: true }).filter(file => fs.statSync(path.join(f.config.uploadsDir, file)).isFile()).length, 0);
+  } finally { release(); f.server.off('request', onRequest); }
+}));
+
+test('custom ministry creation rolls back with a stale document draft and commits with the current revision', () => reminderApi(async f => {
+  const api = transport(f);
+  const saved = await api(url('new'), { method: 'PUT', body: { revision: 'none', values: { notes: 'Prepared' } } });
+  const newer = await api(url('new'), { method: 'PUT', body: { revision: saved.data.revision, values: { notes: 'Newer device' } } });
+  const body = { title: 'Synthetic company document', company_id: f.company.id, document_type_id: f.type.id, ministry_id: 'other', entity_name: 'Synthetic ministry', expiry_date: '2029-01-01' };
+  assert.equal((await f.request('/api/documents', { method: 'POST', body: { ...body, draft: ref('new', saved.data.revision) } })).status, 409);
+  assert.equal(f.db.prepare('SELECT count(*) n FROM ministries').get().n, 0);
+  const result = await f.request('/api/documents', { method: 'POST', body: { ...body, draft: ref('new', newer.data.revision) } });
+  assert.equal(result.status, 201); assert.equal(f.db.prepare('SELECT count(*) n FROM ministries').get().n, 1);
+}));
+
+test('unloaded drafts cannot be submitted, and repeated documents use fresh tombstone revisions', () => reminderApi(async f => {
+  const api = transport(f); let release;
+  const gate = new Promise(resolve => { release = resolve; });
+  const states = [];
+  const session = new DocumentDraftSession('new', () => {}, state => states.push(state), transport(f, 'admin', method => method === 'GET' ? gate : undefined));
+  await assert.rejects(session.prepare({ title: 'Before loading' }), /Wait for the draft/);
+  release(); await session.flush();
+  try {
+    for (const title of ['First document', 'Second document']) {
+      const prepared = await session.prepare({ title });
+      const saved = await f.request('/api/documents', { method: 'POST', body: { title, employee_id: f.employee.id, document_type_id: f.type.id, expiry_date: '2029-01-01', draft: { ...prepared, account: 'admin' } } });
+      assert.equal(saved.status, 201); session.committed(); await session.restart();
+    }
+    assert.equal(states.at(-1), 'saved'); assert.equal((await api(url('new'))).data.values, null);
+    const prepared = await session.prepare({ notes: 'Durable before failed save' });
+    session.resume(new ApiRequestError('Invalid document', 'invalid_body', 400));
+    assert.equal(states.at(-1), 'saved');
+    assert.equal((await api(url('new'))).data.revision, prepared.revision);
+    await session.prepare({ notes: 'Durable before uncertain save' });
+    session.resume(new ApiRequestError('Connection lost', 'network_error', 0));
+    assert.equal(states.at(-1), 'failed');
+  } finally { session.dispose(); }
+}));
+
 test('custom entity limit is shared by the draft API and form; empty draft keeps filename title', () => reminderApi(async f => {
   const api = transport(f), values = { ...fields, beneficiary_type: 'company', company_id: f.company.id, ministry_id: 'other', entity_name: 'x'.repeat(100), document_type_id: f.type.id };
   const schema = createDocumentSchema(key => key);
   assert.equal(schema.safeParse({ ...values, issue_date: new Date(2028, 1, 29), expiry_date: new Date(2029, 0, 1) }).success, true);
   assert.equal(schema.safeParse({ ...values, entity_name: 'x'.repeat(101), issue_date: new Date(2028, 1, 29), expiry_date: new Date(2029, 0, 1) }).success, false);
+  const legacy = schema.safeParse({ ...values, notes: 'x'.repeat(5001), issue_date: new Date(2028, 1, 29), expiry_date: new Date(2029, 0, 1) });
+  assert.equal(legacy.success, false); assert.ok(legacy.error.issues.some(issue => issue.path[0] === 'notes'));
   const saved = await api(url('new'), { method: 'PUT', body: { revision: 'none', values } });
   assert.equal(saved.error, null);
   assert.equal((await api(url('new'), { method: 'PUT', body: { revision: saved.data.revision, values: { ...values, entity_name: 'x'.repeat(101) } } })).error.code, 'invalid_draft');

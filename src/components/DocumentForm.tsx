@@ -105,8 +105,8 @@ function DocumentFormContent({
     });
   }, () => !formIsDirty);
 
-  const handleSubmit = async (data: DocumentFormData): Promise<boolean> => {
-    if (submitting.current) return false;
+  const handleSubmit = async (data: DocumentFormData, keepOpen = false): Promise<boolean> => {
+    if (submitting.current || ['loading', 'failed', 'conflict'].includes(draft.status)) return false;
     submitting.current = true;
     setIsSubmitting(true);
     try {
@@ -122,14 +122,15 @@ function DocumentFormContent({
       }
       const draftRef = await draft.prepare(draftValues(data));
       const uploadId = uploadedFile
-        ? await stageFile(uploadedFile, t('documents.messages.saveError'))
+        ? await stageFile(uploadedFile, t('documents.messages.saveError'), draftRef)
         : undefined;
       await saveDocument(preselectedEmployeeId ? { ...data, beneficiary_type: 'employee', employee_id: preselectedEmployeeId, company_id: '' } : data, editingDocument?.id, uploadId, t, draftRef);
       draft.session.current?.committed();
       clearUpload();
       toast.success(editingDocument ? t('documents.messages.editSuccess') : t('documents.messages.addSuccess'));
       onSuccess();
-      onClose();
+      if (keepOpen) await draft.session.current?.restart();
+      else onClose();
       return true;
     } catch (error) {
       draft.session.current?.resume(error);
@@ -147,9 +148,10 @@ function DocumentFormContent({
       <CardContent className="grid items-start gap-6 p-4 lg:grid-cols-2 lg:p-6">
         <DocumentAttachment uploadedFile={uploadedFile} editingDocument={editingDocument} />
         <Form {...form}>
-          <form onSubmit={form.handleSubmit(handleSubmit, () => toast.error(t('documents.form.validation.reviewFields')))} className="space-y-6">
+          <form onSubmit={form.handleSubmit(data => handleSubmit(data), () => toast.error(t('documents.form.validation.reviewFields')))} className="space-y-6">
             <fieldset disabled={isSubmitting} className="space-y-6">
             <DocumentDraftStatus status={draft.status} restored={draft.hasDraft} needsFile={!uploadedFile && !editingDocument} onDiscard={() => void draft.session.current?.discard().catch(() => toast.error(t('documents.messages.saveError')))} />
+            {(form.watch('notes')?.length ?? 0) > 5000 && <p role="alert" className="text-destructive">{t('documents.form.validation.notesTooLong')}</p>}
             {documentTypes.length === 0 && <p role="alert" className="text-destructive">{t('documents.form.validation.noDocumentTypes')}</p>}
             {form.watch('beneficiary_type') === 'employee' && employees.length === 0 &&
               <p role="alert" className="text-destructive">{t('documents.form.validation.noEmployees')}</p>}
@@ -255,7 +257,7 @@ function DocumentFormContent({
               <div className="flex space-x-2">
                 <Button 
                   type="submit" 
-                  disabled={isSubmitting}
+                  disabled={isSubmitting || ['loading', 'failed', 'conflict'].includes(draft.status)}
                   className="shadow-elegant hover:shadow-glow transition-all"
                 >
                   <Save className="h-4 w-4 ml-2" />
@@ -269,10 +271,10 @@ function DocumentFormContent({
                   <Button
                     type="button"
                     variant="secondary"
-                    disabled={isSubmitting}
+                    disabled={isSubmitting || ['loading', 'failed', 'conflict'].includes(draft.status)}
                     onClick={async () => {
                       let saved = false;
-                      await form.handleSubmit(async (data) => { saved = await handleSubmit(data); },
+                      await form.handleSubmit(async (data) => { saved = await handleSubmit(data, true); },
                         () => toast.error(t('documents.form.validation.reviewFields')))();
                       if (!saved) return;
                       // Reset form for new document

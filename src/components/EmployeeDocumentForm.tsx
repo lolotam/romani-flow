@@ -109,13 +109,14 @@ function EmployeeDocumentFormContent({
       return;
     }
 
+    if (formData.notes.length > 5000) { toast.error(t('documents.form.validation.notesTooLong')); return; }
     submitting.current = true;
     setIsSubmitting(true);
     
     try {
       const draftRef = await draft.prepare(draftValues(formData));
       const uploadId = uploadedFile
-        ? await stageFile(uploadedFile, t('documents.employeeDocumentForm.saveError'))
+        ? await stageFile(uploadedFile, t('documents.employeeDocumentForm.saveError'), draftRef)
         : undefined;
 
       // Save metadata and claim the staged upload in one server transaction.
@@ -175,6 +176,7 @@ function EmployeeDocumentFormContent({
         <DocumentAttachment uploadedFile={uploadedFile ?? null} />
         <form onSubmit={handleSubmit} className="space-y-6">
           <fieldset disabled={isSubmitting} className="space-y-6">
+          {formData.notes.length > 5000 && <p role="alert" className="text-destructive">{t('documents.form.validation.notesTooLong')}</p>}
           <DocumentDraftStatus status={draft.status} restored={draft.hasDraft} needsFile={!uploadedFile} onDiscard={() => void draft.session.current?.discard().catch(() => toast.error(t('documents.employeeDocumentForm.saveError')))} />
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div className="md:col-span-2">
