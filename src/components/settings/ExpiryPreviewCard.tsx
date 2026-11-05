@@ -20,16 +20,29 @@ function statusClass(item: ExpiryPreviewItem): string {
   return 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400';
 }
 
+/** A document belongs to an employee when it names one, otherwise to its company. */
+export function ownerKind(item: ExpiryPreviewItem): 'employee' | 'company' | null {
+  if (item.employeeName) return 'employee';
+  if (item.companyName) return 'company';
+  return null;
+}
+
+export function ownerName(item: ExpiryPreviewItem): string | null {
+  return item.employeeName || item.companyName || null;
+}
+
 export function ExpiryPreviewCard({ preview, canSend, isSending, onRefresh, onSend }: ExpiryPreviewCardProps) {
   const { language } = useLanguage();
   const L = (ar: string, en: string) => (language === 'ar' ? ar : en);
 
-  const rows = (items: ExpiryPreviewItem[], nameOf: (item: ExpiryPreviewItem) => string) => (
+  const rows = (items: ExpiryPreviewItem[], nameOf: (item: ExpiryPreviewItem) => string, showOwner = false) => (
     <div className="overflow-x-auto">
       <table className="w-full text-sm">
         <thead className="bg-muted/50">
           <tr>
             <th className="p-2 text-start font-medium">{L('الاسم', 'Name')}</th>
+            {showOwner && <th className="p-2 text-start font-medium">{L('نوع الوثيقة', 'Document type')}</th>}
+            {showOwner && <th className="p-2 text-start font-medium">{L('مرتبطة بـ', 'Linked to')}</th>}
             <th className="p-2 text-start font-medium">{L('تاريخ الانتهاء', 'Expiry date')}</th>
             <th className="p-2 text-start font-medium">{L('المتبقي', 'Remaining')}</th>
             <th className="p-2 text-start font-medium">{L('الحالة', 'Status')}</th>
@@ -39,6 +52,8 @@ export function ExpiryPreviewCard({ preview, canSend, isSending, onRefresh, onSe
           {items.slice(0, VISIBLE_ROWS).map((item, index) => (
             <tr key={item.id} className={index % 2 === 0 ? 'bg-background' : 'bg-muted/25'}>
               <td className="p-2 font-medium">{nameOf(item)}</td>
+              {showOwner && <td className="p-2">{ownerKind(item) === 'employee' ? L('موظف', 'Employee') : ownerKind(item) === 'company' ? L('شركة', 'Company') : '-'}</td>}
+              {showOwner && <td className="p-2">{ownerName(item) ?? '-'}</td>}
               <td className="p-2">{item.expiryDate}</td>
               <td className="p-2">
                 {Math.abs(item.daysRemaining)} {item.isExpired ? L('يوم منذ الانتهاء', 'days ago') : L('يوم', 'days')}
@@ -111,7 +126,7 @@ export function ExpiryPreviewCard({ preview, canSend, isSending, onRefresh, onSe
         {documents.length > 0 && (
           <div className="space-y-2 border-t pt-4">
             <h4 className="font-medium text-red-600">{L('المستندات', 'Documents')}</h4>
-            {rows(documents, (item) => item.title ?? '-')}
+            {rows(documents, (item) => item.title ?? '-', true)}
           </div>
         )}
       </CardContent>
