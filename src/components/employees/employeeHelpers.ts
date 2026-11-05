@@ -1,5 +1,6 @@
 import type { ExpiryStatus } from '@/types';
 import type { EmployeeFormState } from './employeeTypes';
+import { formPatch } from '../../lib/formPatch';
 
 /**
  * Builds the payload sent to the API.
@@ -7,13 +8,14 @@ import type { EmployeeFormState } from './employeeTypes';
  * Empty fields are sent as `null` on purpose: the server keeps a stored value
  * when a key is absent, but clears it when the key is explicitly `null`.
  * Untouched edit-form consent is omitted rather than replayed from a stale form.
+ * Other untouched fields are omitted too, including concurrent mobile changes.
  */
-export function buildEmployeePayload(formData: EmployeeFormState, includeWhatsAppConsent = true) {
-  return {
+export function buildEmployeePayload(formData: EmployeeFormState, changes?: Partial<Record<keyof EmployeeFormState, boolean>>) {
+  const payload = {
     name: formData.name,
     email: formData.email || null,
     mobile_no: formData.mobile_no || null,
-    ...(includeWhatsAppConsent ? { whatsapp_notifications_enabled: formData.whatsapp_notifications_enabled } : {}),
+    whatsapp_notifications_enabled: formData.whatsapp_notifications_enabled,
     position: formData.position || null,
     hire_date: formData.hire_date || null,
     birth_date: formData.birth_date || null,
@@ -24,6 +26,9 @@ export function buildEmployeePayload(formData: EmployeeFormState, includeWhatsAp
     company_id: formData.company_id,
     is_active: formData.is_active,
   };
+  // Disabling the licence explicitly clears its dependent expiry as before.
+  return formPatch(payload, changes?.driving_license && !formData.driving_license
+    ? { ...changes, driving_license_expiry_date: true } : changes);
 }
 
 /**

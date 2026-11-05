@@ -30,7 +30,7 @@ export default function Employees() {
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
   const [selectedEmployee, setSelectedEmployee] = useState<EmployeeWithRelations | null>(null);
-  const [whatsappConsentChanged, setWhatsAppConsentChanged] = useState(false);
+  const [employeeChanges, setEmployeeChanges] = useState<Partial<Record<keyof EmployeeFormState, boolean>>>({});
   const [isViewDialogOpen, setIsViewDialogOpen] = useState(false);
   const [viewEmployee, setViewEmployee] = useState<EmployeeWithRelations | null>(null);
   const [sortField, setSortField] = useState<SortField>('name');
@@ -106,7 +106,7 @@ export default function Employees() {
       const { data, error } = await api.update<EmployeeWithRelations>(
         'employees',
         selectedEmployee.id,
-        buildEmployeePayload(formData, whatsappConsentChanged),
+        buildEmployeePayload(formData, employeeChanges),
       );
 
       if (error) throw error;
@@ -193,7 +193,7 @@ export default function Employees() {
 
   const openEditDialog = (employee: EmployeeWithRelations) => {
     setSelectedEmployee(employee);
-    setWhatsAppConsentChanged(false);
+    setEmployeeChanges({});
     setFormData({
       name: employee.name,
       email: employee.email || '',
@@ -312,7 +312,7 @@ export default function Employees() {
   const [formData, setFormData] = useLastSubmissionState<EmployeeFormState>('employees', EMPTY_EMPLOYEE_FORM, isAddDialogOpen);
 
   const updateFormData = (patch: Partial<EmployeeFormState>) => {
-    if (isEditDialogOpen && 'whatsapp_notifications_enabled' in patch) setWhatsAppConsentChanged(true);
+    if (isEditDialogOpen) setEmployeeChanges(previous => ({ ...previous, ...Object.fromEntries(Object.keys(patch).map(key => [key, true])) }));
     setFormData(prev => ({ ...prev, ...patch }));
   };
 
