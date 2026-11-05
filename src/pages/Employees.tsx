@@ -18,7 +18,7 @@ import { EmployeeFormDialog } from '@/components/employees/EmployeeFormDialog';
 import { EmployeeViewDialogContent } from '@/components/employees/EmployeeViewDialogContent';
 import { EMPTY_EMPLOYEE_FORM } from '@/components/employees/employeeTypes';
 import type { EmployeeFormState } from '@/components/employees/employeeTypes';
-import { formatDateForInput, toEmployeeFlags } from '@/components/employees/employeeHelpers';
+import { buildEmployeePayload, formatDateForInput, toEmployeeFlags } from '@/components/employees/employeeHelpers';
 
 export default function Employees() {
   const [employees, setEmployees] = useState<EmployeeWithRelations[]>([]);
@@ -30,6 +30,7 @@ export default function Employees() {
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
   const [selectedEmployee, setSelectedEmployee] = useState<EmployeeWithRelations | null>(null);
+  const [whatsappConsentChanged, setWhatsAppConsentChanged] = useState(false);
   const [isViewDialogOpen, setIsViewDialogOpen] = useState(false);
   const [viewEmployee, setViewEmployee] = useState<EmployeeWithRelations | null>(null);
   const [sortField, setSortField] = useState<SortField>('name');
@@ -46,30 +47,6 @@ export default function Employees() {
       setSortDirection('asc');
     }
   };
-
-  /**
-   * Builds the payload sent to the API.
-   *
-   * Empty fields are sent as `null` on purpose: the server keeps a stored value
-   * when a key is absent, but clears it when the key is explicitly `null`.
-   */
-  const buildEmployeePayload = (formData: EmployeeFormState) => ({
-    name: formData.name,
-    email: formData.email || null,
-    mobile_no: formData.mobile_no || null,
-    whatsapp_notifications_enabled: formData.whatsapp_notifications_enabled,
-    position: formData.position || null,
-    hire_date: formData.hire_date || null,
-    birth_date: formData.birth_date || null,
-    civil_id_no: formData.civil_id_no || null,
-    residency_expiry_date: formData.residency_expiry_date || null,
-    driving_license: formData.driving_license,
-    driving_license_expiry_date: formData.driving_license
-      ? formData.driving_license_expiry_date || null
-      : null,
-    company_id: formData.company_id,
-    is_active: formData.is_active,
-  });
 
   const handleAddEmployee = async () => {
     if (!formData.name.trim() || !formData.company_id) {
@@ -129,7 +106,7 @@ export default function Employees() {
       const { data, error } = await api.update<EmployeeWithRelations>(
         'employees',
         selectedEmployee.id,
-        buildEmployeePayload(formData),
+        buildEmployeePayload(formData, whatsappConsentChanged),
       );
 
       if (error) throw error;
@@ -216,6 +193,7 @@ export default function Employees() {
 
   const openEditDialog = (employee: EmployeeWithRelations) => {
     setSelectedEmployee(employee);
+    setWhatsAppConsentChanged(false);
     setFormData({
       name: employee.name,
       email: employee.email || '',
@@ -334,6 +312,7 @@ export default function Employees() {
   const [formData, setFormData] = useLastSubmissionState<EmployeeFormState>('employees', EMPTY_EMPLOYEE_FORM, isAddDialogOpen);
 
   const updateFormData = (patch: Partial<EmployeeFormState>) => {
+    if (isEditDialogOpen && 'whatsapp_notifications_enabled' in patch) setWhatsAppConsentChanged(true);
     setFormData(prev => ({ ...prev, ...patch }));
   };
 
