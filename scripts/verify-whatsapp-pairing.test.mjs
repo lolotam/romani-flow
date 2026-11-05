@@ -18,6 +18,7 @@ import { createServer as createViteServer } from 'vite';
 import { stopRequestWork } from '../server/middleware/requestWork.ts';
 import { createReminderRuntime } from '../server/whatsapp/runtime.ts';
 import { whatsappPairing } from '../src/lib/api/whatsapp.ts';
+import { setSetting } from '../server/repositories/settings.ts';
 
 // Synthetic loopback provider only; no .env, production accounts or real QR scan.
 const PNG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jGDkAAAAASUVORK5CYII=';
@@ -388,3 +389,25 @@ test('a queued enable cannot slip between disconnect disable and provider logout
   assert.equal(f.mode.state,'close');assert.equal(f.calls.filter(call=>call.method==='DELETE').length,1);
  }finally{release();await held;await disconnect;}
 },{ROMANI_EVOLUTION_INSTANCE:'romani'},''));
+
+test('status keeps reporting connecting while a server-issued QR is valid, and connected wins', () => fixture(async f => {
+  assert.equal((await f.request('/api/whatsapp/connect', { method: 'POST', body: {} })).status, 200);
+  f.mode.state = 'close'; // the provider keeps reporting `close` while the QR is pending
+  assert.deepEqual((await f.request('/api/whatsapp/status')).json.data, { configured: true, state: 'connecting' });
+  f.mode.state = 'open';
+  assert.deepEqual((await f.request('/api/whatsapp/status')).json.data, { configured: true, state: 'connected' });
+  f.mode.state = 'close';
+  setSetting(f.db, 'system.whatsapp_pairing_pending_until', Date.now() - 1);
+  assert.deepEqual((await f.request('/api/whatsapp/status')).json.data, { configured: true, state: 'disconnected' });
+}));
+
+test('a pending QR is revoked by disconnect even when the window was opened by another process', () => fixture(async f => {
+  // Simulates a restart or another worker: the window exists only in the shared database.
+  setSetting(f.db, 'system.whatsapp_pairing_pending_until', Date.now() + 60_000);
+  f.mode.state = 'close';
+  const response = await f.request('/api/whatsapp/disconnect', { method: 'POST', body: {} });
+  assert.equal(response.status, 200);
+  assert.equal(response.json.data.state, 'disconnected');
+  assert.equal(f.calls.filter(call => call.method === 'DELETE').length, 1);
+  assert.deepEqual((await f.request('/api/whatsapp/status')).json.data, { configured: true, state: 'disconnected' });
+}));
