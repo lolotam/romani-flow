@@ -95,7 +95,8 @@ export function createBackupRouter(db: Db, documents: DocumentService, reminders
         // Audit/recipient configuration survive business erase; sending requires deliberate re-enable.
         setSetting(db, 'whatsapp.enabled', false);
         setSetting(db, 'whatsapp.last_enqueue_date', '');
-        reminders.reconcile();
+        db.prepare("UPDATE whatsapp_jobs SET state='cancelled',error_code='no_longer_eligible',updated_at=? WHERE instance=? AND state IN ('pending','retryable_failed','permanent_failed')")
+          .run(new Date().toISOString(), reminders.auditInstance);
 
         // The seed marker is written here as well: erasing the data must never
         // let the next boot import the seed and resurrect it.

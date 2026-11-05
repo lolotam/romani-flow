@@ -9,6 +9,11 @@ import type { DestinationReplacement } from './destinations.js';
 const FIELDS = ['instance', 'item_type', 'item_id', 'expiry_date', 'bucket', 'recipient', 'recipient_label', 'audience', 'item_name', 'owner_name', 'text'] as const;
 const SNAPSHOT = ['recipient_label', 'audience', 'item_name', 'owner_name', 'text'] as const;
 
+/** Date-independent lookup for prepared work at the previous destination. */
+function replacementKey(item: ReminderCandidate): string {
+  return JSON.stringify([item.instance, item.item_type, item.item_id, item.recipient]);
+}
+
 /** Savepoints also compose with an enclosing document/employee mutation transaction. */
 export function atomic<T>(db: Db, action: () => T): T {
   const name = `wa_${randomUUID().replaceAll('-', '')}`;
@@ -33,14 +38,15 @@ export class ReminderStore {
 
   private reconcileJobs(jobs: ReminderJob[], candidates: ReminderCandidate[], replacements: DestinationReplacement[]): void {
     const current = new Map(candidates.map(candidate => [reminderIdentity(candidate), candidate]));
-    const replaceable = new Set(jobs.filter(job => job.state !== 'permanent_failed' || isSafeUnsentFailure(job.error_code)).map(reminderIdentity));
+    const replaceable = new Set(jobs.filter(job => job.state !== 'permanent_failed' || isSafeUnsentFailure(job.error_code)).map(replacementKey));
     for (const job of jobs) {
       const candidate = current.get(reminderIdentity(job));
       if (!candidate) this.db.prepare("UPDATE whatsapp_jobs SET state='cancelled',error_code='no_longer_eligible',updated_at=? WHERE id=?").run(this.clock().toISOString(), job.id);
       else if (SNAPSHOT.some(key => job[key] !== candidate[key])) this.db.prepare(`UPDATE whatsapp_jobs SET ${SNAPSHOT.map(key => `${key}=?`).join(',')},updated_at=? WHERE id=?`)
         .run(...SNAPSHOT.map(key => candidate[key]), this.clock().toISOString(), job.id);
     }
-    this.admit(replacements.filter(pair => replaceable.has(reminderIdentity(pair.previous))).map(pair => pair.current));
+    // Match prepared work by source item and old destination, even after a date/bucket change.
+    this.admit(replacements.filter(pair => replaceable.has(replacementKey(pair.previous))).map(pair => pair.current));
   }
 
   enqueue(candidates: ReminderCandidate[]): number {
@@ -112,10 +118,11 @@ export class ReminderStore {
   }
 
   recover(): void {
+    if (!this.instance) return;
     atomic(this.db, () => {
       const now = this.clock().toISOString();
-      this.db.prepare("UPDATE whatsapp_attempts SET state='unknown',error_code='interrupted_restart',finished_at=? WHERE state='sending'").run(now);
-      this.db.prepare("UPDATE whatsapp_jobs SET state='unknown',error_code='interrupted_restart',updated_at=? WHERE state='sending'").run(now);
+      this.db.prepare("UPDATE whatsapp_attempts SET state='unknown',error_code='interrupted_restart',finished_at=? WHERE state='sending' AND job_id IN (SELECT id FROM whatsapp_jobs WHERE instance=?)").run(now, this.instance);
+      this.db.prepare("UPDATE whatsapp_jobs SET state='unknown',error_code='interrupted_restart',updated_at=? WHERE state='sending' AND instance=?").run(now, this.instance);
     });
   }
 

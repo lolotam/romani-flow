@@ -116,11 +116,25 @@ When a canonical destination gains or loses management status, recompute the win
 
 Owner decision (2026-11-04): a phone edit to an existing employee or management
 recipient replaces already-prepared unsent work for the same still-eligible
-item/expiry/bucket on the same day, atomically with cancellation. Never derive a
+source item immediately in the phone-edit transaction using its current eligible expiry/bucket, including
+combined phone/expiry edits and crossed buckets, atomically with cancellation. Never derive a
 replacement from accepted/unknown work. Pending/retryable and explicitly safe
 permanent failures qualify; new destinations remain subject to capacity and
 accepted/unknown identity suppression. This exception does not enqueue on a new
-audience/document, global enable or expiry change.
+audience/document, global enable or expiry-only change.
+
+"Same day" means no wait for the next scheduled selection, not a creation-date or
+calendar-window eligibility check. Older prepared safe jobs also qualify. Replacement
+uses the edit's current UTC clock for due-bucket evaluation. The daily enqueue
+checkpoint separately uses UTC dates, with a day spanning [00:00:00Z, next 00:00:00Z);
+crossing that boundary does not itself prevent immediate replacement.
+
+The recurring due lookup must use a state/due-time index rather than scan retained
+audit history. Migration `007_whatsapp_notifications.sql` already creates
+`whatsapp_due_jobs(state, next_attempt_at)` for the worker's state and due-time range;
+the query additionally filters its fixed instance and attempt limit. Preserve that
+index when evolving the schema; an instance-leading extension is a future optimization,
+not a missing-index correction or authorization to apply production DDL.
 
 The existing global `cron.last_run_date` cannot serve as a shared delivery-success flag. Keep email's current completion tracking; give WhatsApp enqueue a separate day checkpoint. The checkpoint controls selection work only; changing the day must not change logical job identity or resend accepted/unknown expired reminders. Evaluate both channels even if email is disabled, lacks recipients, fails or was already processed. A single worker checks due jobs every 60 seconds; this is transport retry processing, not a change to reminder cadence. Both channels disabled means no delivery. No unbounded queues or catch-up bursts. Admitted jobs and the enqueue checkpoint commit in the same outer SQLite transaction; the checkpoint advances only after admitted inserts succeed, with uniqueness making reruns idempotent.
 
@@ -144,7 +158,7 @@ Insert the attempt and mark `sending` before network I/O. Accept success only wi
 
 Permanent failures do not retry automatically. After correction and current-eligibility reconciliation, an administrator may explicitly retry only the pinned pre-handler `provider_unauthorized` or local zero-fetch `invalid_text` and `whatsapp_not_configured` codes, still within four attempts and queue capacity. Unknown, accepted, cancelled and unclassified remote failures remain ineligible for manual resend. The log shows translated allowlisted reasons and generic copy for an unrecognized code, never raw provider text.
 
-Network timeout/reset after handoff, malformed ambiguous success, or process restart while `sending` becomes `unknown`: do not blindly resend. Evolution acceptance can precede a lost response. Exactly-once external delivery is not promised; v1 favors visible uncertainty over automatic duplicates. Never manufacture success or handset delivery. Disconnected instances defer pending jobs without consuming send attempts; revalidate current eligibility on reconnect without inventing daily identities.
+Network timeout/reset after handoff, malformed ambiguous success, or process restart while `sending` becomes `unknown`: do not blindly resend. While WhatsApp runtime configuration is invalid, a restart leaves `sending` rows unchanged because no worker/recovery runs; those rows become `unknown` when a valid runtime starts recovery in its own namespace. Evolution acceptance can precede a lost response. Exactly-once external delivery is not promised; v1 favors visible uncertainty over automatic duplicates. Never manufacture success or handset delivery. Disconnected instances defer pending jobs without consuming send attempts; revalidate current eligibility on reconnect without inventing daily identities.
 
 ## 11. API boundary
 
@@ -166,6 +180,11 @@ Global WhatsApp enable is written through the existing validated administrator s
 Shared logging prerequisite: the Curemed manager owns the approved LOG_LEVEL patch/reload. SA accepted the Q8 execution verification receipt, SHA256 `262fd084465a61b891ab219f7178cf5caf9d332dcbbbeed3d3c381d7434dd813`; this satisfies the logging execution gate and is operator evidence, not a Romani server rerun. Holder QR has been separately authorized; its scan/open receipt remains pending. Keep webhooks off until that receipt, then perform connection-only webhook activation and scoped smoke as separate gated steps. The native query-override isolation gate remains open before any live send. Local reminder work uses loopback fixtures only; no live messaging is authorized here.
 
 ## 12. Acceptance and rollout
+
+Before live sending, require verified HTTPS or an explicitly owner-approved dedicated-network
+isolation disposition with runtime proof. Operator approval of a plain HTTP URL alone is insufficient.
+The private encrypted overlay maintenance receipt is separate from application release approval;
+native query-override isolation and the remaining release gates must still be satisfied.
 
 | ID | Required proof |
 | --- | --- |

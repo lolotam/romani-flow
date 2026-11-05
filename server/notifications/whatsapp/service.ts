@@ -10,6 +10,7 @@ import { changedDestinations, snapshotDestinations, type DestinationSnapshot } f
 export class WhatsAppReminders {
   readonly coordinator = new NotificationCoordinator();
   readonly store: ReminderStore;
+  readonly auditInstance: string;
   private timer: ReturnType<typeof setInterval> | null = null;
   private draining: Promise<number> | null = null;
   private stopped = false;
@@ -18,6 +19,8 @@ export class WhatsAppReminders {
   constructor(readonly db: Db, readonly instance: string, private readonly transport: WhatsAppTransport,
     readonly clock: () => Date = () => new Date()) {
     this.store = new ReminderStore(db, instance, clock);
+    // Invalid sending configuration must not hide this backend's existing audit.
+    this.auditInstance = instance || 'romani';
   }
 
   /** Call inside the business write's transaction and the shared coordinator. */
@@ -97,7 +100,7 @@ export class WhatsAppReminders {
     for (const pending of this.store.due(10)) {
       if (this.stopped) break;
       await this.coordinator.runExclusive(async () => {
-        atomic(this.db, () => this.store.reconcileClaim(pending.id, selectReminders(this.db, this.instance, this.clock())));
+        atomic(this.db, () => this.store.reconcileClaim(pending.id, selectReminders(this.db, this.instance, this.clock(), pending)));
         if (this.stopped || !getBoolean(this.db, 'whatsapp.enabled')) return;
         const claim = this.store.claim(pending.id);
         if (!claim) return;
@@ -112,7 +115,7 @@ export class WhatsAppReminders {
   }
 
   start(): void {
-    if (this.timer) return;
+    if (this.timer || !this.instance) return;
     this.stopped = false;
     this.store.recover();
     this.timer = setInterval(() => {

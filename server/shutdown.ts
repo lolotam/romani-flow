@@ -7,6 +7,7 @@ interface ShutdownOptions {
   server: Server;
   stopReminders: () => Promise<void>;
   stopCron: () => Promise<void>;
+  stopHandlers: () => Promise<void>;
   closeDatabase: () => void;
   exit: (code: number) => void;
 }
@@ -17,11 +18,13 @@ export async function drainApplication(options: ShutdownOptions): Promise<void> 
   // Stop new claims synchronously, before waiting for active HTTP requests.
   const remindersStopped = options.stopReminders();
   const cronStopped = options.stopCron();
+  const handlersStopped = options.stopHandlers();
   const httpClosed = new Promise<void>((resolve, reject) => {
     options.server.close(error => error ? reject(error) : resolve());
   });
   try {
-    await Promise.all([remindersStopped, cronStopped, httpClosed]);
+    const drains = await Promise.allSettled([remindersStopped, cronStopped, handlersStopped, httpClosed]);
+    if (drains.some(result => result.status === 'rejected')) throw new Error('Drain failed');
     options.closeDatabase();
     options.exit(0);
   } catch {

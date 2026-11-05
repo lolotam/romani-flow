@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useAuth } from './useAuth';
 import { ApiRequestError, request, type ApiEnvelope } from '@/lib/api/http';
-import { whatsappReminders, type WhatsAppRecipient, type WhatsAppLogItem, type WhatsAppLogFilter } from '@/lib/api/whatsapp';
+import type { WhatsAppRecipient, WhatsAppLogItem, WhatsAppLogFilter } from '@/lib/api/whatsapp';
+import { loadWhatsAppReminderSettings } from '@/lib/api/whatsappSettings';
 
 export function useWhatsAppSettings() {
   const { user } = useAuth();
@@ -12,24 +13,20 @@ export function useWhatsAppSettings() {
   const [filter, setFilter] = useState<WhatsAppLogFilter>({});
   const [recipients, setRecipients] = useState<WhatsAppRecipient[]>([]), [recipientTotal, setRecipientTotal] = useState(0);
   const [log, setLog] = useState<WhatsAppLogItem[]>([]), [logTotal, setLogTotal] = useState(0);
-  const [enabled, setEnabled] = useState(false), [busy, setBusy] = useState(false), [error, setError] = useState('');
+  const [enabled, setEnabled] = useState<boolean | null>(null), [busy, setBusy] = useState(false), [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
 
   const load = useCallback(async (signal?: AbortSignal) => {
     if (!identity) return;
     setLoading(true);
+    setEnabled(null);
     const version = ++generation.current;
-    const results = await Promise.all([
-      whatsappReminders.recipients(recipientOffset, signal), whatsappReminders.log(filter, signal),
-      request<{ settings: Record<string, unknown> }>('/api/settings', { signal }),
-    ]);
+    const results = await loadWhatsAppReminderSettings(recipientOffset, filter, signal);
     if (signal?.aborted || active.current !== identity || generation.current !== version) return;
     setLoading(false);
-    const [people, jobs, settings] = results;
-    if (results.some(result => result.error)) { setError('failed'); return; }
-    setRecipients(people.data?.items ?? []); setRecipientTotal(people.data?.total ?? 0);
-    setLog(jobs.data?.items ?? []); setLogTotal(jobs.data?.total ?? 0);
-    setEnabled(settings.data?.settings['whatsapp.enabled'] === true); setError('');
+    setRecipients(results.people?.items ?? []); setRecipientTotal(results.people?.total ?? 0);
+    setLog(results.jobs?.items ?? []); setLogTotal(results.jobs?.total ?? 0);
+    setEnabled(results.enabled); setError(results.failed ? 'failed' : '');
   }, [identity, recipientOffset, filter]);
   const latestLoad = useRef(load);
   useEffect(() => { latestLoad.current = load; }, [load]);
@@ -56,6 +53,6 @@ export function useWhatsAppSettings() {
   };
 
   return { recipients, recipientTotal, recipientOffset, setRecipientOffset, log, logTotal, filter, setFilter,
-    enabled, busy, loading, error, act, reload: () => void load(),
-    setEnabled: (value: boolean) => act(() => request('/api/settings', { method: 'PUT', body: { settings: { 'whatsapp.enabled': value } } })) };
+    enabled: active.current === identity ? enabled : null, busy, loading, error, act, reload: () => void load(),
+    setEnabled: (value: boolean) => enabled === null ? Promise.resolve(false) : act(() => request('/api/settings', { method: 'PUT', body: { settings: { 'whatsapp.enabled': value } } })) };
 }
