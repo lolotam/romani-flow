@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -54,9 +54,16 @@ function EmployeeDocumentFormContent({
   const { stageFile, clearUpload } = useStagedDocumentUpload();
   const submitting = useRef(false);
   
-  const [formData, setFormData] = useState(emptyForm);
+  const [formData, commitFormData] = useState(emptyForm);
+  const latestForm = useRef(emptyForm);
+  const setFormData = useCallback((update: React.SetStateAction<typeof emptyForm>) => {
+    const next = typeof update === 'function' ? update(latestForm.current) : update;
+    latestForm.current = next;
+    commitFormData(next);
+  }, []);
   const dirty = useRef(false);
   const draft = useDocumentDraft('employee:' + employeeId, saved => {
+    dirty.current = false;
     setFormData(employeeDocumentDraft(saved, uploadedFile?.name));
   }, isOpen);
   useEffect(() => { if (isOpen) dirty.current = false; }, [isOpen, employeeId]);
@@ -95,12 +102,10 @@ function EmployeeDocumentFormContent({
 
   const editForm = (patch: Partial<typeof emptyForm>) => {
     dirty.current = true;
-    setFormData(current => ({ ...current, ...patch }));
+    const next = { ...latestForm.current, ...patch };
+    setFormData(next);
+    draft.session.current?.change(draftValues(next));
   };
-
-  useEffect(() => {
-    if (dirty.current) draft.session.current?.change(draftValues(formData));
-  }, [formData, draft.session]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -148,7 +153,6 @@ function EmployeeDocumentFormContent({
       onSave();
       onClose();
     } catch (error) {
-      clearUpload();
       draft.session.current?.resume(error);
       console.error('Error saving document:', error);
       toast.error(error instanceof Error ? error.message : t('documents.employeeDocumentForm.saveError'));

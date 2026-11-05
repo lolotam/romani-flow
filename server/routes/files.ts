@@ -40,6 +40,13 @@ export function createFilesRouter(
 ): Router {
   const router = Router();
 
+  router.post('/uploads/:uploadId/validate', requireAdmin, asyncHandler(async (req, res) => {
+    res.setHeader('Cache-Control', 'no-store');
+    const ref = draftReference(req.body?.draft);
+    const upload = await documents.validateStagedUpload(String(req.params.uploadId), () => assertCurrentDraft(db, req.user!.id, ref));
+    res.json({ data: { upload_id: upload.uploadId }, error: null });
+  }));
+
   const upload = multer({
     storage: multer.memoryStorage(),
     limits: { fileSize: config.maxUploadBytes, files: 20 },

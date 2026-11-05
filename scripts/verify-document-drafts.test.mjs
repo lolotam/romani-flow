@@ -350,3 +350,27 @@ for(const failure of ['second-file','registration']) test('staging rolls back al
  assert.equal(f.db.prepare('SELECT count(*) n FROM pending_uploads').get().n,0);
  assert.ok(paths.length);for(const path of paths)assert.equal(f.storage.exists(path),false);
 }));
+
+for(const registrationFails of [false,true]) test('failed unlink keeps cleanup tracking and preserves staging error '+registrationFails,t=>reminderApi(async f=>{
+ const original=f.storage.save.bind(f.storage);let writes=0;const paths=[];
+ t.mock.method(f.storage,'save',async(...args)=>{if(writes++)throw Error('Original staging failure');const saved=await original(...args);paths.push(saved.relativePath);return saved;});
+ const remove=t.mock.method(f.storage,'remove',async()=>{throw Error('Synthetic unlink failure');});
+ if(registrationFails)f.db.exec("CREATE TRIGGER reject_pending BEFORE INSERT ON pending_uploads BEGIN SELECT RAISE(ABORT,'Original registration failure'); END;");
+ const file={buffer:Buffer.from('synthetic'),originalname:'fixture.pdf',mimetype:'application/pdf'};
+ await assert.rejects(f.documents.stageUploads([file,file]),registrationFails?/Original registration/:/Original staging/);
+ assert.equal(f.db.prepare('SELECT count(*) n FROM upload_cleanup_queue').get().n,1);assert.equal(f.storage.exists(paths[0]),true);
+ remove.mock.restore();await f.documents.purgeStaleUploads();
+ assert.equal(f.db.prepare('SELECT count(*) n FROM upload_cleanup_queue').get().n,0);assert.equal(f.storage.exists(paths[0]),false);
+}));
+test('pending upload validation follows the current draft without reuploading and denies stale or viewer requests',()=>reminderApi(async f=>{
+ const api=transport(f);let saved=await api(url('new'),{method:'PUT',body:{revision:'none',values:{title:'First'}}});
+ const [upload]=await f.documents.stageUploads([{buffer:Buffer.from('synthetic'),originalname:'fixture.pdf',mimetype:'application/pdf'}]);
+ const endpoint='/api/files/uploads/'+upload.uploadId+'/validate';const old=ref('new',saved.data.revision);
+ saved=await api(url('new'),{method:'PUT',body:{revision:saved.data.revision,values:{title:'Corrected'}}});
+ assert.equal((await f.request(endpoint,{method:'POST',body:{draft:old}})).status,409);
+ assert.equal((await f.request(endpoint,{method:'POST',role:'viewer',body:{draft:ref('new',saved.data.revision)}})).status,403);
+ assert.equal((await f.request(endpoint,{method:'POST',body:{draft:ref('new',saved.data.revision)}})).status,200);
+ assert.equal(f.db.prepare('SELECT count(*) n FROM pending_uploads').get().n,1);
+ f.db.prepare('DELETE FROM pending_uploads WHERE id=?').run(upload.uploadId);
+ assert.equal((await f.request(endpoint,{method:'POST',body:{draft:ref('new',saved.data.revision)}})).status,404);
+}));

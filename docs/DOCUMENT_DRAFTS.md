@@ -21,3 +21,9 @@ No WhatsApp/email activation, sending, environment change or production migratio
 Closing after a draft failure/conflict offers an explicit confirmation before discarding unsaved local changes; the last server draft remains. A failed document-save CAS keeps prepared metadata and exposes the conflict. Concurrent discard clicks share one operation. Business erase also rotates an epoch for never-written scopes, so an old first-write reference is rejected. Custom entity names are limited to 100 characters consistently in the input, form schema and draft API.
 
 Uploads from draft-enabled forms carry the account/revision reference and stage under the erase coordinator. Stale references fail before file I/O. Custom ministries are resolved inside the document transaction, so a stale draft failure also rolls back their creation. Save & Add Next reloads the post-commit tombstone before accepting the next draft. Save controls wait for draft loading, while Cancel remains available. Proven client-side/API validation failures leave the already-durable draft saved; unknown save outcomes are shown as failed. Legacy notes over 5000 characters receive explicit form validation rather than a hidden draft-only failure.
+
+## Upload retries and failed cleanup
+
+An open form retains its staged upload after a failed document save. Reuse validates the current account/draft revision and confirms the upload is still pending; a consumed or missing upload is staged again. No file path is accepted from the browser.
+
+Migration008 also adds upload_cleanup_queue. Failed staging cleanup retains paths there even when pending-upload registration failed. A cleanup pass removes tracking only after the file is removed or confirmed absent; failed removals remain retryable. DocumentService.purgeStaleUploads is asynchronous and returns the number of paths cleaned, including queued rollback work. The release does not claim an automatically scheduled cleanup pass.

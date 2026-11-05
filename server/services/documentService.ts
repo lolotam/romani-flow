@@ -65,11 +65,38 @@ export class DocumentService {
       }
       return uploads;
       } catch (error) {
-        for (const upload of uploads) this.db.prepare('DELETE FROM pending_uploads WHERE id=?').run(upload.uploadId);
-        await Promise.all(paths.map(path => this.storage.remove(path)));
+        for (const path of paths) {
+          try { this.db.prepare('INSERT OR IGNORE INTO upload_cleanup_queue(file_path,created_at) VALUES(?,?)').run(path, new Date().toISOString()); }
+          catch { console.error('[uploads] could not record cleanup work'); }
+        }
+        await this.cleanupPaths(paths);
         throw error;
       }
     });
+  }
+
+  /** Reuse a still-pending upload only after validating the current draft. */
+  validateStagedUpload(uploadId: string, guard: () => void): Promise<StoredUpload> {
+    return this.serialize(async () => {
+      guard();
+      const upload = this.resolveUpload(uploadId);
+      if (!upload || !this.storage.exists(upload.filePath)) throw new RepositoryError('Upload is no longer pending.', 'invalid_upload', 404);
+      return upload;
+    });
+  }
+
+  /** Failed removals retain durable tracking and never hide the staging error. */
+  private async cleanupPaths(paths: string[]): Promise<number> {
+    let removed = 0;
+    for (const path of paths) {
+      try {
+        await this.storage.remove(path);
+        this.db.prepare('DELETE FROM pending_uploads WHERE file_path=?').run(path);
+        this.db.prepare('DELETE FROM upload_cleanup_queue WHERE file_path=?').run(path);
+        removed++;
+      } catch { console.error('[uploads] cleanup deferred'); }
+    }
+    return removed;
   }
 
   /** Records a freshly uploaded file so a record can claim it. */
@@ -330,17 +357,15 @@ export class DocumentService {
   }
 
   /** Removes staged uploads that were never claimed. */
-  purgeStaleUploads(olderThanHours = 24): number {
+  purgeStaleUploads(olderThanHours = 24): Promise<number> {
+    return this.serialize(() => {
     const cutoff = new Date(Date.now() - olderThanHours * 3600_000).toISOString();
     const rows = this.db
       .prepare('SELECT file_path FROM pending_uploads WHERE created_at < ?')
       .all(cutoff) as Row[];
 
-    for (const row of rows) {
-      void this.storage.remove(String(row.file_path));
-    }
-
-    this.db.prepare('DELETE FROM pending_uploads WHERE created_at < ?').run(cutoff);
-    return rows.length;
+    const queued = this.db.prepare('SELECT file_path FROM upload_cleanup_queue').all() as Row[];
+    return this.cleanupPaths([...new Set([...rows, ...queued].map(row => String(row.file_path)))]);
+    });
   }
 }

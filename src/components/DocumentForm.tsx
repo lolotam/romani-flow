@@ -133,7 +133,6 @@ function DocumentFormContent({
       else onClose();
       return true;
     } catch (error) {
-      clearUpload();
       draft.session.current?.resume(error);
       console.error(t('documents.messages.consoleError') + ':', error);
       toast.error(error instanceof Error ? error.message : t('documents.messages.error'));
