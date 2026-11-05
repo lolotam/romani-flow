@@ -88,6 +88,7 @@ export class DocumentDraftSession {
   }
 
   async prepare(values: DraftValues): Promise<DraftReference> {
+    if (this.discarding) await this.discarding;
     if (!this.ready) throw new Error('Wait for the draft to load before saving.');
     this.change(values);
     await this.flush();

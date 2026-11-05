@@ -11,6 +11,21 @@ import { createDocumentSchema } from '../src/components/documents/documentFormSc
 import fs from 'node:fs';
 import path from 'node:path';
 
+test('save preparation waits for discard and persists the new values', () => reminderApi(async f => {
+  const api = transport(f); let release;
+  const gate = new Promise(resolve => { release = resolve; });
+  const session = new DocumentDraftSession('new', () => {}, () => {}, async (path, options) => {
+    if (options?.method === 'DELETE') { const result = await api(path, options); await gate; return result; }
+    return api(path, options);
+  });
+  await session.flush(); session.change({ title: 'Before discard' }); await session.flush();
+  const discard = session.discard(), save = session.prepare({ title: 'After discard' });
+  release(); await discard; const prepared = await save;
+  const stored = await api(url('new'));
+  assert.equal(stored.data.values.title, 'After discard'); assert.equal(stored.data.revision, prepared.revision);
+  session.committed(); session.dispose();
+}));
+
 test('actual form preview components render authenticated PDF/image sources and keep fixed company selection disabled', async () => {
   const vite = await createServer({ server: { middlewareMode: true, hmr: false }, appType: 'custom', logLevel: 'error' });
   try {
@@ -325,3 +340,13 @@ test('file-derived titles fit drafts while existing titles remain visible for ex
  assert.equal(employeeDocumentDraft(null,name).title.length,120);
  assert.equal(employeeDocumentDraft({title:'y'.repeat(130)},name).title.length,130);
 });
+
+for(const failure of ['second-file','registration']) test('staging rolls back all artifacts after '+failure, t=>reminderApi(async f=>{
+ const original=f.storage.save.bind(f.storage);const paths=[];
+ t.mock.method(f.storage,'save',async(...args)=>{if(failure==='second-file'&&paths.length)throw Error('Synthetic disk error');const stored=await original(...args);paths.push(stored.relativePath);return stored;});
+ if(failure==='registration')f.db.exec("CREATE TRIGGER reject_pending BEFORE INSERT ON pending_uploads BEGIN SELECT RAISE(ABORT,'Synthetic registration error'); END;");
+ const file={buffer:Buffer.from('synthetic'),originalname:'synthetic.pdf',mimetype:'application/pdf'};
+ await assert.rejects(f.documents.stageUploads([file,file]));
+ assert.equal(f.db.prepare('SELECT count(*) n FROM pending_uploads').get().n,0);
+ assert.ok(paths.length);for(const path of paths)assert.equal(f.storage.exists(path),false);
+}));

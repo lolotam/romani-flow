@@ -56,11 +56,19 @@ export class DocumentService {
     return this.serialize(async () => {
       guard?.();
       const uploads: StoredUpload[] = [];
+      const paths: string[] = [];
+      try {
       for (const file of files) {
         const stored = await this.storage.save(file.buffer, file.originalname, file.mimetype);
+        paths.push(stored.relativePath);
         uploads.push(this.registerUpload({ fileName: stored.fileName, filePath: stored.relativePath, fileSize: stored.size, mimeType: stored.mimeType }));
       }
       return uploads;
+      } catch (error) {
+        for (const upload of uploads) this.db.prepare('DELETE FROM pending_uploads WHERE id=?').run(upload.uploadId);
+        await Promise.all(paths.map(path => this.storage.remove(path)));
+        throw error;
+      }
     });
   }
 

@@ -95,14 +95,17 @@ function EmployeeDocumentFormContent({
 
   const editForm = (patch: Partial<typeof emptyForm>) => {
     dirty.current = true;
-    const next = { ...formData, ...patch };
-    setFormData(next);
-    draft.session.current?.change(draftValues(next));
+    setFormData(current => ({ ...current, ...patch }));
   };
+
+  useEffect(() => {
+    if (dirty.current) draft.session.current?.change(draftValues(formData));
+  }, [formData, draft.session]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (submitting.current) return;
+    if (!uploadedFile) { toast.error(t('documents.employeeDocumentForm.requiredFieldsError')); return; }
     
     if (!formData.title || !formData.document_type_id) {
       toast.error(t('documents.employeeDocumentForm.requiredFieldsError'));
@@ -145,6 +148,7 @@ function EmployeeDocumentFormContent({
       onSave();
       onClose();
     } catch (error) {
+      clearUpload();
       draft.session.current?.resume(error);
       console.error('Error saving document:', error);
       toast.error(error instanceof Error ? error.message : t('documents.employeeDocumentForm.saveError'));
