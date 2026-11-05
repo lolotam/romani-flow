@@ -50,9 +50,14 @@ test('missing employee PATCH returns 404 before WhatsApp validation or write hoo
  assert.equal(f.db.prepare('SELECT total_changes() n').get().n,before);assert.equal(f.calls.length,0);
 }));
 
-test('restart with invalid local configuration cannot admit jobs, replacements or a daily checkpoint',()=>loopbackEvolution(async e=>reminderApi(async f=>{
+for(const initialState of ['pending','permanent_failed'])test(`invalid configuration preserves ${initialState} history without admission or usable retries`,()=>loopbackEvolution(async e=>reminderApi(async f=>{
  await f.request('/api/employees/'+f.employee.id,{method:'PATCH',body:{whatsapp_notifications_enabled:true,residency_expiry_date:null}});
  await f.reminders.schedule();const original=f.db.prepare('SELECT * FROM whatsapp_jobs ORDER BY id').all();assert.equal(original.length,1);
+ if(initialState==='permanent_failed'){
+  const failed=f.reminders.store.claim(original[0].id);f.reminders.store.finish(failed.job,failed.attemptId,{kind:'permanent_failed',code:'invalid_text'});
+ }
+ const retained=f.db.prepare('SELECT * FROM whatsapp_jobs ORDER BY id').all();
+ assert.equal((await f.request('/api/whatsapp/log')).json.data.items[0].retry_allowed,initialState==='permanent_failed');
  f.db.prepare("DELETE FROM settings WHERE key='whatsapp.last_enqueue_date'").run();
  for(const config of [{...e.config,instance:'romani_test'},{...e.config,url:e.config.url+'/prefix'}]){
   const invalid=createReminderRuntime(f.db,config);assert.equal(invalid.instance,'');
@@ -66,9 +71,13 @@ test('restart with invalid local configuration cannot admit jobs, replacements o
    const response=await fetch('http://127.0.0.1:'+server.address().port+'/api/whatsapp/log',{headers:{cookie}});
    assert.equal(response.status,200);const audit=(await response.json()).data;
    assert.equal(audit.total,original.length);assert.deepEqual(audit.items.map(job=>job.id),original.map(job=>job.id));
+   assert.ok(audit.items.every(job=>job.retry_allowed===false));
+   const before=f.db.prepare('SELECT total_changes() n').get().n;
+   const retry=await fetch('http://127.0.0.1:'+server.address().port+'/api/whatsapp/jobs/'+original[0].id+'/retry',{method:'POST',headers:{cookie}});
+   assert.equal(retry.status,409);assert.equal(f.db.prepare('SELECT total_changes() n').get().n,before);
   }finally{server.closeAllConnections();await new Promise(resolve=>server.close(resolve));}
   assert.equal(f.db.prepare("SELECT value FROM settings WHERE key='whatsapp.last_enqueue_date'").get(),undefined);
-  assert.deepEqual(f.db.prepare('SELECT * FROM whatsapp_jobs ORDER BY id').all(),original);
+  assert.deepEqual(f.db.prepare('SELECT * FROM whatsapp_jobs ORDER BY id').all(),retained);
  }
  assert.equal(e.requests.length,0);assert.equal(e.sends.length,0);
  const corrected=createReminderRuntime(f.db,e.config);assert.equal(await corrected.schedule(),1);

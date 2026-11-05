@@ -128,8 +128,8 @@ test('owner phone edit replaces even older eligible unsent work on the edit day,
  await f.request(employeePath,{method:'PATCH',body:{whatsapp_notifications_enabled:true,residency_expiry_date:null}});
  await f.reminders.schedule();
  const first=f.db.prepare('SELECT id FROM whatsapp_jobs').get().id;
- f.clock.now=new Date('2026-01-03T10:00:00Z');
- for(const phone of [MANAGER_PHONE,EMPLOYEE_PHONE]){
+ for(const [phone,at] of [[MANAGER_PHONE,'2026-01-03T23:59:59.999Z'],[EMPLOYEE_PHONE,'2026-01-04T00:00:00.000Z']]){
+  f.clock.now=new Date(at);
   assert.equal((await f.request(employeePath,{method:'PATCH',body:{mobile_no:phone}})).status,200);
   const pending=f.db.prepare("SELECT recipient FROM whatsapp_jobs WHERE state='pending'").all();
   assert.deepEqual(pending.map(row=>row.recipient),[phone]);

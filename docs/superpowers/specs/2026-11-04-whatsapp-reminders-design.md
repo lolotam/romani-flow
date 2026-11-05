@@ -116,12 +116,25 @@ When a canonical destination gains or loses management status, recompute the win
 
 Owner decision (2026-11-04): a phone edit to an existing employee or management
 recipient replaces already-prepared unsent work for the same still-eligible
-source item on the same day using its current eligible expiry/bucket, including
+source item immediately in the phone-edit transaction using its current eligible expiry/bucket, including
 combined phone/expiry edits and crossed buckets, atomically with cancellation. Never derive a
 replacement from accepted/unknown work. Pending/retryable and explicitly safe
 permanent failures qualify; new destinations remain subject to capacity and
 accepted/unknown identity suppression. This exception does not enqueue on a new
 audience/document, global enable or expiry-only change.
+
+"Same day" means no wait for the next scheduled selection, not a creation-date or
+calendar-window eligibility check. Older prepared safe jobs also qualify. Replacement
+uses the edit's current UTC clock for due-bucket evaluation. The daily enqueue
+checkpoint separately uses UTC dates, with a day spanning [00:00:00Z, next 00:00:00Z);
+crossing that boundary does not itself prevent immediate replacement.
+
+The recurring due lookup must use a state/due-time index rather than scan retained
+audit history. Migration `007_whatsapp_notifications.sql` already creates
+`whatsapp_due_jobs(state, next_attempt_at)` for the worker's state and due-time range;
+the query additionally filters its fixed instance and attempt limit. Preserve that
+index when evolving the schema; an instance-leading extension is a future optimization,
+not a missing-index correction or authorization to apply production DDL.
 
 The existing global `cron.last_run_date` cannot serve as a shared delivery-success flag. Keep email's current completion tracking; give WhatsApp enqueue a separate day checkpoint. The checkpoint controls selection work only; changing the day must not change logical job identity or resend accepted/unknown expired reminders. Evaluate both channels even if email is disabled, lacks recipients, fails or was already processed. A single worker checks due jobs every 60 seconds; this is transport retry processing, not a change to reminder cadence. Both channels disabled means no delivery. No unbounded queues or catch-up bursts. Admitted jobs and the enqueue checkpoint commit in the same outer SQLite transaction; the checkpoint advances only after admitted inserts succeed, with uniqueness making reruns idempotent.
 
