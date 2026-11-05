@@ -13,7 +13,7 @@ import {api} from '../src/lib/api/client.ts';
 import {buildEmployeePayload} from '../src/components/employees/employeeHelpers.ts';
 import {EMPTY_EMPLOYEE_FORM} from '../src/components/employees/employeeTypes.ts';
 
-test('stale metadata forms preserve another admin consent change unless the switch was explicitly edited',t=>reminderApi(async f=>{
+test('stale metadata forms preserve another admin consent and destination changes unless explicitly edited',t=>reminderApi(async f=>{
  f.db.prepare("INSERT INTO admin_users(id,email,name,role,password_hash,created_at,updated_at) VALUES('second-admin','second@example.invalid','Synthetic','admin','unused','2026-01-01','2026-01-01')").run();
  const cookie=f.config.cookieName+'='+signSession(f.config,{id:'second-admin',role:'admin',name:'Synthetic',email:'second@example.invalid'});
  const nativeFetch=globalThis.fetch;
@@ -30,17 +30,41 @@ test('stale metadata forms preserve another admin consent change unless the swit
    assert.equal((await f.request('/api/whatsapp/recipients/'+id,{method:'PATCH',body:{enabled:!stale}})).status,200);
    assert.equal((await whatsappReminders.saveRecipient({...snapshot,label:'Changed label'},id)).error,null);
    assert.equal(f.db.prepare('SELECT enabled FROM whatsapp_recipients WHERE id=?').get(id).enabled,Number(!stale));
-   assert.equal((await whatsappReminders.saveRecipient(snapshot,id,true)).error,null);
+   assert.equal((await whatsappReminders.saveRecipient(snapshot,id,{enabled:true})).error,null);
    assert.equal(f.db.prepare('SELECT enabled FROM whatsapp_recipients WHERE id=?').get(id).enabled,Number(stale));
 
    assert.equal((await f.request('/api/employees/'+f.employee.id,{method:'PATCH',body:{whatsapp_notifications_enabled:stale}})).status,200);
    const form={...EMPTY_EMPLOYEE_FORM,...f.employee,name:'Changed name',whatsapp_notifications_enabled:stale};
    assert.equal((await f.request('/api/employees/'+f.employee.id,{method:'PATCH',body:{whatsapp_notifications_enabled:!stale}})).status,200);
-   assert.equal((await api.update('employees',f.employee.id,buildEmployeePayload(form,false))).error,null);
+   assert.equal((await api.update('employees',f.employee.id,buildEmployeePayload(form,{name:true}))).error,null);
    assert.equal(f.db.prepare('SELECT whatsapp_notifications_enabled FROM employees WHERE id=?').get(f.employee.id).whatsapp_notifications_enabled,Number(!stale));
-   assert.equal((await api.update('employees',f.employee.id,buildEmployeePayload(form,true))).error,null);
+   assert.equal((await api.update('employees',f.employee.id,buildEmployeePayload(form,{whatsapp_notifications_enabled:true}))).error,null);
    assert.equal(f.db.prepare('SELECT whatsapp_notifications_enabled FROM employees WHERE id=?').get(f.employee.id).whatsapp_notifications_enabled,Number(stale));
   }
+  for(const [oldPhone,newPhone] of [[MANAGER_PHONE,'+99900000003'],['+99900000003',MANAGER_PHONE]]){
+   assert.equal((await f.request('/api/whatsapp/recipients/'+id,{method:'PATCH',body:{phone:oldPhone,enabled:true}})).status,200);
+   const snapshot={label:'Changed label',phone:oldPhone,enabled:true};
+   assert.equal((await f.request('/api/whatsapp/recipients/'+id,{method:'PATCH',body:{phone:newPhone}})).status,200);
+   assert.equal((await whatsappReminders.saveRecipient(snapshot,id,{label:true})).error,null);
+   assert.equal(f.db.prepare('SELECT phone FROM whatsapp_recipients WHERE id=?').get(id).phone,newPhone);
+   assert.equal((await whatsappReminders.saveRecipient(snapshot,id,{phone:true})).error,null);
+   assert.equal(f.db.prepare('SELECT phone FROM whatsapp_recipients WHERE id=?').get(id).phone,oldPhone);
+
+   assert.equal((await f.request('/api/employees/'+f.employee.id,{method:'PATCH',body:{mobile_no:oldPhone,whatsapp_notifications_enabled:true}})).status,200);
+   const form={...EMPTY_EMPLOYEE_FORM,...f.employee,name:'Changed name',mobile_no:oldPhone,whatsapp_notifications_enabled:true};
+   assert.equal((await f.request('/api/employees/'+f.employee.id,{method:'PATCH',body:{mobile_no:newPhone}})).status,200);
+   assert.equal((await api.update('employees',f.employee.id,buildEmployeePayload(form,{name:true}))).error,null);
+   assert.equal(f.db.prepare('SELECT mobile_no FROM employees WHERE id=?').get(f.employee.id).mobile_no,newPhone);
+   assert.equal((await api.update('employees',f.employee.id,buildEmployeePayload(form,{mobile_no:true}))).error,null);
+   assert.equal(f.db.prepare('SELECT mobile_no FROM employees WHERE id=?').get(f.employee.id).mobile_no,oldPhone);
+  }
+  const cleared={...EMPTY_EMPLOYEE_FORM,...f.employee,mobile_no:'',whatsapp_notifications_enabled:false};
+  assert.equal((await api.update('employees',f.employee.id,buildEmployeePayload(cleared,{mobile_no:true,whatsapp_notifications_enabled:true}))).error,null);
+  assert.equal(f.db.prepare('SELECT mobile_no FROM employees WHERE id=?').get(f.employee.id).mobile_no,null);
+  assert.equal((await api.update('employees',f.employee.id,{driving_license:true,driving_license_expiry_date:'2030-01-01'})).error,null);
+  assert.equal((await api.update('employees',f.employee.id,buildEmployeePayload({...cleared,driving_license:false,driving_license_expiry_date:'2030-01-01'},{driving_license:true}))).error,null);
+  const licence=f.db.prepare('SELECT driving_license,driving_license_expiry_date FROM employees WHERE id=?').get(f.employee.id);
+  assert.equal(licence.driving_license,0);assert.equal(licence.driving_license_expiry_date,null);
   assert.equal(f.calls.length,0);assert.equal(f.db.prepare('SELECT count(*) n FROM whatsapp_jobs').get().n,0);
  }finally{t.mock.restoreAll();}
 }));
