@@ -24,6 +24,11 @@ lock, with separate rate limits so successful logout permits immediate new QR.
 Pairing handlers participate in the application's shutdown drain, including
 disconnect work whose browser socket has already closed. Once shutdown closes
 admission, status/connect/disconnect return 503 without contacting the provider.
+Disabling reminders and provider logout hold one coordinator operation, so a
+queued enable cannot validate against the old connected account between them.
+The disable commits before provider I/O and remains in effect if logout fails.
+Every settled disconnect attempt also refreshes the sibling reminder settings,
+including failures after the backend may already have disabled sending.
 
 The browser polls the admin status GET every3seconds during visible pairing for
 a bounded period. No polling action generates QR or sends a message. Actual

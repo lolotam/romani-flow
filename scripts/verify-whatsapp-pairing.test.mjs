@@ -16,22 +16,24 @@ import { CronService } from '../server/services/cronService.ts';
 import { pairingConfiguration, readPairingConfig } from '../server/whatsapp/config.ts';
 import { createServer as createViteServer } from 'vite';
 import { stopRequestWork } from '../server/middleware/requestWork.ts';
+import { createReminderRuntime } from '../server/whatsapp/runtime.ts';
 
 // Synthetic loopback provider only; no .env, production accounts or real QR scan.
 const PNG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jGDkAAAAASUVORK5CYII=';
 const listen = server => new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
 const stop = server => new Promise(resolve => { server.close(resolve); server.closeAllConnections(); });
 
-async function fixture(run, overrides = {}) {
+async function fixture(run, overrides = {}, providerPath = '/api') {
   const apiKey = randomBytes(32).toString('hex');
   const webhookSecret = randomBytes(32).toString('hex');
   const curemedKey = randomBytes(32).toString('hex');
   const calls = [];
-  const mode = { state: 'close', instance: 'romani-fixture', qr: PNG, status: 200, delay: 0, redirect: false, oversized: false, connectResponse: null, errorBody: false };
+  const instance = overrides.ROMANI_EVOLUTION_INSTANCE ?? 'romani-fixture';
+  const mode = { state: 'close', instance, qr: PNG, status: 200, delay: 0, redirect: false, oversized: false, connectResponse: null, errorBody: false };
   const provider = http.createServer(async (req, res) => {
     calls.push({ path: req.url, method: req.method, authorized: req.headers.apikey === apiKey });
     // Emulate a project-scoped provider boundary; Curemed key cannot read Romani.
-    if (req.headers.apikey !== apiKey || !req.url.endsWith('/romani-fixture')) { res.writeHead(403); res.end('not allowed'); return; }
+    if (req.headers.apikey !== apiKey || !req.url.endsWith('/' + instance)) { res.writeHead(403); res.end('not allowed'); return; }
     if (mode.beforeResponse) await mode.beforeResponse(req);
     if (mode.delay) await new Promise(resolve => setTimeout(resolve, mode.delay));
     if (mode.redirect) { res.writeHead(302, { location: '/instance/connectionState/curemed' }); res.end(); return; }
@@ -47,7 +49,7 @@ async function fixture(run, overrides = {}) {
   await listen(provider);
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'romani-pairing-'));
   const config = loadConfig({ NODE_ENV: 'test', JWT_SECRET: randomBytes(32).toString('hex'),
-    ROMANI_EVOLUTION_URL: `http://127.0.0.1:${provider.address().port}/api`, ROMANI_EVOLUTION_API_KEY: apiKey,
+    ROMANI_EVOLUTION_URL: `http://127.0.0.1:${provider.address().port}${providerPath}`, ROMANI_EVOLUTION_API_KEY: apiKey,
     ROMANI_EVOLUTION_INSTANCE: 'romani-fixture', ROMANI_EVOLUTION_WEBHOOK_SECRET: webhookSecret, ...overrides });
   const db = new DatabaseSync(path.join(dir, 'romani.db'));
   db.exec('PRAGMA foreign_keys=ON'); runMigrations(db, path.resolve('server/db/migrations'));
@@ -57,7 +59,8 @@ async function fixture(run, overrides = {}) {
   const mailer = { isConfigured: () => false };
   const storage = new StorageService(path.join(dir, 'uploads')); storage.ensureDirectories();
   const cron = new CronService(db, mailer);
-  const app = createApp({ config, db, mailer, cron, storage, documents: new DocumentService(db, storage), staticDir: dir });
+  const reminders = createReminderRuntime(db, config.whatsapp);
+  const app = createApp({ config, db, mailer, cron, storage, documents: new DocumentService(db, storage), staticDir: dir, reminders });
   const server = http.createServer(app); await listen(server);
   const base = `http://127.0.0.1:${server.address().port}`;
   const cookie = (role = 'admin', cfg = config) => `${config.cookieName}=${signSession(cfg, { id: role, role, name: 'Synthetic', email: `${role}@example.invalid` })}`;
@@ -69,7 +72,7 @@ async function fixture(run, overrides = {}) {
     assert.ok(!JSON.stringify(json).includes('must-not-leak'));
     return { status: res.status, headers: res.headers, json };
   };
-  try { await run({ request, config, db, mode, calls, cookie, webhookSecret, curemedKey, base, app }); }
+  try { await run({ request, config, db, mode, calls, cookie, webhookSecret, curemedKey, base, app, server, reminders }); }
   finally { cron.stop(); await stop(server); await stop(provider); db.close(); fs.rmSync(dir, { recursive: true, force: true }); }
 }
 
@@ -318,3 +321,29 @@ test('shutdown drains detached disconnect work and refuses further pairing provi
   assert.equal(f.calls.filter(call=>call.method==='DELETE').length,1);
  }finally{release();controller.abort();await request;}
 }));
+
+test('a queued enable cannot slip between disconnect disable and provider logout',()=>fixture(async f=>{
+ const {setSetting,getBoolean}=await import('../server/repositories/settings.ts');
+ f.mode.state='open';setSetting(f.db,'whatsapp.enabled',true);
+ let release,entered;
+ const blocked=new Promise(resolve=>release=resolve),started=new Promise(resolve=>entered=resolve);
+ const held=f.reminders.coordinator.runExclusive(async()=>{entered();await blocked;});
+ await started;
+ const admitted=path=>new Promise(resolve=>{
+  const observe=req=>{if(req.url===path){f.server.off('request',observe);setImmediate(resolve);}};
+  f.server.on('request',observe);
+ });
+ const disconnectAdmitted=admitted('/api/whatsapp/disconnect');
+ const disconnect=f.request('/api/whatsapp/disconnect',{method:'POST',body:{}});
+ try{
+  await disconnectAdmitted;
+  const enableAdmitted=admitted('/api/settings');
+  const enable=f.request('/api/settings',{method:'PUT',body:{settings:{'whatsapp.enabled':true}}});
+  await enableAdmitted;release();await held;
+  assert.equal((await disconnect).status,200);
+  const response=await enable;
+  assert.equal(response.status,409);assert.equal(response.json.error.code,'whatsapp_not_connected');
+  assert.equal(getBoolean(f.db,'whatsapp.enabled'),false);
+  assert.equal(f.mode.state,'close');assert.equal(f.calls.filter(call=>call.method==='DELETE').length,1);
+ }finally{release();await held;await disconnect;}
+},{ROMANI_EVOLUTION_INSTANCE:'romani'},''));

@@ -7,7 +7,7 @@ import { whatsappPairing, type WhatsAppPairingStatus } from '@/lib/api/whatsapp'
 import { CheckCircle2, LogOut, QrCode, RefreshCw } from 'lucide-react';
 
 /** Transient QR only. Never stores credentials, QR codes, chats or session data. */
-export default function WhatsAppPairingSettings() {
+export default function WhatsAppPairingSettings({ onDisconnectSettled }: { onDisconnectSettled?: () => void }) {
   const { user } = useAuth();
   const { t, isRTL } = useLanguage();
   const [status, setStatus] = useState<WhatsAppPairingStatus | null>(null);
@@ -43,9 +43,12 @@ export default function WhatsAppPairingSettings() {
       if (mounted.current && id === operation.current) { setError(true); setQr(null); setStatus(null); }
     } finally {
       if (id === operation.current) requestBusy.current = false;
-      if (mounted.current && id === operation.current) setBusy(false);
+      if (mounted.current && id === operation.current) {
+        setBusy(false);
+        if (action === 'disconnect') onDisconnectSettled?.();
+      }
     }
-  }, [user?.role, user?.id]);
+  }, [user?.role, user?.id, onDisconnectSettled]);
 
   useEffect(() => {
     mounted.current = true;

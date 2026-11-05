@@ -4,7 +4,7 @@ import { ApiRequestError, request, type ApiEnvelope } from '@/lib/api/http';
 import type { WhatsAppRecipient, WhatsAppLogItem, WhatsAppLogFilter } from '@/lib/api/whatsapp';
 import { loadWhatsAppReminderSettings } from '@/lib/api/whatsappSettings';
 
-export function useWhatsAppSettings() {
+export function useWhatsAppSettings(refreshKey = 0) {
   const { user } = useAuth();
   const identity = user?.role === 'admin' ? user.id : null;
   const active = useRef<string | null>(identity);
@@ -36,7 +36,7 @@ export function useWhatsAppSettings() {
     const controller = new AbortController();
     void load(controller.signal);
     return () => { controller.abort(); active.current = null; };
-  }, [load, identity]);
+  }, [load, identity, refreshKey]);
 
   const act = async (operation: () => Promise<ApiEnvelope<unknown>>): Promise<boolean> => {
     if (!identity || active.current !== identity) return false;

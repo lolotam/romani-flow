@@ -41,8 +41,7 @@ export function createPairingRouter(config: PairingConfig, env: NodeEnv, reminde
     connecting = true;
     lastDisconnectAt = Date.now();
     try {
-      await reminders.setEnabled(false);
-      const status = await reminders.coordinator.runExclusive(() => client.disconnect());
+      const status = await reminders.withSendingDisabled(() => client.disconnect());
       res.json({ data: status, error: null });
     } catch (error) { const e = error instanceof PairingError ? error : new PairingError('provider_unavailable'); fail(res, e.status, e.code); }
     finally { connecting = false; }
