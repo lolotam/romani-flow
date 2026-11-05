@@ -5,7 +5,7 @@ import nodemailer from 'nodemailer';
 import { reminderApi } from './fixtures/whatsapp-api.mjs';
 import { setSetting, getString } from '../server/repositories/settings.ts';
 import { sendExpiryReport } from '../server/services/expiryService.ts';
-import { writeLoadedEmailSettings } from '../src/lib/emailSettingsWrite.ts';
+import { validEmailSettings, writeLoadedEmailSettings } from '../src/lib/emailSettingsWrite.ts';
 import { insertRow } from '../server/repositories/base.ts';
 
 const TO = ['first@example.invalid', 'second@example.invalid'], CC = 'copy@example.invalid';
@@ -46,7 +46,7 @@ function withMail(t, run, outcome = addresses => ({ accepted: addresses, rejecte
     verify: async () => true,
     sendMail: async message => {
       calls.push(message);
-      return { messageId: 'synthetic-' + calls.length, ...outcome([...(message.to ?? []), ...(message.cc ?? [])], calls.length) };
+      return { messageId: 'synthetic-' + calls.length, ...await outcome([...(message.to ?? []), ...(message.cc ?? [])], calls.length) };
     },
   }));
   return reminderApi(f => run(f, calls), undefined, {
@@ -65,6 +65,56 @@ test('test email includes configured CC, supports explicit CC and records relay 
   assert.equal((await f.request('/api/email/test', { method: 'POST', body: { to: TO, cc: [] } })).status, 200);
   assert.deepEqual(calls[1].to, TO); assert.deepEqual(calls[1].cc, []);
 }));
+
+test('malformed successful settings reads cannot unlock default writes', t => reminderApi(async f => {
+  const response = await f.request('/api/settings');
+  const settings = response.json.data.settings;
+  assert.equal(validEmailSettings(settings), true);
+  let writes = 0;
+  t.mock.method(globalThis, 'fetch', async () => { writes++; throw new Error('Unexpected write'); });
+  for (const malformed of [{}, [], null, { ...settings, 'email.cc': [7] },
+    { ...settings, 'cron.enabled': 'true' }, { ...settings, 'cron.days': null },
+    { ...settings, 'email.language': 'xx' }, { ...settings, 'email.notification_intervals': [{}] }]) {
+    assert.equal(validEmailSettings(malformed), false);
+    const result = await writeLoadedEmailSettings({ 'email.language': 'en' }, validEmailSettings(malformed));
+    assert.ok(result.error); assert.equal(writes, 0);
+  }
+}));
+
+test('skipped email audits retain To and CC in disabled and no-interval runs', t => withMail(t, async (f, calls) => {
+  setSetting(f.db, 'email.recipients', [TO[0]]); setSetting(f.db, 'email.cc', [CC]);
+  for (const disabled of [true, false]) {
+    setSetting(f.db, 'email.enabled', !disabled);
+    if (!disabled) setSetting(f.db, 'email.notification_intervals', []);
+    const result = await sendExpiryReport(f.db, f.mailer, 'cron');
+    assert.deepEqual(result.recipients, [TO[0], CC]);
+    const row = f.db.prepare('SELECT recipients FROM email_log ORDER BY rowid DESC LIMIT 1').get();
+    assert.ok(row.recipients.includes(TO[0])); assert.ok(row.recipients.includes(CC));
+  }
+  assert.equal(calls.length, 0);
+}));
+
+test('a timed-out grouped handoff is unknown, stops subsequent groups and never repeats on late completion', async t => {
+  let finish;
+  await withMail(t, async (f, calls) => {
+    const expiry = new Date().toISOString().slice(0, 10);
+    f.db.prepare('UPDATE documents SET title=?,expiry_date=?').run('Synthetic A', expiry);
+    f.db.prepare('UPDATE employees SET residency_expiry_date=NULL').run();
+    setSetting(f.db, 'email.recipients', [TO[0]]); setSetting(f.db, 'email.cc', []);
+    await sendExpiryReport(f.db, f.mailer, 'cron');
+    insertRow(f.db, 'documents', { title: 'Synthetic B', employee_id: f.employee.id, document_type_id: f.type.id, expiry_date: expiry });
+    setSetting(f.db, 'email.cc', [CC]);
+    const result = await sendExpiryReport(f.db, f.mailer, 'cron', { budgetMs: 25 });
+    assert.equal(result.sent, false); assert.match(result.error, /unknown/); assert.equal(calls.length, 2);
+    assert.equal(f.db.prepare("SELECT count(*) n FROM email_log WHERE status='unknown'").get().n, 1);
+    finish(); await new Promise(resolve => setImmediate(resolve));
+    assert.equal(f.db.prepare("SELECT count(*) n FROM email_log WHERE status='unknown'").get().n, 1);
+    assert.equal((await sendExpiryReport(f.db, f.mailer, 'cron')).sent, true);
+    assert.equal(calls.length, 3); assert.deepEqual(calls[2].to, []); assert.deepEqual(calls[2].cc, [CC]);
+    assert.equal((await sendExpiryReport(f.db, f.mailer, 'cron')).skipped, 'nothing_due');
+    assert.equal(calls.length, 3);
+  }, (addresses, attempt) => attempt === 2 ? new Promise(resolve => { finish = () => resolve({ accepted: addresses, rejected: [] }); }) : { accepted: addresses, rejected: [] });
+});
 
 for (const pending of [TO[1], CC]) test(`cron retries only the relay-rejected recipient ${pending === CC ? 'CC' : 'To'} without repeating accepted recipients`, t => withMail(t, async (f, calls) => {
   f.db.prepare('UPDATE documents SET expiry_date=?').run(new Date().toISOString().slice(0, 10));

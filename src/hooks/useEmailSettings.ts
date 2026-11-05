@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { endpoints, rejectedSettings } from '@/lib/api';
 import type { CronStatus, EmailLogEntry, ExpiryPreview, SmtpStatus } from '@/lib/api';
-import { writeLoadedEmailSettings } from '@/lib/emailSettingsWrite';
+import { validEmailSettings, writeLoadedEmailSettings } from '@/lib/emailSettingsWrite';
 
 /**
  * State and actions of the e-mail settings screen.
@@ -113,7 +113,7 @@ export function useEmailSettings() {
     setIsLoading(true);
     ready.current = false; setSettingsReady(false);
     const { data, error } = await endpoints.settings.read();
-    if (!error && data?.settings) {
+    if (!error && validEmailSettings(data?.settings)) {
       setForm(toForm(data.settings));
       setSmtp(data.smtp);
       ready.current = true; setSettingsReady(true);

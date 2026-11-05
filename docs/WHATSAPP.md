@@ -233,6 +233,14 @@ including an overlapping selection, before database close. SMTP phase/idle timer
 are 15/15/30 seconds; these are not a whole-operation bound. The application hard
 ceiling is 90 seconds, not a delivery guarantee. A forced process/host termination
 can still leave an email outcome uncertain; no exactly-once email claim is added.
+Grouped expiry emails share a 60-second whole-run budget and stop admitting
+further groups after a transport error. Groups not started remain pending.
+If the budget expires during SMTP, that attempt is recorded as `unknown`; the
+underlying transport may still complete, but its late result cannot update the
+ledger. Its exact item/recipient identities remain suppressed on automatic runs,
+including after restart, pending operator investigation. A manual report is an
+explicit fresh send and does not clear that audit. No transport cancellation or
+recipient-delivery guarantee is implied by the deadline.
 Verify actual managed stop grace exceeds this ceiling with margin before release;
 no production grace change or proof is implied by local lifecycle tests.
 

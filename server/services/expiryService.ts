@@ -17,6 +17,7 @@ import {
 } from './emailLog.js';
 import { EXPIRED_BUCKET, parseIntervals, resolveBucket, type NotificationInterval } from './intervals.js';
 import type { Mailer } from './mailer.js';
+import { EmailDeadlineError, withinEmailDeadline } from './emailDeadline.js';
 import {
   expiryReportHtml,
   expiryReportSubject,
@@ -197,7 +198,9 @@ function alreadyNotified(
   expiryDate: string,
   intervalDays: number,
   recipient: string,
+  uncertainIdentities: Set<string>,
 ): boolean {
+  if (uncertainIdentities.has(JSON.stringify([recipient, JSON.stringify([itemType, itemId, expiryDate, intervalDays])]))) return true;
   const row = db
     .prepare(
       `SELECT id FROM expiry_notifications
@@ -206,6 +209,22 @@ function alreadyNotified(
     )
     .get(itemType, itemId, expiryDate, intervalDays, recipient);
   return Boolean(row);
+}
+
+/** Interrupted SMTP waits suppress only their exact item/destination identities. */
+function uncertainEmailIdentities(db: Db): Set<string> {
+  const identities = new Set<string>();
+  const rows = db.prepare("SELECT details FROM email_log WHERE kind='expiry_report' AND status IN ('sending','unknown') AND trigger_source='cron'").all() as { details: string | null }[];
+  for (const row of rows) {
+    try {
+      const details = JSON.parse(row.details ?? '{}');
+      if (!Array.isArray(details.recipients) || !Array.isArray(details.identities)) continue;
+      for (const recipient of details.recipients) for (const identity of details.identities) {
+        if (typeof recipient === 'string' && typeof identity === 'string') identities.add(JSON.stringify([recipient, identity]));
+      }
+    } catch { /* Older or malformed audit details contain no usable identities. */ }
+  }
+  return identities;
 }
 
 function recordNotification(
@@ -245,7 +264,9 @@ export async function sendExpiryReport(
   db: Db,
   mailer: Mailer,
   triggerSource: TriggerSource,
+  options: { budgetMs?: number } = {},
 ): Promise<ExpiryReportResult> {
+  const deadline = performance.now() + Math.min(60_000, Math.max(1, options.budgetMs ?? 60_000));
   const enabled = getBoolean(db, 'email.enabled');
   const recipients = getStringList(db, 'email.recipients');
   const cc = getStringList(db, 'email.cc');
@@ -259,13 +280,13 @@ export async function sendExpiryReport(
   if (!enabled) {
     writeEmailLog(db, {
       kind: 'expiry_report',
-      recipients,
+      recipients: allRecipients,
       subject: 'Expiry report',
       status: 'skipped',
       error: 'Email notifications are disabled in the settings.',
       triggerSource,
     });
-    return { sent: false, skipped: 'disabled', recipients, itemCount: 0 };
+    return { sent: false, skipped: 'disabled', recipients: allRecipients, itemCount: 0 };
   }
 
   if (allRecipients.length === 0) {
@@ -283,13 +304,13 @@ export async function sendExpiryReport(
   if (intervals.length === 0) {
     writeEmailLog(db, {
       kind: 'expiry_report',
-      recipients,
+      recipients: allRecipients,
       subject: 'Expiry report',
       status: 'skipped',
       error: 'No notification intervals are selected.',
       triggerSource,
     });
-    return { sent: false, skipped: 'no_intervals', recipients, itemCount: 0 };
+    return { sent: false, skipped: 'no_intervals', recipients: allRecipients, itemCount: 0 };
   }
 
   const report = collectExpiring(db, {
@@ -306,9 +327,10 @@ export async function sendExpiryReport(
   // the full picture and never consumes a notification.
   // Recipients only share a report when their pending item sets are identical.
   const groups = new Map<string, { report: ExpiryReport; to: string[]; cc: string[] }>();
+  const uncertainIdentities = triggerSource === 'cron' ? uncertainEmailIdentities(db) : new Set<string>();
   for (const recipient of allRecipients) {
-    const employees = report.employees.filter(item => triggerSource !== 'cron' || !alreadyNotified(db, 'employee', item.id, item.expiryDate, item.intervalDays, recipient));
-    const documents = report.documents.filter(item => triggerSource !== 'cron' || !alreadyNotified(db, 'document', item.id, item.expiryDate, item.intervalDays, recipient));
+    const employees = report.employees.filter(item => triggerSource !== 'cron' || !alreadyNotified(db, 'employee', item.id, item.expiryDate, item.intervalDays, recipient, uncertainIdentities));
+    const documents = report.documents.filter(item => triggerSource !== 'cron' || !alreadyNotified(db, 'document', item.id, item.expiryDate, item.intervalDays, recipient, uncertainIdentities));
     if (!employees.length && !documents.length) continue;
     const key = JSON.stringify([employees.map(item => [item.id, item.expiryDate, item.intervalDays]), documents.map(item => [item.id, item.expiryDate, item.intervalDays])]);
     let group = groups.get(key);
@@ -322,9 +344,16 @@ export async function sendExpiryReport(
   const results: ExpiryReportResult[] = [];
   const items = new Set<string>();
   for (const group of groups.values()) {
+    if (performance.now() >= deadline) {
+      results.push({ sent: false, error: 'Email run deadline reached; remaining groups deferred.', recipients: [], itemCount: 0 });
+      break;
+    }
     for (const item of group.report.employees) items.add('employee:' + item.id);
     for (const item of group.report.documents) items.add('document:' + item.id);
-    results.push(await sendReportGroup(db, mailer, triggerSource, group.report, group.to, group.cc, intervals));
+    const result = await sendReportGroup(db, mailer, triggerSource, group.report, group.to, group.cc, intervals, deadline);
+    results.push(result);
+    // Never start another handoff after a transport error or expired wait.
+    if (result.error) break;
   }
   const sent = results.every(result => result.sent);
   const error = results.find(result => result.error)?.error;
@@ -333,7 +362,7 @@ export async function sendExpiryReport(
 }
 
 async function sendReportGroup(db: Db, mailer: Mailer, triggerSource: TriggerSource, finalReport: ExpiryReport,
-  targetRecipients: string[], targetCc: string[], intervals: NotificationInterval[]): Promise<ExpiryReportResult> {
+  targetRecipients: string[], targetCc: string[], intervals: NotificationInterval[], deadline: number): Promise<ExpiryReportResult> {
   const { employees, documents, windowDays } = finalReport;
   const subject = expiryReportSubject(finalReport);
   const itemCount = employees.length + documents.length;
@@ -348,17 +377,20 @@ async function sendReportGroup(db: Db, mailer: Mailer, triggerSource: TriggerSou
       documents: documents.length,
       windowDays,
       intervals,
+      recipients: [...targetRecipients, ...targetCc],
+      identities: [...employees.map(item => JSON.stringify(['employee', item.id, item.expiryDate, item.intervalDays])),
+        ...documents.map(item => JSON.stringify(['document', item.id, item.expiryDate, item.intervalDays]))],
     },
   });
 
   try {
-    const result = await mailer.send({
+    const result = await withinEmailDeadline(mailer.send({
       to: targetRecipients,
       cc: targetCc.length > 0 ? targetCc : undefined,
       subject,
       text: expiryReportText(finalReport),
       html: expiryReportHtml(finalReport),
-    });
+    }), deadline - performance.now());
 
     // Only the recipients that accepted the message are marked as notified, so a
     // rejected recipient is retried on its own while the others are not.
@@ -405,7 +437,7 @@ async function sendReportGroup(db: Db, mailer: Mailer, triggerSource: TriggerSou
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error);
 
-    finishEmailAttempt(db, logId, { status: 'failed', error: detail });
+    finishEmailAttempt(db, logId, { status: error instanceof EmailDeadlineError ? 'unknown' : 'failed', error: detail });
 
     setSetting(db, 'email.last_result', `failed: ${detail}`);
 
