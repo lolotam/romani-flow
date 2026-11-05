@@ -27,7 +27,10 @@ export interface WhatsAppPage<T> { items: T[]; total: number }
 export interface WhatsAppLogFilter { state?: string; recipient?: string; item?: string; offset?: number }
 export const whatsappReminders = {
   recipients: (offset = 0, signal?: AbortSignal) => request<WhatsAppPage<WhatsAppRecipient>>(`/api/whatsapp/recipients?limit=20&offset=${offset}`, { signal }),
-  saveRecipient: (body: Omit<WhatsAppRecipient, 'id'>, id?: string) => request<{ id: string }>(`/api/whatsapp/recipients${id ? `/${encodeURIComponent(id)}` : ''}`, { method: id ? 'PATCH' : 'POST', body }),
+  saveRecipient: (body: Omit<WhatsAppRecipient, 'id'>, id?: string, consentChanged = false) => request<{ id: string }>(`/api/whatsapp/recipients${id ? `/${encodeURIComponent(id)}` : ''}`, {
+    method: id ? 'PATCH' : 'POST',
+    body: id && !consentChanged ? { label: body.label, phone: body.phone } : body,
+  }),
   toggleRecipient: (id: string, enabled: boolean) => request(`/api/whatsapp/recipients/${encodeURIComponent(id)}`, { method: 'PATCH', body: { enabled } }),
   removeRecipient: (id: string) => request(`/api/whatsapp/recipients/${encodeURIComponent(id)}`, { method: 'DELETE' }),
   log: (filter: WhatsAppLogFilter, signal?: AbortSignal) => {

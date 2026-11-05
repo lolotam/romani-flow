@@ -8,6 +8,42 @@ import {setSetting} from '../server/repositories/settings.ts';
 import {createReminderRuntime} from '../server/whatsapp/runtime.ts';
 import {createApp} from '../server/app.ts';
 import {signSession} from '../server/middleware/auth.ts';
+import {whatsappReminders} from '../src/lib/api/whatsapp.ts';
+import {api} from '../src/lib/api/client.ts';
+import {buildEmployeePayload} from '../src/components/employees/employeeHelpers.ts';
+import {EMPTY_EMPLOYEE_FORM} from '../src/components/employees/employeeTypes.ts';
+
+test('stale metadata forms preserve another admin consent change unless the switch was explicitly edited',t=>reminderApi(async f=>{
+ f.db.prepare("INSERT INTO admin_users(id,email,name,role,password_hash,created_at,updated_at) VALUES('second-admin','second@example.invalid','Synthetic','admin','unused','2026-01-01','2026-01-01')").run();
+ const cookie=f.config.cookieName+'='+signSession(f.config,{id:'second-admin',role:'admin',name:'Synthetic',email:'second@example.invalid'});
+ const nativeFetch=globalThis.fetch;
+ // Only browser-relative URL/auth resolution is adapted; both admins use the real API/SQLite.
+ t.mock.method(globalThis,'fetch',(url,options)=>typeof url==='string'&&url.startsWith('/')
+  ?nativeFetch(f.base+url,{...options,headers:{...options?.headers,cookie}}):nativeFetch(url,options));
+ try{
+  const created=await whatsappReminders.saveRecipient({label:'Synthetic',phone:MANAGER_PHONE,enabled:false});assert.equal(created.error,null);
+  const id=created.data.id;
+  for(const stale of [true,false]){
+   assert.equal((await whatsappReminders.toggleRecipient(id,stale)).error,null);
+   const {label,phone,enabled}=(await whatsappReminders.recipients()).data.items.find(row=>row.id===id);
+   const snapshot={label,phone,enabled};
+   assert.equal((await f.request('/api/whatsapp/recipients/'+id,{method:'PATCH',body:{enabled:!stale}})).status,200);
+   assert.equal((await whatsappReminders.saveRecipient({...snapshot,label:'Changed label'},id)).error,null);
+   assert.equal(f.db.prepare('SELECT enabled FROM whatsapp_recipients WHERE id=?').get(id).enabled,Number(!stale));
+   assert.equal((await whatsappReminders.saveRecipient(snapshot,id,true)).error,null);
+   assert.equal(f.db.prepare('SELECT enabled FROM whatsapp_recipients WHERE id=?').get(id).enabled,Number(stale));
+
+   assert.equal((await f.request('/api/employees/'+f.employee.id,{method:'PATCH',body:{whatsapp_notifications_enabled:stale}})).status,200);
+   const form={...EMPTY_EMPLOYEE_FORM,...f.employee,name:'Changed name',whatsapp_notifications_enabled:stale};
+   assert.equal((await f.request('/api/employees/'+f.employee.id,{method:'PATCH',body:{whatsapp_notifications_enabled:!stale}})).status,200);
+   assert.equal((await api.update('employees',f.employee.id,buildEmployeePayload(form,false))).error,null);
+   assert.equal(f.db.prepare('SELECT whatsapp_notifications_enabled FROM employees WHERE id=?').get(f.employee.id).whatsapp_notifications_enabled,Number(!stale));
+   assert.equal((await api.update('employees',f.employee.id,buildEmployeePayload(form,true))).error,null);
+   assert.equal(f.db.prepare('SELECT whatsapp_notifications_enabled FROM employees WHERE id=?').get(f.employee.id).whatsapp_notifications_enabled,Number(stale));
+  }
+  assert.equal(f.calls.length,0);assert.equal(f.db.prepare('SELECT count(*) n FROM whatsapp_jobs').get().n,0);
+ }finally{t.mock.restoreAll();}
+}));
 
 test('business erase with invalid sending config cancels only its unsent namespace and rolls back on failure',()=>reminderApi(async f=>{
  await f.request('/api/whatsapp/recipients',{method:'POST',body:{label:'Synthetic manager',phone:MANAGER_PHONE,enabled:true}});
