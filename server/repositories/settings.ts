@@ -21,6 +21,7 @@ export interface SettingDefinition {
 
 export const SETTING_DEFINITIONS: SettingDefinition[] = [
   { key: 'whatsapp.enabled', type: 'boolean', defaultValue: false },
+  { key: 'whatsapp.language', type: 'string', defaultValue: 'ar' },
   { key: 'email.enabled', type: 'boolean', defaultValue: true },
   { key: 'email.recipients', type: 'string[]', defaultValue: [] },
   { key: 'email.cc', type: 'string[]', defaultValue: [] },

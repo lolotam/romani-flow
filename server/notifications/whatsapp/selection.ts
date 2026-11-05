@@ -1,6 +1,6 @@
 import type { Db } from '../../db/connection.js';
 import type { Row } from '../../repositories/base.js';
-import { getBoolean, getRawList } from '../../repositories/settings.js';
+import { getBoolean, getRawList, getString } from '../../repositories/settings.js';
 import { parseIntervals, resolveBucket } from '../../services/intervals.js';
 import { daysUntil, normalizeDate } from '../../utils/dates.js';
 import type { ReminderCandidate } from './contracts.js';
@@ -11,6 +11,7 @@ import { optedPhoneCounts } from './employeePolicy.js';
 /** A claim supplies its item/destination; daily selection omits that scope. */
 export function selectReminders(db: Db, instance: string, now: Date, scope?: Pick<ReminderCandidate, 'item_type' | 'item_id' | 'recipient'>): ReminderCandidate[] {
   if (!getBoolean(db, 'whatsapp.enabled')) return [];
+  const language = getString(db, 'whatsapp.language', 'ar') === 'en' ? 'en' : 'ar';
   const intervals = parseIntervals(getRawList(db, 'email.notification_intervals'));
   const documents = !getBoolean(db, 'cron.include_documents') ? [] : scope
     ? scope.item_type === 'document' ? db.prepare('SELECT id,title,expiry_date,employee_id,company_id FROM documents WHERE id=?').all(scope.item_id) as Row[] : []
@@ -44,7 +45,7 @@ export function selectReminders(db: Db, instance: string, now: Date, scope?: Pic
     for (const [recipient, destination] of destinations) candidates.push({
       instance, item_type: type, item_id: id, expiry_date: date, bucket, recipient,
       recipient_label: destination.label, audience: destination.audience, item_name: name, owner_name: owner,
-      text: reminderText(destination.audience, name, owner, date, !employee),
+      text: reminderText(destination.audience, name, owner, date, !employee, language),
     });
   }
   if ((!scope || scope.item_type === 'document') && getBoolean(db, 'cron.include_documents')) {
@@ -56,7 +57,7 @@ export function selectReminders(db: Db, instance: string, now: Date, scope?: Pic
     }
   }
   if ((!scope || scope.item_type === 'employee_residency') && getBoolean(db, 'cron.include_employees')) {
-    for (const employee of employees.values()) add('employee_residency', String(employee.id), 'الإقامة', employee.residency_expiry_date, employee);
+    for (const employee of employees.values()) add('employee_residency', String(employee.id), language === 'en' ? 'Residency' : 'الإقامة', employee.residency_expiry_date, employee);
   }
   return candidates;
 }

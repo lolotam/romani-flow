@@ -17,6 +17,7 @@ export function useWhatsAppSettings(refreshKey = 0) {
   const [recipientsAvailable, setRecipientsAvailable] = useState(false), [logAvailable, setLogAvailable] = useState(false);
   const [enabled, setEnabled] = useState<boolean | null>(null), [busy, setBusy] = useState(false), [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
+  const [language, setLanguage] = useState<'ar' | 'en' | null>(null);
 
   // Returning to the same account must not revive an earlier session's mutation.
   useEffect(() => {
@@ -29,6 +30,7 @@ export function useWhatsAppSettings(refreshKey = 0) {
     if (!identity) return;
     setLoading(true);
     setEnabled(null);
+    setLanguage(null);
     const version = ++generation.current;
     const results = await loadWhatsAppReminderSettings(recipientOffset, filter, signal);
     if (signal?.aborted || active.current !== identity || generation.current !== version) return;
@@ -37,6 +39,7 @@ export function useWhatsAppSettings(refreshKey = 0) {
     setRecipients(results.people?.items ?? []); setRecipientTotal(results.people?.total ?? 0);
     setLog(results.jobs?.items ?? []); setLogTotal(results.jobs?.total ?? 0);
     setEnabled(results.enabled); setError(results.failed ? 'failed' : '');
+    setLanguage(results.language);
   }, [identity, recipientOffset, filter]);
   const latestLoad = useRef(load);
   useEffect(() => { latestLoad.current = load; }, [load]);
@@ -65,6 +68,7 @@ export function useWhatsAppSettings(refreshKey = 0) {
   };
 
   return { recipients, recipientTotal, recipientOffset, setRecipientOffset, recipientsAvailable, log, logTotal, logAvailable, filter, setFilter,
-    enabled: active.current === identity ? enabled : null, busy, loading, error, act, reload: () => void load(),
+    enabled: active.current === identity ? enabled : null, language: active.current === identity ? language : null, busy, loading, error, act, reload: () => void load(),
+    setLanguage: (value: 'ar' | 'en') => language === null ? Promise.resolve(false) : act(() => request('/api/settings', { method: 'PUT', body: { settings: { 'whatsapp.language': value } } })),
     setEnabled: (value: boolean) => enabled === null ? Promise.resolve(false) : act(() => request('/api/settings', { method: 'PUT', body: { settings: { 'whatsapp.enabled': value } } })) };
 }

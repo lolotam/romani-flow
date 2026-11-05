@@ -103,6 +103,7 @@ function cronRule(): Rule {
 
 const EDITABLE: Record<string, Rule> = {
   'whatsapp.enabled': boolRule(),
+  'whatsapp.language': languageRule(),
   'email.enabled': boolRule(),
   'email.recipients': emailListRule(),
   'email.cc': emailListRule(),
