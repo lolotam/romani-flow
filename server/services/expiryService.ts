@@ -18,6 +18,7 @@ import {
 import { EXPIRED_BUCKET, parseIntervals, resolveBucket, type NotificationInterval } from './intervals.js';
 import { MailError, type Mailer } from './mailer.js';
 import { EmailDeadlineError, withinEmailDeadline } from './emailDeadline.js';
+import { emailIdentity, emailIdentities } from './emailAddress.js';
 import {
   expiryReportHtml,
   expiryReportSubject,
@@ -205,7 +206,7 @@ function alreadyNotified(
     .prepare(
       `SELECT id FROM expiry_notifications
         WHERE item_type = ? AND item_id = ? AND expiry_date = ?
-          AND interval_days = ? AND recipient = ?`,
+          AND interval_days = ? AND lower(trim(recipient)) = ?`,
     )
     .get(itemType, itemId, expiryDate, intervalDays, recipient);
   return Boolean(row);
@@ -220,7 +221,7 @@ function uncertainEmailIdentities(db: Db): Set<string> {
       const details = JSON.parse(row.details ?? '{}');
       if (!Array.isArray(details.recipients) || !Array.isArray(details.identities)) continue;
       for (const recipient of details.recipients) for (const identity of details.identities) {
-        if (typeof recipient === 'string' && typeof identity === 'string') identities.add(JSON.stringify([recipient, identity]));
+        if (typeof recipient === 'string' && typeof identity === 'string') identities.add(JSON.stringify([emailIdentity(recipient), identity]));
       }
     } catch { /* Older or malformed audit details contain no usable identities. */ }
   }
@@ -268,8 +269,8 @@ export async function sendExpiryReport(
 ): Promise<ExpiryReportResult> {
   const deadline = performance.now() + Math.min(60_000, Math.max(1, options.budgetMs ?? 60_000));
   const enabled = getBoolean(db, 'email.enabled');
-  const recipients = getStringList(db, 'email.recipients');
-  const cc = getStringList(db, 'email.cc');
+  const recipients = emailIdentities(getStringList(db, 'email.recipients'));
+  const cc = emailIdentities(getStringList(db, 'email.cc'));
   const allRecipients = [...new Set([...recipients, ...cc])];
   const windowDays = getNumber(db, 'cron.days', 30);
   const includeEmployees = getBoolean(db, 'cron.include_employees');
@@ -344,8 +345,11 @@ export async function sendExpiryReport(
   const results: ExpiryReportResult[] = [];
   const items = new Set<string>();
   for (const group of groups.values()) {
+    for (const item of group.report.employees) items.add('employee:' + item.id);
+    for (const item of group.report.documents) items.add('document:' + item.id);
+  }
+  for (const group of groups.values()) {
     if (deadline - performance.now() < (options.minimumSendMs ?? 15_000)) {
-      results.push({ sent: false, error: 'Email run deadline reached; remaining groups deferred.', recipients: [], itemCount: 0 });
       break;
     }
     for (const item of group.report.employees) items.add('employee:' + item.id);
@@ -355,7 +359,14 @@ export async function sendExpiryReport(
     // Never start another handoff after a transport error or expired wait.
     if (result.error) break;
   }
-  const sent = results.every(result => result.sent);
+  const completedGroups = results.length;
+  for (const group of [...groups.values()].slice(completedGroups)) {
+    const deferred = { sent: false, error: 'Email group deferred before SMTP handoff.', recipients: [...group.to, ...group.cc], itemCount: group.report.employees.length + group.report.documents.length };
+    writeEmailLog(db, { kind: 'expiry_report', recipients: deferred.recipients, subject: expiryReportSubject(group.report), status: 'deferred', error: deferred.error, triggerSource,
+      details: { employees: group.report.employees.length, documents: group.report.documents.length } });
+    results.push(deferred);
+  }
+  const sent = completedGroups === groups.size && results.every(result => result.sent);
   const error = results.find(result => result.error)?.error;
   setSetting(db, 'email.last_result', error ? 'failed: ' + error : sent ? 'sent' : 'partial');
   return { sent, ...(error ? { error } : {}), recipients: results.flatMap(result => result.recipients), itemCount: items.size };
@@ -423,6 +434,9 @@ async function sendReportGroup(db: Db, mailer: Mailer, triggerSource: TriggerSou
     finishEmailAttempt(db, logId, {
       status,
       details: { employees: employees.length, documents: documents.length, windowDays, intervals,
+        recipients: [...targetRecipients, ...targetCc],
+        identities: [...employees.map(item => JSON.stringify(['employee', item.id, item.expiryDate, item.intervalDays])),
+          ...documents.map(item => JSON.stringify(['document', item.id, item.expiryDate, item.intervalDays]))],
         messageId: result.messageId, accepted: result.accepted, rejected: result.rejected },
       error:
         result.rejected.length > 0

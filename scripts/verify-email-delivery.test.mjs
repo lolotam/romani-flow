@@ -171,3 +171,17 @@ test('explicit null CC never falls back to saved recipients', t=>withMail(t,asyn
 }));
 
 test('blank CC and BCC entries cannot turn acceptance into partial', t=>withMail(t,async f=>{const result=await f.mailer.send({to:[TO[0]],cc:[' '],bcc:[''],subject:'Synthetic',text:'Synthetic'});assert.equal(result.status,'sent');assert.deepEqual(result.rejected,[]);}));
+
+test('case variants share retained notification history and accepted audit identities',t=>withMail(t,async(f,calls)=>{
+ f.db.prepare('UPDATE documents SET expiry_date=?').run(new Date().toISOString().slice(0,10));f.db.prepare('UPDATE employees SET residency_expiry_date=NULL').run();
+ setSetting(f.db,'email.recipients',[TO[0].toUpperCase()]);setSetting(f.db,'email.cc',[' '+TO[0]+' ']);
+ await sendExpiryReport(f.db,f.mailer,'cron');assert.equal(calls.length,1);assert.deepEqual(calls[0].to,[TO[0]]);assert.equal(calls[0].cc,undefined);
+ const details=JSON.parse(f.db.prepare("SELECT details FROM email_log WHERE status='sent'").get().details);assert.deepEqual(details.recipients,[TO[0]]);assert.equal(details.identities.length,1);
+ f.db.prepare('UPDATE expiry_notifications SET recipient=upper(recipient)').run();
+ assert.equal((await sendExpiryReport(f.db,f.mailer,'cron')).skipped,'nothing_due');assert.equal(calls.length,1);
+}));
+test('deferred groups remain visible in result and audit without an SMTP attempt',t=>withMail(t,async(f,calls)=>{
+ setSetting(f.db,'email.recipients',[TO[0]]);f.db.prepare('UPDATE documents SET expiry_date=?').run(new Date().toISOString().slice(0,10));
+ const result=await sendExpiryReport(f.db,f.mailer,'cron',{budgetMs:1});assert.equal(result.sent,false);assert.deepEqual(result.recipients,[TO[0]]);assert.ok(result.itemCount>0);assert.equal(calls.length,0);
+ const row=f.db.prepare("SELECT recipients,details FROM email_log WHERE status='deferred'").get();assert.ok(row.recipients.includes(TO[0]));assert.ok(JSON.parse(row.details).documents>0);
+}));

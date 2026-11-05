@@ -1,6 +1,7 @@
 import nodemailer, { type Transporter } from 'nodemailer';
 import type { AppConfig } from '../config.js';
 import { isSmtpConfigured } from '../config.js';
+import { emailIdentities } from './emailAddress.js';
 
 /**
  * SMTP transport.
@@ -84,9 +85,9 @@ export class Mailer {
 
   /** Sends one message. Rejects empty recipient lists before touching the network. */
   async send(message: MailMessage): Promise<MailResult> {
-    const to = message.to.filter((address) => address.trim().length > 0);
-    const cc = message.cc?.filter((address) => address.trim().length > 0);
-    const bcc = message.bcc?.filter((address) => address.trim().length > 0);
+    const to = emailIdentities(message.to);
+    const cc = message.cc ? emailIdentities(message.cc).filter(address => !to.includes(address)) : undefined;
+    const bcc = message.bcc ? emailIdentities(message.bcc).filter(address => !to.includes(address) && !cc?.includes(address)) : undefined;
     if (to.length === 0 && !cc?.length && !bcc?.length) {
       throw new MailError('At least one recipient is required.', 'no_recipients', 400);
     }
@@ -111,8 +112,8 @@ export class Mailer {
 
       // The relay can accept some recipients and reject others. That has to be
       // visible, otherwise the rejected recipients would never be retried.
-      const accepted = (info.accepted ?? []).map((address: unknown) => String(address));
-      const rejected = (info.rejected ?? []).map((address: unknown) => String(address));
+      const accepted = emailIdentities((info.accepted ?? []).map((address: unknown) => String(address)));
+      const rejected = emailIdentities((info.rejected ?? []).map((address: unknown) => String(address)));
 
       const allRecipients = [...to, ...(cc ?? []), ...(bcc ?? [])];
       const missing = allRecipients.filter(
