@@ -1,4 +1,30 @@
 import type { ExpiryStatus } from '@/types';
+import type { EmployeeFormState } from './employeeTypes';
+
+/**
+ * Builds the payload sent to the API.
+ *
+ * Empty fields are sent as `null` on purpose: the server keeps a stored value
+ * when a key is absent, but clears it when the key is explicitly `null`.
+ * Untouched edit-form consent is omitted rather than replayed from a stale form.
+ */
+export function buildEmployeePayload(formData: EmployeeFormState, includeWhatsAppConsent = true) {
+  return {
+    name: formData.name,
+    email: formData.email || null,
+    mobile_no: formData.mobile_no || null,
+    ...(includeWhatsAppConsent ? { whatsapp_notifications_enabled: formData.whatsapp_notifications_enabled } : {}),
+    position: formData.position || null,
+    hire_date: formData.hire_date || null,
+    birth_date: formData.birth_date || null,
+    civil_id_no: formData.civil_id_no || null,
+    residency_expiry_date: formData.residency_expiry_date || null,
+    driving_license: formData.driving_license,
+    driving_license_expiry_date: formData.driving_license ? formData.driving_license_expiry_date || null : null,
+    company_id: formData.company_id,
+    is_active: formData.is_active,
+  };
+}
 
 /**
  * Shared helpers for the employee screens.

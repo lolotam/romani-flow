@@ -9,6 +9,7 @@ export function useWhatsAppSettings(refreshKey = 0) {
   const identity = user?.role === 'admin' ? user.id : null;
   const active = useRef<string | null>(identity);
   const generation = useRef(0);
+  const identityEpoch = useRef(0);
   const [recipientOffset, setRecipientOffset] = useState(0);
   const [filter, setFilter] = useState<WhatsAppLogFilter>({});
   const [recipients, setRecipients] = useState<WhatsAppRecipient[]>([]), [recipientTotal, setRecipientTotal] = useState(0);
@@ -16,6 +17,13 @@ export function useWhatsAppSettings(refreshKey = 0) {
   const [recipientsAvailable, setRecipientsAvailable] = useState(false), [logAvailable, setLogAvailable] = useState(false);
   const [enabled, setEnabled] = useState<boolean | null>(null), [busy, setBusy] = useState(false), [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
+
+  // Returning to the same account must not revive an earlier session's mutation.
+  useEffect(() => {
+    identityEpoch.current += 1;
+    setBusy(false); setError('');
+    return () => { identityEpoch.current += 1; };
+  }, [identity]);
 
   const load = useCallback(async (signal?: AbortSignal) => {
     if (!identity) return;
@@ -42,16 +50,18 @@ export function useWhatsAppSettings(refreshKey = 0) {
 
   const act = async (operation: () => Promise<ApiEnvelope<unknown>>): Promise<boolean> => {
     if (!identity || active.current !== identity) return false;
+    const epoch = identityEpoch.current;
+    const current = () => active.current === identity && identityEpoch.current === epoch;
     setBusy(true); setError('');
     try {
       const result = await operation();
-      if (active.current !== identity) return false;
+      if (!current()) return false;
       if (result.error) {
         setError(result.error instanceof ApiRequestError && result.error.code === 'duplicate_recipient' ? 'duplicate' : result.error instanceof ApiRequestError && result.error.code === 'whatsapp_not_connected' ? 'connectFirst' : 'failed');
         return false;
       }
-      await latestLoad.current(); return true;
-    } finally { if (active.current === identity) setBusy(false); }
+      await latestLoad.current(); return current();
+    } finally { if (current()) setBusy(false); }
   };
 
   return { recipients, recipientTotal, recipientOffset, setRecipientOffset, recipientsAvailable, log, logTotal, logAvailable, filter, setFilter,
