@@ -13,6 +13,8 @@ export function WhatsAppLogCard({ state }: { state: ReturnType<typeof useWhatsAp
   const [filter, setFilter] = useState({ state: '', recipient: '', item: '' });
   const offset = state.filter.offset ?? 0;
   return <Card><CardHeader><CardTitle>{t('settings.whatsappReminders.log')}</CardTitle></CardHeader><CardContent className="space-y-4">
+    {!state.logAvailable && <p role="status">{t('settings.whatsappReminders.logUnavailable')}</p>}
+    <div hidden={!state.logAvailable} className="space-y-4">
     <p className="text-sm text-muted-foreground">{t('settings.whatsappReminders.deliveryLimit')}</p>
     <form className="grid gap-3 sm:grid-cols-3" onSubmit={e => { e.preventDefault(); state.setFilter({ ...filter, offset: 0 }); }}>
       <div><Label htmlFor="wa-log-state">{t('settings.whatsappReminders.state')}</Label><select id="wa-log-state" className="h-10 w-full rounded-md border bg-background px-3" value={filter.state} onChange={e => setFilter({ ...filter, state: e.target.value })}>
@@ -39,5 +41,6 @@ export function WhatsAppLogCard({ state }: { state: ReturnType<typeof useWhatsAp
       {job.retry_allowed && <Button type="button" disabled={state.busy} variant="outline" onClick={() => void state.act(() => whatsappReminders.retry(job.id))}>{t('settings.whatsappReminders.retry')}</Button>}
     </article>)}
     <div className="flex items-center gap-3"><Button type="button" variant="outline" disabled={offset === 0} onClick={() => state.setFilter({ ...state.filter, offset: Math.max(0, offset - 20) })}>{t('settings.whatsappReminders.previous')}</Button><span>{state.logTotal}</span><Button type="button" variant="outline" disabled={offset + 20 >= state.logTotal} onClick={() => state.setFilter({ ...state.filter, offset: offset + 20 })}>{t('settings.whatsappReminders.next')}</Button></div>
+    </div>
   </CardContent></Card>;
 }

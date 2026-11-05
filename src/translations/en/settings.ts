@@ -19,6 +19,8 @@ export const settings = {
   whatsappReminders: {
     loading: 'Loading WhatsApp settings…',
     enabledUnknown: 'The sending state is unavailable. Refresh before changing it.',
+    recipientsUnavailable: 'Management numbers could not be loaded. Refresh to try again.',
+    logUnavailable: 'The reminder log could not be loaded. Refresh to try again.',
     failureReason: 'Reason',
     errors: {
       whatsapp_not_configured: 'The server integration needs configuration review before retrying.',
