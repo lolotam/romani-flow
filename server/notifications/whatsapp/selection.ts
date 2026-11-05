@@ -25,7 +25,7 @@ export function selectReminders(db: Db, instance: string, now: Date, scope?: Pic
   const phoneCounts = optedPhoneCounts(needsCollisionCheck ? db.prepare('SELECT mobile_no,whatsapp_notifications_enabled FROM employees WHERE whatsapp_notifications_enabled=1').all() as Row[] : employeeRows);
   const companyRows = scope ? db.prepare('SELECT id,name,name_ar FROM companies WHERE id=?').all(String(documents[0]?.company_id ?? '')) as Row[]
     : db.prepare('SELECT id,name,name_ar FROM companies').all() as Row[];
-  const companies = new Map(companyRows.map(row => [String(row.id), String(row.name_ar || row.name)]));
+  const companies = new Map(companyRows.map(row => [String(row.id), String(language === 'en' ? row.name : row.name_ar || row.name)]));
   const managers = (scope ? db.prepare('SELECT label,phone FROM whatsapp_recipients WHERE enabled=1 AND phone=?').all(scope.recipient)
     : db.prepare('SELECT label,phone FROM whatsapp_recipients WHERE enabled=1').all()) as { label: string; phone: string }[];
   const candidates: ReminderCandidate[] = [];

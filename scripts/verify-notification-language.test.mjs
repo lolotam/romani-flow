@@ -4,6 +4,23 @@ import { reminderApi } from './fixtures/whatsapp-api.mjs';
 import { MANAGER_PHONE } from './fixtures/whatsapp.mjs';
 import { selectReminders } from '../server/notifications/whatsapp/selection.ts';
 import { sendExpiryReport } from '../server/services/expiryService.ts';
+import { insertRow } from '../server/repositories/base.ts';
+import { setSetting } from '../server/repositories/settings.ts';
+
+test('company reminders select the stored name matching the channel language with Arabic fallback', () => reminderApi(async f => {
+  insertRow(f.db, 'documents', { title: 'Synthetic company document', company_id: f.company.id, document_type_id: f.type.id, expiry_date: '2026-01-01' });
+  f.reminders.store.saveRecipient({ label: 'Synthetic', phone: MANAGER_PHONE, enabled: true });
+  for (const language of ['ar', 'en']) {
+    setSetting(f.db, 'whatsapp.language', language);
+    const job = selectReminders(f.db, 'romani', f.clock.now).find(row => row.item_name === 'Synthetic company document');
+    assert.equal(job.owner_name, language === 'en' ? f.company.name : f.company.name_ar);
+    assert.ok(job.text.includes(job.owner_name));
+  }
+  f.db.prepare('UPDATE companies SET name_ar=? WHERE id=?').run('', f.company.id);
+  setSetting(f.db, 'whatsapp.language', 'ar');
+  assert.equal(selectReminders(f.db, 'romani', f.clock.now).find(row => row.item_name === 'Synthetic company document').owner_name, f.company.name);
+  assert.equal(f.calls.length, 0);
+}));
 
 test('channel languages persist independently; invalid writes are atomic and viewers cannot change or preview templates', () => reminderApi(async f => {
   const save = (settings, role = 'admin') => f.request('/api/settings', { method: 'PUT', body: { settings }, role });
