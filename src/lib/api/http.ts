@@ -36,6 +36,8 @@ export interface RequestOptions {
   body?: unknown;
   signal?: AbortSignal;
   timeoutMs?: number;
+  draftAccount?: string;
+  keepalive?: boolean;
 }
 
 export class ApiRequestError extends Error {
@@ -78,10 +80,11 @@ export async function request<T>(
     const response = await fetch(path, {
       method: options.method ?? 'GET',
       credentials: 'same-origin',
-      headers:
-        options.body === undefined
-          ? undefined
-          : { 'Content-Type': 'application/json' },
+      keepalive: options.keepalive,
+      headers: {
+        ...(options.body === undefined ? {} : { 'Content-Type': 'application/json' }),
+        ...(options.draftAccount ? { 'x-draft-account': options.draftAccount } : {}),
+      },
       body: options.body === undefined ? undefined : JSON.stringify(options.body),
       signal: controller.signal,
     });

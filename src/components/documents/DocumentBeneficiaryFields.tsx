@@ -8,9 +8,9 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { useLanguage } from '@/contexts/LanguageContext';
 import type { DocumentFormData, DocumentFormProps } from './documentFormSchema';
 
-type Props = Pick<DocumentFormProps, 'companies' | 'employees' | 'documentTypes' | 'ministries' | 'preselectedEmployeeId'>;
+type Props = Pick<DocumentFormProps, 'companies' | 'employees' | 'documentTypes' | 'ministries' | 'preselectedEmployeeId' | 'preselectedCompanyId'>;
 
-export function DocumentBeneficiaryFields({ companies, employees, documentTypes, ministries, preselectedEmployeeId }: Props) {
+export function DocumentBeneficiaryFields({ companies, employees, documentTypes, ministries, preselectedEmployeeId, preselectedCompanyId }: Props) {
   const form = useFormContext<DocumentFormData>();
   const { t, language } = useLanguage();
   const [selectedCompany, setSelectedCompany] = useState('');
@@ -45,7 +45,7 @@ export function DocumentBeneficiaryFields({ companies, employees, documentTypes,
               render={({ field }) => (
                 <FormItem>
                   <FormLabel>{t('documents.form.company')} *</FormLabel>
-                  <Select onValueChange={field.onChange} value={field.value}>
+                  <Select disabled={!!preselectedCompanyId} onValueChange={field.onChange} value={field.value}>
                     <FormControl>
                       <SelectTrigger>
                         <SelectValue placeholder={t('documents.form.selectCompany')} />

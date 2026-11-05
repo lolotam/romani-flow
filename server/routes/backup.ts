@@ -91,6 +91,8 @@ export function createBackupRouter(db: Db, documents: DocumentService, reminders
         }
         db.prepare('DELETE FROM pending_uploads').run();
         db.prepare('DELETE FROM form_defaults').run();
+        // Keep revision tombstones so pre-erase autosaves cannot resurrect private draft text.
+        db.prepare("UPDATE document_drafts SET values_json=NULL,revision=lower(hex(randomblob(16))),updated_at=?").run(new Date().toISOString());
         db.prepare('DELETE FROM expiry_notifications').run();
         // Audit/recipient configuration survive business erase; sending requires deliberate re-enable.
         setSetting(db, 'whatsapp.enabled', false);

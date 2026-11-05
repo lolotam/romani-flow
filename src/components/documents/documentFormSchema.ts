@@ -46,6 +46,7 @@ export const createDocumentSchema = (t: (key: string) => string) => z.object({
 export type DocumentFormData = z.infer<ReturnType<typeof createDocumentSchema>>;
 
 export interface DocumentFormProps {
+  registerDraftClose?: (handler: (() => Promise<void>) | null) => void;
   uploadedFile: File | null;
   fileName: string;
   onClose: () => void;
@@ -68,6 +69,7 @@ export interface DocumentFormProps {
     notes?: string;
     file_path?: string;
     file_name?: string;
+    mime_type?: string;
   } | null;
 }
 

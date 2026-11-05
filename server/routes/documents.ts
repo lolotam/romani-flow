@@ -11,6 +11,7 @@ import {
 } from '../repositories/base.js';
 import { getNumber } from '../repositories/settings.js';
 import { rememberSubmission } from '../repositories/formDefaults.js';
+import { finishDraft } from '../repositories/documentDrafts.js';
 import type { DocumentService } from '../services/documentService.js';
 import { documentStatus, normalizeDate } from '../utils/dates.js';
 
@@ -82,12 +83,17 @@ export function createDocumentsRouter(db: Db, documents: DocumentService): Route
       assertWritable(payload);
 
       const prepared: Row = { ...payload };
+      const draft = prepared.draft;
+      delete prepared.draft;
       if ('expiry_date' in prepared) {
         prepared.expiry_date = normalizeDate(prepared.expiry_date);
       }
 
       const row = await documents.createDocument(prepared, statusFor,
-        (created) => rememberSubmission(db, req.user!.id, 'documents', created));
+        (created) => {
+          rememberSubmission(db, req.user!.id, 'documents', created);
+          finishDraft(db, req.user!.id, draft, created);
+        });
       // The envelope always carries a list, so the client's `insert()` contract
       // is the same for every resource.
       res.status(201).json({ data: [shape(row)], error: null });
@@ -117,11 +123,14 @@ export function createDocumentsRouter(db: Db, documents: DocumentService): Route
       assertWritable(payload);
 
       const prepared: Row = { ...payload };
+      const draft = prepared.draft;
+      delete prepared.draft;
       if ('expiry_date' in prepared) {
         prepared.expiry_date = normalizeDate(prepared.expiry_date);
       }
 
-      const row = await documents.updateDocument(String(req.params.id), prepared, statusFor);
+      const row = await documents.updateDocument(String(req.params.id), prepared, statusFor,
+        updated => finishDraft(db, req.user!.id, draft, updated, String(req.params.id)));
       if (!row) {
         res.status(404).json({
           data: null,

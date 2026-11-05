@@ -14,6 +14,12 @@ import { api, type Document, type DocumentType, type Ministry } from '@/lib/api'
 import { useStagedDocumentUpload } from './documents/useStagedDocumentUpload';
 import { toast } from 'sonner';
 import { useLanguage } from '@/contexts/LanguageContext';
+import { useDocumentDraft } from '@/hooks/useDocumentDraft';
+import { draftValues } from '@/lib/documentDraftSession';
+import { restoreFormDate } from '@/lib/formDefaults';
+import { useAuth } from '@/hooks/useAuth';
+import { DocumentDraftStatus } from './documents/DocumentDraftStatus';
+import { DocumentAttachment } from './documents/DocumentAttachment';
 import { useLastSubmissionRestore } from '@/hooks/useLastSubmission';
 
 const emptyForm = {
@@ -29,7 +35,12 @@ interface EmployeeDocumentFormProps {
   uploadedFile?: File | null;
 }
 
-export function EmployeeDocumentForm({
+export function EmployeeDocumentForm(props: EmployeeDocumentFormProps) {
+  const { user } = useAuth();
+  return <EmployeeDocumentFormContent key={String(user?.id) + ':' + props.employeeId} {...props} />;
+}
+
+function EmployeeDocumentFormContent({
   isOpen,
   onClose,
   onSave,
@@ -45,8 +56,12 @@ export function EmployeeDocumentForm({
   
   const [formData, setFormData] = useState(emptyForm);
   const dirty = useRef(false);
+  const draft = useDocumentDraft('employee:' + employeeId, saved => {
+    setFormData({ ...emptyForm, ...(saved ?? {}),
+      issue_date: restoreFormDate(saved?.issue_date) ?? null, expiry_date: restoreFormDate(saved?.expiry_date) ?? null });
+  }, isOpen);
   useEffect(() => { if (isOpen) dirty.current = false; }, [isOpen, employeeId]);
-  useLastSubmissionRestore('documents', isOpen, (saved) => {
+  useLastSubmissionRestore('documents', isOpen && draft.status === 'saved' && !draft.hasDraft, (saved) => {
     setFormData(current => ({ ...current, title: uploadedFile ? uploadedFile.name.replace(/\.[^/.]+$/, '') : String(saved.title ?? ''),
       document_type_id: String(saved.document_type_id ?? ''), ministry_id: String(saved.ministry_id ?? ''),
       notes: String(saved.notes ?? '') }));
@@ -81,7 +96,9 @@ export function EmployeeDocumentForm({
 
   const editForm = (patch: Partial<typeof emptyForm>) => {
     dirty.current = true;
-    setFormData(current => ({ ...current, ...patch }));
+    const next = { ...formData, ...patch };
+    setFormData(next);
+    draft.session.current?.change(draftValues(next));
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -97,12 +114,14 @@ export function EmployeeDocumentForm({
     setIsSubmitting(true);
     
     try {
+      const draftRef = await draft.prepare(draftValues(formData));
       const uploadId = uploadedFile
         ? await stageFile(uploadedFile, t('documents.employeeDocumentForm.saveError'))
         : undefined;
 
       // Save metadata and claim the staged upload in one server transaction.
-      const { error: dbError } = await api.insert<Document>('documents', {
+      const payload = {
+        draft: draftRef,
         title: formData.title,
         document_type_id: formData.document_type_id,
         employee_id: employeeId,
@@ -112,17 +131,20 @@ export function EmployeeDocumentForm({
         expiry_date: formData.expiry_date ? format(formData.expiry_date, 'yyyy-MM-dd') : null,
         notes: formData.notes || null,
         ...(uploadId ? { upload_id: uploadId } : {}),
-      });
+      };
+      const { error: dbError } = await api.insert<Document>('documents', payload);
 
       if (dbError) {
         throw new Error(`${t('documents.employeeDocumentForm.saveError')}: ${dbError.message}`);
       }
 
+      draft.session.current?.committed();
       clearUpload();
       toast.success(t('documents.employeeDocumentForm.saveSuccess'));
       onSave();
       onClose();
     } catch (error) {
+      draft.session.current?.resume();
       console.error('Error saving document:', error);
       toast.error(error instanceof Error ? error.message : t('documents.employeeDocumentForm.saveError'));
     } finally {
@@ -131,15 +153,15 @@ export function EmployeeDocumentForm({
     }
   };
 
-  const handleClose = () => {
+  const handleClose = async () => {
     if (submitting.current) return;
-    setFormData(emptyForm);
-    onClose();
+    try { await draft.session.current?.flush(); onClose(); }
+    catch { toast.error(t('documents.employeeDocumentForm.saveError')); }
   };
 
   return (
     <Dialog open={isOpen} onOpenChange={handleClose}>
-      <DialogContent className="sm:max-w-2xl max-h-[90vh] overflow-y-auto" dir={isRTL ? 'rtl' : 'ltr'}>
+      <DialogContent className="sm:max-w-5xl max-h-[90vh] overflow-y-auto" dir={isRTL ? 'rtl' : 'ltr'}>
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <FileText className="h-5 w-5" />
@@ -150,12 +172,17 @@ export function EmployeeDocumentForm({
           </DialogDescription>
         </DialogHeader>
 
+        <div className="grid items-start gap-6 lg:grid-cols-2">
+        <DocumentAttachment uploadedFile={uploadedFile ?? null} />
         <form onSubmit={handleSubmit} className="space-y-6">
+          <fieldset disabled={isSubmitting} className="space-y-6">
+          <DocumentDraftStatus status={draft.status} restored={draft.hasDraft} needsFile={!uploadedFile} onDiscard={() => void draft.session.current?.discard().catch(() => toast.error(t('documents.employeeDocumentForm.saveError')))} />
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div className="md:col-span-2">
               <Label htmlFor="title">{t('documents.form.title')} *</Label>
               <Input
                 id="title"
+                maxLength={120}
                 value={formData.title}
                 onChange={(e) => editForm({ title: e.target.value })}
                 placeholder={t('documents.form.titlePlaceholder')}
@@ -258,7 +285,7 @@ export function EmployeeDocumentForm({
 
             <div className="md:col-span-2">
               <Label htmlFor="notes">{t('documents.form.notes')}</Label>
-              <Textarea
+              <Textarea maxLength={5000}
                 id="notes"
                 value={formData.notes}
                 onChange={(e) => editForm({ notes: e.target.value })}
@@ -279,7 +306,7 @@ export function EmployeeDocumentForm({
           </div>
 
           <div className="flex gap-2 pt-4">
-            <Button type="submit" disabled={isSubmitting} className="flex-1">
+            <Button type="submit" disabled={isSubmitting || ['loading', 'failed', 'conflict'].includes(draft.status)} className="flex-1">
               {isSubmitting ? (
                 <div className="flex items-center gap-2">
                   <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
@@ -297,7 +324,9 @@ export function EmployeeDocumentForm({
               {t('documents.employeeDocumentForm.cancel')}
             </Button>
           </div>
+          </fieldset>
         </form>
+        </div>
       </DialogContent>
     </Dialog>
   );

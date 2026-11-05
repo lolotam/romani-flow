@@ -23,6 +23,7 @@ import type { StorageService } from './services/storageService.js';
 import type { WhatsAppReminders } from './notifications/whatsapp/service.js';
 import { createReminderRuntime } from './whatsapp/runtime.js';
 import { createReminderRouter } from './notifications/whatsapp/routes.js';
+import { createDocumentDraftsRouter } from './routes/documentDrafts.js';
 import { prepareEmployee } from './notifications/whatsapp/employeePolicy.js';
 
 /**
@@ -84,6 +85,7 @@ export function createApp(deps: AppDependencies): Express {
   app.use('/api/whatsapp', authenticated, createPairingRouter(config.whatsapp, config.env, reminders));
   app.use('/api/whatsapp', authenticated, createReminderRouter(reminders, config.env));
   app.use('/api/form-defaults', authenticated, createFormDefaultsRouter(db));
+  app.use('/api/document-drafts', authenticated, createDocumentDraftsRouter(db, reminders.coordinator));
 
   app.use('/api/settings', authenticated, createSettingsRouter(config, db, cron, reminders));
   app.use('/api/files', authenticated, createFilesRouter(config, db, storage, documents));

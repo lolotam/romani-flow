@@ -20,8 +20,12 @@ test('additive 007 upgrades existing employees with opt-in false and default glo
   for(const f of fs.readdirSync('server/db/migrations').filter(f=>f.endsWith('.sql')&&f<'007')) fs.copyFileSync(path.join('server/db/migrations',f),path.join(dir,f));
   runMigrations(db,dir);
   db.prepare("INSERT INTO employees(id,name,created_at,updated_at) VALUES('existing','Synthetic','2026-01-01','2026-01-01')").run();
-  const result=runMigrations(db,path.resolve('server/db/migrations'));
+  fs.copyFileSync('server/db/migrations/007_whatsapp_notifications.sql',path.join(dir,'007_whatsapp_notifications.sql'));
+  const result=runMigrations(db,dir);
   assert.deepEqual(result.applied,['007_whatsapp_notifications.sql']);
+  assert.deepEqual(runMigrations(db,path.resolve('server/db/migrations')).applied,['008_document_drafts.sql']);
+  assert.equal(db.prepare('SELECT count(*) n FROM document_drafts').get().n,0);
+  assert.equal(db.prepare('SELECT name FROM employees WHERE id=?').get('existing').name,'Synthetic');
   assert.equal(db.prepare('SELECT whatsapp_notifications_enabled enabled FROM employees WHERE id=?').get('existing').enabled,0);
   assert.equal(getBoolean(db,'whatsapp.enabled'),false);
   assert.throws(()=>db.prepare('UPDATE employees SET whatsapp_notifications_enabled=2').run(),/CHECK/);

@@ -152,14 +152,16 @@ export class DocumentService {
     documentId: string,
     payload: Row,
     status: (expiry: string | null) => string,
+    onUpdated?: (row: Row) => void,
   ): Promise<Row | null> {
-    return this.serialize(() => this.updateDocumentLocked(documentId, payload, status));
+    return this.serialize(() => this.updateDocumentLocked(documentId, payload, status, onUpdated));
   }
 
   private async updateDocumentLocked(
     documentId: string,
     payload: Row,
     status: (expiry: string | null) => string,
+    onUpdated?: (row: Row) => void,
   ): Promise<Row | null> {
     const fields: Row = { ...payload };
     const uploadId = typeof fields.upload_id === 'string' ? fields.upload_id : null;
@@ -184,6 +186,7 @@ export class DocumentService {
         status: status(expiry),
       });
 
+      if (row) onUpdated?.(row);
       if (uploadId) this.claimUpload(uploadId);
       this.notifications?.changed();
       this.db.exec('COMMIT');
