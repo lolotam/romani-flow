@@ -1,5 +1,6 @@
 // Employees Page
 export const employees = {
+  whatsapp: { optIn: 'إرسال تذكيرات واتساب لهذا الموظف', help: 'تصله وثائقه وإقامته فقط على الموبايل الحالي مع كود الدولة، عند تفعيل إرسال واتساب العام.' },
   title: 'إدارة الموظفين',
   registered: 'إجمالي {{count}} موظف مسجل',
   addEmployee: 'إضافة موظف جديد',

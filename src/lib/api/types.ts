@@ -53,6 +53,7 @@ export interface Employee {
   name: string;
   phone?: string | null;
   mobile_no?: string | null;
+  whatsapp_notifications_enabled?: boolean;
   email?: string | null;
   hire_date?: string | null;
   birth_date?: string | null;

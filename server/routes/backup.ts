@@ -5,6 +5,7 @@ import { requireAdmin } from '../middleware/auth.js';
 import type { Row } from '../repositories/base.js';
 import { setSetting } from '../repositories/settings.js';
 import type { DocumentService } from '../services/documentService.js';
+import type { WhatsAppReminders } from '../notifications/whatsapp/service.js';
 
 /**
  * Backup and erase.
@@ -23,8 +24,9 @@ const BUSINESS_TABLES = [
   'positions',
 ];
 
-export function createBackupRouter(db: Db, documents: DocumentService): Router {
+export function createBackupRouter(db: Db, documents: DocumentService, reminders: WhatsAppReminders): Router {
   const router = Router();
+  const write = <T>(action: () => Promise<T>): Promise<T> => reminders.coordinator.runExclusive(action);
 
   router.get(
     '/export',
@@ -32,7 +34,7 @@ export function createBackupRouter(db: Db, documents: DocumentService): Router {
     asyncHandler(async (_req, res) => {
       const data: Record<string, unknown[]> = {};
 
-      for (const table of BUSINESS_TABLES) {
+      for (const table of [...BUSINESS_TABLES, 'whatsapp_recipients', 'whatsapp_jobs', 'whatsapp_attempts']) {
         data[table] = db.prepare(`SELECT * FROM "${table}"`).all() as Row[];
       }
 
@@ -64,7 +66,7 @@ export function createBackupRouter(db: Db, documents: DocumentService): Router {
   router.post(
     '/erase',
     requireAdmin,
-    asyncHandler(async (_req, res) => {
+    asyncHandler(async (_req, res) => write(async () => {
       // The files are collected before the rows disappear, because afterwards
       // there would be nothing left that points at them.
       const filePaths: string[] = [];
@@ -90,6 +92,11 @@ export function createBackupRouter(db: Db, documents: DocumentService): Router {
         db.prepare('DELETE FROM pending_uploads').run();
         db.prepare('DELETE FROM form_defaults').run();
         db.prepare('DELETE FROM expiry_notifications').run();
+        // Audit/recipient configuration survive business erase; sending requires deliberate re-enable.
+        setSetting(db, 'whatsapp.enabled', false);
+        setSetting(db, 'whatsapp.last_enqueue_date', '');
+        db.prepare("UPDATE whatsapp_jobs SET state='cancelled',error_code='no_longer_eligible',updated_at=? WHERE instance=? AND state IN ('pending','retryable_failed','permanent_failed')")
+          .run(new Date().toISOString(), reminders.auditInstance);
 
         // The seed marker is written here as well: erasing the data must never
         // let the next boot import the seed and resurrect it.
@@ -118,7 +125,7 @@ export function createBackupRouter(db: Db, documents: DocumentService): Router {
         data: { erased: BUSINESS_TABLES, filesRemoved: removed, at: new Date().toISOString() },
         error: null,
       });
-    }),
+    })),
   );
 
   return router;

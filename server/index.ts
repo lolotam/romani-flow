@@ -11,6 +11,9 @@ import { CronService } from './services/cronService.js';
 import { DocumentService } from './services/documentService.js';
 import { Mailer } from './services/mailer.js';
 import { StorageService } from './services/storageService.js';
+import { createReminderRuntime } from './whatsapp/runtime.js';
+import { drainApplication } from './shutdown.js';
+import { stopRequestWork } from './middleware/requestWork.js';
 
 /**
  * Server bootstrap.
@@ -75,6 +78,7 @@ async function main(): Promise<void> {
   const mailer = new Mailer(config);
   const cron = new CronService(db, mailer);
   const documents = new DocumentService(db, storage);
+  const reminders = createReminderRuntime(db, config.whatsapp);
 
   const seed = await seedDatabase(db, {
     seedFile: defaultSeedFile(projectRoot),
@@ -106,23 +110,23 @@ async function main(): Promise<void> {
   }
 
   const staticDir = path.join(projectRoot, 'dist');
-  const app = createApp({ config, db, mailer, cron, storage, documents, staticDir });
+  const app = createApp({ config, db, mailer, cron, storage, documents, staticDir, reminders });
 
   cron.reschedule();
+  reminders.start();
 
   const server = app.listen(config.port, () => {
     console.log(`[server] listening on http://0.0.0.0:${config.port}`);
   });
 
+  let shuttingDown = false;
   const shutdown = (signal: string) => {
+    if (shuttingDown) return;
+    shuttingDown = true;
     console.log(`[server] ${signal} received, shutting down`);
-    cron.stop();
-    server.close(() => {
-      closeDatabase(db);
-      process.exit(0);
-    });
-    // Do not hang forever if a connection refuses to close.
-    setTimeout(() => process.exit(0), 10_000).unref();
+    void drainApplication({ server, stopReminders: () => reminders.stop(),
+      stopCron: () => cron.shutdown(), stopHandlers: () => stopRequestWork(app),
+      closeDatabase: () => closeDatabase(db), exit: code => process.exit(code) });
   };
 
   process.on('SIGTERM', () => shutdown('SIGTERM'));

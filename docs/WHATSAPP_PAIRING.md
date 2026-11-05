@@ -8,9 +8,12 @@ website has its own authorized-admin QR/status flow. Sessions, instance tokens a
 webhook secrets are not shared. The Curemed manager coordinates infrastructure
 and provisioning; Romani does not create/delete/restart/logout another instance.
 
-This release implements **pairing and status only**, not messages or reminders.
-Employee phone choice, overdue repetition, company fallback and residency behavior
-remain unconfirmed defaults in the broader reminder specification. Goal B's
+This pairing slice implements **pairing and status only**. The separate local
+[reminder implementation](WHATSAPP.md) remains migration/release-gated.
+The owner has confirmed the current employee mobile with country code, once-only
+expired reminders, company documents for management and employee residency in the
+broader reminder specification. Reminder implementation/release is separate from
+this deployed pairing slice. Goal B's
 accepted production release, rollback, KEEP, audit/fixture/data remain preserved.
 
 ## Confirmed managed service
@@ -35,12 +38,14 @@ foreign401. These are manager receipts, not SA reruns or website/device proof.
 
 | Variable | Requirement |
 | --- | --- |
-| `ROMANI_EVOLUTION_URL` | Approved internal HTTP/HTTPS API base/prefix, no userinfo/query/fragment. |
+| `ROMANI_EVOLUTION_URL` | Production reminders require a canonical internal HTTP/HTTPS origin only, no prefix/userinfo/query/fragment. Pairing-only fixtures retain base-prefix compatibility; this does not establish send readiness. |
 | `ROMANI_EVOLUTION_API_KEY` | Instance `romani` token, minimum16 characters, never master/Curemed key. |
 | `ROMANI_EVOLUTION_INSTANCE` | Exact `romani` in production; code also permits the romani-prefixed namespace for isolated fixtures. |
 | `ROMANI_EVOLUTION_WEBHOOK_SECRET` | Independent private random value, minimum32 characters, different from API token. |
 
-Use the approved private operator handoff, no values in chat or `VITE_` copies.
+Future values are entered by Waleed through `request_secret` or the hub UI; no
+values in chat or `VITE_` copies. The manager must not read or copy the provider
+private handoff file or rerun file-based configuration helpers.
 Leave all four empty to keep pairing unconfigured without affecting email/app boot.
 Partial/invalid values fail closed for pairing; no global credential fallback.
 Ordinary settings and business exports never contain this configuration.
@@ -93,7 +98,8 @@ are sanitized without logging the original request body.
 
 ## Authenticated connection-only webhook
 
-After the reviewed endpoint is deployed, the shared-service owner configures only
+After the reviewed endpoint is deployed AND the shared-service LOG_LEVEL patch
+has a verified execution receipt, the shared-service owner configures only
 the dedicated Romani instance, preserving Curemed/global configuration:
 
 ```json
@@ -135,12 +141,12 @@ Before release: exact-head typecheck/build/lint/config/forms/operations/API test
 review-thread pagination and concrete release packet. Pairing adds no SQL migration.
 Preserve running rollback image and all existing data; do not down-migrate/wipe.
 
-The native provisioning/denial/connectivity receipt is recorded above. Before
-activation, consume only the ready Romani private handoff inside the trusted
-reviewed operator process. It remains server-only; do not print/read its values
-into tool output/chat. Deploy the reviewed
-webhook endpoint before configuring it. Generate the actual QR/ask for the account
-holder scan only when the real reviewed flow is ready. No customer messages,
+The native provisioning/denial/connectivity receipt is recorded above. Future
+secret entry belongs to Waleed through `request_secret` or the hub UI; do not read
+or copy the provider private handoff file or rerun prior file-based helpers.
+Deploy the reviewed webhook endpoint and obtain the shared LOG_LEVEL execution
+verification receipt before activation. Then proceed one step at a time: real QR
+with the account holder, dedicated connection webhook, and scoped smoke test. No customer messages,
 bulk/history calls, payment/shipment, Ministry-hold lift, working-key rotation or
 shared-session reset is included. Do not equate source auth checks with native
 runtime proof or local fake-provider QR with a live WhatsApp QR.

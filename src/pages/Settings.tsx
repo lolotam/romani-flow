@@ -24,6 +24,7 @@ import DocumentTypesSettings from '@/components/settings/DocumentTypesSettings';
 import MinistriesSettings from '@/components/settings/MinistriesSettings';
 import BackupSettings from '@/components/settings/BackupSettings';
 import WhatsAppPairingSettings from '@/components/settings/WhatsAppPairingSettings';
+import WhatsAppSettings from '@/components/settings/WhatsAppSettings';
 
 export default function Settings() {
   const { t, isRTL } = useLanguage();
@@ -224,7 +225,7 @@ export default function Settings() {
             <TabsContent value="email">
               <EmailSettingsComponent />
             </TabsContent>
-            {user?.role === 'admin' && <TabsContent value="whatsapp"><WhatsAppPairingSettings /></TabsContent>}
+            {user?.role === 'admin' && <TabsContent value="whatsapp" className="space-y-5"><WhatsAppPairingSettings /><WhatsAppSettings /></TabsContent>}
 
             <TabsContent value="appearance">
               <AppearanceSettings darkMode={theme === 'dark'} onToggleDarkMode={toggleDarkMode} />

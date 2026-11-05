@@ -1,11 +1,13 @@
 # ROMANI Flow — Employee and Document Management
 
 A bilingual (Arabic / English) web application for managing employees and their
-documents, with expiry reminders delivered by email.
+documents, with expiry reminders delivered by email and optional WhatsApp.
 
 Administrator-only [WhatsApp QR pairing](docs/WHATSAPP_PAIRING.md) connects a
 dedicated Romani instance on the shared Evolution service. Pairing does not send
-messages or enable the separately proposed WhatsApp reminder automation.
+messages or enable reminders automatically. [WhatsApp reminders](docs/WHATSAPP.md)
+add named management recipients, employee opt-in and a durable outgoing log;
+the channel defaults off and its migration/live activation remain release-gated.
 
 The application is a **Vite + React SPA served by a small Node API**. The API
 owns a **SQLite database** and a **file bucket** that lives on a mounted volume

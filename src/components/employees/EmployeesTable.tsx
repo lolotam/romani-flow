@@ -168,9 +168,9 @@ export function EmployeesTable({
               </div>
             </TableCell>
             <TableCell>
-              {employee.mobile_no ? (
+              {(employee.mobile_no || employee.phone) ? (
                 <div className="flex items-center space-x-2">
-                  <span>{employee.mobile_no}</span>
+                  <span>{(employee.mobile_no || employee.phone)}</span>
                 </div>
               ) : (
                 <span className="text-muted-foreground">{t('employees.status.notSpecified')}</span>

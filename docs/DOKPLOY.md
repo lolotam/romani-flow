@@ -1,5 +1,9 @@
 # Deploying ROMANI Flow on Dokploy
 
+For [WhatsApp reminders](WHATSAPP.md), merging main would apply additive migration007
+at startup. Keep the channel disabled and obtain the migration/release disposition
+before merge; QR/status approval alone does not permit reminder activation.
+
 The application runs as a **single container** that serves both the API and the
 built SPA. Everything that must survive a redeploy — the SQLite database and
 every uploaded file — lives in **one directory on the host**, mounted into the
@@ -53,7 +57,10 @@ share, or an object-storage mount — SQLite needs proper `fcntl` locking there.
 2. **Create Application → Dockerfile** (or "Compose" if you prefer the file below).
 3. Point the build context at the repository root (`romani-flow`) and leave the
    Dockerfile as `Dockerfile`.
-4. **Domain**: add the domain you want, e.g. `romani.curemed.iq`. Traefik
+4. **Domain**: use `romani.curemedkw.com` for this reviewed release. WhatsApp admin
+   writes use the server-fixed public origin `https://romani.curemedkw.com`.
+   Another domain requires a reviewed origin-policy change, not browser-supplied
+   Host/forwarded-header authority. Traefik
    terminates TLS and routes it to the container's port `3000`.
 
 ### Using the compose file instead
@@ -145,12 +152,14 @@ mount that file read-only at `/app/data/seed.json`. Never commit a personal-data
 seed or copy it into the image. Review the import and administrator bootstrap
 before starting the backend; normal startup migrates, seeds and arms the scheduler.
 
-Deploy and watch the logs. A healthy first boot with an approved seed mounted prints:
+After the separately approved release, deploy and watch the logs. The following
+is an illustrative fresh-install log for the reminder release, with a separately
+approved seed mounted; it does not claim production migration `007` has run:
 
 ```
 [server] environment : production
 [server] data dir    : /data
-[server] applied migrations: 001_init.sql, 002_indexes.sql, 003_expiry_notifications.sql, 004_pending_uploads.sql
+[server] applied migrations: 001_init.sql, 002_indexes.sql, 003_expiry_notifications.sql, 004_pending_uploads.sql, 005_notification_identity.sql, 006_form_defaults.sql, 007_whatsapp_notifications.sql
 [server] imported seed data: companies=2, ministries=5, document_types=8, positions=6, employees=20, documents=3
 [server] created admin accounts: <the addresses you put in ADMIN_SEED_EMAILS>
 [server] listening on http://0.0.0.0:3000
@@ -159,7 +168,7 @@ Deploy and watch the logs. A healthy first boot with an approved seed mounted pr
 Then check:
 
 ```bash
-curl -fsS https://romani.curemed.iq/api/health
+curl -fsS https://romani.curemedkw.com/api/health
 # {"status":"healthy","database":"ok","smtp":true,"timestamp":"…"}
 ```
 

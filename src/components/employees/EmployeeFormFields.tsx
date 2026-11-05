@@ -102,6 +102,9 @@ export function EmployeeFormFields({
         <Input
           id={id('mobile_no')}
           value={formData.mobile_no}
+          dir="ltr"
+          inputMode="tel"
+          required={formData.whatsapp_notifications_enabled}
           onChange={(e) => onChange({ mobile_no: e.target.value })}
         />
       </div>
@@ -184,6 +187,14 @@ export function EmployeeFormFields({
             </span>
           )}
         </div>
+      </div>
+      <div className="col-span-2 space-y-2">
+        <div className="flex items-center gap-3">
+          <Switch id={id('whatsapp_notifications_enabled')} checked={formData.whatsapp_notifications_enabled}
+            onCheckedChange={checked => onChange({ whatsapp_notifications_enabled: checked })} />
+          <Label htmlFor={id('whatsapp_notifications_enabled')}>{t('employees.whatsapp.optIn')}</Label>
+        </div>
+        <p className="text-sm text-muted-foreground">{t('employees.whatsapp.help')}</p>
       </div>
       <div className="col-span-2">
         <Label htmlFor={id('is_active')}>{t('employees.dialog.fields.employeeStatus')}</Label>

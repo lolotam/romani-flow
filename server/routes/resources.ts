@@ -13,6 +13,7 @@ import {
 import { asyncHandler } from '../middleware/errorHandler.js';
 import { requireAdmin } from '../middleware/auth.js';
 import { rememberSubmission } from '../repositories/formDefaults.js';
+import { atomic } from '../notifications/whatsapp/repository.js';
 
 /**
  * Generic CRUD router.
@@ -25,7 +26,9 @@ export interface ResourceOptions {
   /** Relations embedded when the client does not ask for them explicitly. */
   defaultRelations?: string[];
   /** Hook applied to every write payload before it reaches the database. */
-  transformWrite?: (payload: Row, db: Db) => Row;
+  transformWrite?: (payload: Row, db: Db, existing?: Row) => Row;
+  aroundWrite?: <T>(action: () => Promise<T>) => Promise<T>;
+  afterWrite?: () => void;
   /** Hook that shapes a row on the way out, for derived or typed values. */
   transformRead?: (row: Row, db: Db) => Row;
   /** Hook that performs the delete and any cleanup it owns. */
@@ -66,6 +69,7 @@ export function createResourceRouter(
   options: ResourceOptions = {},
 ): Router {
   const router = Router();
+  const write = <T>(action: () => Promise<T>): Promise<T> => options.aroundWrite ? options.aroundWrite(action) : action();
 
   const relationsFor = (req: Request): string[] => {
     const parsed = parseListOptions(req.query, tableName);
@@ -91,7 +95,7 @@ export function createResourceRouter(
   router.post(
     '/',
     requireAdmin,
-    asyncHandler(async (req, res) => {
+    asyncHandler(async (req, res) => write(async () => {
       const payload = readPayload(req);
       const records = Array.isArray(payload) ? payload : [payload];
 
@@ -103,6 +107,7 @@ export function createResourceRouter(
           const prepared = options.transformWrite ? options.transformWrite(record, db) : record;
           const row = insertRow(db, tableName, prepared);
           rememberSubmission(db, req.user!.id, tableName, shape(row));
+          options.afterWrite?.();
           return row;
         });
         db.exec('COMMIT');
@@ -114,7 +119,7 @@ export function createResourceRouter(
       // The rows are shaped on the way out, exactly like a GET would do them, so
       // the client sees the same column types no matter how it created the row.
       res.status(201).json({ data: inserted.map(shape), error: null });
-    }),
+    })),
   );
 
   router.get(
@@ -135,7 +140,7 @@ export function createResourceRouter(
   router.patch(
     '/:id',
     requireAdmin,
-    asyncHandler(async (req, res) => {
+    asyncHandler(async (req, res) => write(async () => {
       const payload = readPayload(req);
       assertNoManagedFields(payload, options.managedFields ?? [], tableName);
 
@@ -144,8 +149,14 @@ export function createResourceRouter(
         throw new RepositoryError('The identifier cannot be changed.', 'immutable_field', 400);
       }
 
-      const prepared = options.transformWrite ? options.transformWrite(payload, db) : payload;
-      const row = updateRow(db, tableName, String(req.params.id), prepared);
+      const row = atomic(db, () => {
+        const existing = findRow(db, tableName, String(req.params.id), []);
+        if (!existing) return null;
+        const prepared = options.transformWrite ? options.transformWrite(payload, db, existing ?? undefined) : payload;
+        const updated = updateRow(db, tableName, String(req.params.id), prepared);
+        options.afterWrite?.();
+        return updated;
+      });
 
       if (!row) {
         res.status(404).json({
@@ -155,15 +166,19 @@ export function createResourceRouter(
         return;
       }
       res.json({ data: shape(row), error: null });
-    }),
+    })),
   );
 
   router.delete(
     '/:id',
     requireAdmin,
-    asyncHandler(async (req, res) => {
+    asyncHandler(async (req, res) => write(async () => {
       const id = String(req.params.id);
-      const deleted = options.onDelete ? await options.onDelete(id) : deleteRow(db, tableName, id);
+      const deleted = options.onDelete ? await options.onDelete(id) : atomic(db, () => {
+        const result = deleteRow(db, tableName, id);
+        options.afterWrite?.();
+        return result;
+      });
       if (!deleted) {
         res.status(404).json({
           data: null,
@@ -172,7 +187,7 @@ export function createResourceRouter(
         return;
       }
       res.json({ data: { id, deleted: true }, error: null });
-    }),
+    })),
   );
 
   return router;

@@ -1,5 +1,15 @@
 # Romani Flow operating guide
 
+WhatsApp reminder migration, queue/unknown states, private credentials and isolated
+recovery safeguards are documented in [WHATSAPP.md](WHATSAPP.md). Do not merge its
+additive migration into auto-deploying main before the production release gate.
+
+Waleed is the release decision owner for this migration/deployment. The exact-head
+review/check/backup/rollback packet and his disposition must be recorded in the
+existing project conversation. Historical Super Admin reviews retain their
+original source attribution; they are not current release approval. Successful
+bot checks do not authorize a migration or auto-deploying merge on their own.
+
 ## Deployment and identity
 
 Production is the Dockerfile/direct Node deployment at https://romani.curemedkw.com.
@@ -153,10 +163,34 @@ its command and runtime files without starting the application or mounting data.
 If application rollout fails, restore that preserved image through the deployment
 controller and verify its health/build identity. Do not replace the database as
 an application rollback, and do not change secrets to mask an application fault.
-This release introduces no schema migration.
+The earlier Goal-B operations release introduced no schema migration. The separate
+WhatsApp reminder release includes additive migration `007_whatsapp_notifications.sql`.
+Before that release, rehearse the migration on an isolated recovery copy and verify
+that the preserved old application image can still read the migrated database.
+An image-only rollback retains the additive schema and notification audit data;
+do not down-migrate, wipe or replace the production database to undo this feature.
 
 Capture sanitized status/error counts, exact head and merge SHA, image ID and
 timestamps. Keep customer names, file contents, account emails and secrets out of
-public receipts. Send concrete blockers/results directly to SA; tool acceptance is
-not SA approval. Freeze only when the accepted B1–B8 ledger has journey and
-operating evidence and the final release is accepted.
+public receipts. Record concrete blockers/results and the exact-head release
+disposition directly with Waleed in the existing project conversation. Historical
+Super Admin reviews retain their source attribution only. Goal B's accepted
+B1–B8 ledger remains frozen; acceptance/freeze of the separate WhatsApp W1–W9
+scope requires its own completed evidence and owner disposition.
+
+
+## Reminder shutdown and business-erasure retention
+
+The reminder release awaits HTTP, WhatsApp handoff and active cron/SMTP work before
+closing SQLite. The application has a 90-second hard shutdown ceiling; SMTP's
+15/15/30-second connection/greeting/socket timers are phase/idle limits rather
+than a total-operation bound. Verify the managed stop grace with operational
+margin before deployment. A forced shutdown remains an uncertain-delivery case,
+not proof of an unsent email. Do not change production grace without the owner
+release disposition.
+
+Business erase retains WhatsApp audit (including names/numbers/message text) and
+management recipients, disables WhatsApp and clears its enqueue checkpoint
+atomically. It is not a privacy purge. New business data cannot reactivate
+WhatsApp without deliberate administrator enablement. Preserve retained audit
+and recipient configuration; any full purge needs a separate explicit decision.

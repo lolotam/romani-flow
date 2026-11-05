@@ -1,4 +1,35 @@
-import type { ExpiryStatus } from '@/types';
+import type { Company, EmployeeWithRelations, ExpiryStatus } from '@/types';
+import type { EmployeeFormState } from './employeeTypes';
+import { formPatch } from '../../lib/formPatch';
+
+/**
+ * Builds the payload sent to the API.
+ *
+ * Empty fields are sent as `null` on purpose: the server keeps a stored value
+ * when a key is absent, but clears it when the key is explicitly `null`.
+ * Untouched edit-form consent is omitted rather than replayed from a stale form.
+ * Other untouched fields are omitted too, including concurrent mobile changes.
+ */
+export function buildEmployeePayload(formData: EmployeeFormState, changes?: Partial<Record<keyof EmployeeFormState, boolean>>) {
+  const payload = {
+    name: formData.name,
+    email: formData.email || null,
+    mobile_no: formData.mobile_no || null,
+    whatsapp_notifications_enabled: formData.whatsapp_notifications_enabled,
+    position: formData.position || null,
+    hire_date: formData.hire_date || null,
+    birth_date: formData.birth_date || null,
+    civil_id_no: formData.civil_id_no || null,
+    residency_expiry_date: formData.residency_expiry_date || null,
+    driving_license: formData.driving_license,
+    driving_license_expiry_date: formData.driving_license ? formData.driving_license_expiry_date || null : null,
+    company_id: formData.company_id,
+    is_active: formData.is_active,
+  };
+  // Disabling the licence explicitly clears its dependent expiry as before.
+  return formPatch(payload, changes?.driving_license && !formData.driving_license
+    ? { ...changes, driving_license_expiry_date: true } : changes);
+}
 
 /**
  * Shared helpers for the employee screens.
@@ -68,4 +99,23 @@ export function expiryDateClassName(expiryDate?: string | null): string {
   if (expiry < new Date()) return 'text-red-500';
   if (expiry < new Date(Date.now() + 30 * 24 * 60 * 60 * 1000)) return 'text-orange-500';
   return 'text-green-600';
+}
+
+/**
+ * The company relation an employee row should display for `companyId`.
+ *
+ * It never returns a relation that belongs to a different company: sources are
+ * only trusted when their own `company_id` matches, and the loaded company list
+ * is the fallback. This keeps the displayed company consistent with the id the
+ * server stored, even when another administrator changed it after the form opened.
+ */
+export function relationForCompany(
+  companyId: string | null | undefined,
+  sources: Array<Pick<EmployeeWithRelations, 'company_id' | 'companies'>>,
+  companies: Company[],
+): Company | null {
+  if (!companyId) return null;
+  const loaded = companies.find((company) => company.id === companyId);
+  if (loaded) return loaded;
+  return sources.find((source) => source.company_id === companyId && source.companies)?.companies ?? null;
 }

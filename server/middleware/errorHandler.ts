@@ -1,5 +1,6 @@
 import type { NextFunction, Request, Response } from 'express';
 import { RepositoryError } from '../repositories/base.js';
+import { runRequestWork } from './requestWork.js';
 
 /** Reads the SQLite error code from a driver error, when there is one. */
 function getSqliteErrorCode(error: unknown): string | null {
@@ -161,6 +162,11 @@ export function asyncHandler<T extends Request = Request>(
   handler: (req: T, res: Response, next: NextFunction) => Promise<unknown>,
 ) {
   return (req: Request, res: Response, next: NextFunction): void => {
-    void handler(req as T, res, next).catch(next);
+    const pending = runRequestWork(req.app, () => handler(req as T, res, next));
+    if (!pending) {
+      res.status(503).json({ data: null, error: { message: 'Server is shutting down.', code: 'shutting_down' } });
+      return;
+    }
+    void pending.catch(next);
   };
 }

@@ -7,6 +7,8 @@ import {
   type Row,
 } from '../repositories/base.js';
 import type { StorageService } from './storageService.js';
+import type { NotificationCoordinator } from '../notifications/coordinator.js';
+import { atomic } from '../notifications/whatsapp/repository.js';
 
 /**
  * Document file lifecycle.
@@ -34,10 +36,19 @@ export interface StorageFields {
 }
 
 export class DocumentService {
+  private notifications: { coordinator: NotificationCoordinator; changed: () => void } | null = null;
   constructor(
     private readonly db: Db,
     private readonly storage: StorageService,
   ) {}
+
+  configureNotifications(hooks: { coordinator: NotificationCoordinator; changed: () => void }): void {
+    this.notifications = hooks;
+  }
+
+  private serialize<T>(action: () => Promise<T>): Promise<T> {
+    return this.notifications ? this.notifications.coordinator.runExclusive(action) : action();
+  }
 
   /** Records a freshly uploaded file so a record can claim it. */
   registerUpload(upload: Omit<StoredUpload, 'uploadId'>): StoredUpload {
@@ -99,7 +110,12 @@ export class DocumentService {
    * transaction rolls back and the upload stays pending, so the administrator
    * can correct the data and retry with the same upload id.
    */
-  createDocument(payload: Row, status: (expiry: string | null) => string, onCreated?: (row: Row) => void): Row {
+  async createDocument(payload: Row, status: (expiry: string | null) => string, onCreated?: (row: Row) => void): Promise<Row> {
+    // Same coordinator as update/delete, so a create cannot interleave with a backup erase.
+    return this.serialize(async () => this.createDocumentLocked(payload, status, onCreated));
+  }
+
+  private createDocumentLocked(payload: Row, status: (expiry: string | null) => string, onCreated?: (row: Row) => void): Row {
     const fields: Row = { ...payload };
     const uploadId = typeof fields.upload_id === 'string' ? fields.upload_id : null;
     delete fields.upload_id;
@@ -117,6 +133,7 @@ export class DocumentService {
 
       if (uploadId) this.claimUpload(uploadId);
       onCreated?.(row);
+      this.notifications?.changed();
       this.db.exec('COMMIT');
       return row;
     } catch (error) {
@@ -132,6 +149,14 @@ export class DocumentService {
    * leave the record pointing at a file that was already deleted.
    */
   async updateDocument(
+    documentId: string,
+    payload: Row,
+    status: (expiry: string | null) => string,
+  ): Promise<Row | null> {
+    return this.serialize(() => this.updateDocumentLocked(documentId, payload, status));
+  }
+
+  private async updateDocumentLocked(
     documentId: string,
     payload: Row,
     status: (expiry: string | null) => string,
@@ -160,6 +185,7 @@ export class DocumentService {
       });
 
       if (uploadId) this.claimUpload(uploadId);
+      this.notifications?.changed();
       this.db.exec('COMMIT');
 
       // Only a replacement upload retires the old file; a data-only update keeps it.
@@ -211,11 +237,19 @@ export class DocumentService {
 
   /** Deletes a document and its file together. */
   async deleteDocument(documentId: string): Promise<boolean> {
+    return this.serialize(() => this.deleteDocumentLocked(documentId));
+  }
+
+  private async deleteDocumentLocked(documentId: string): Promise<boolean> {
     const document = findRow(this.db, 'documents', documentId, []);
     if (!document) return false;
 
-    const result = this.db.prepare('DELETE FROM documents WHERE id = ?').run(documentId);
-    if (result.changes === 0) return false;
+    const deleted = atomic(this.db, () => {
+      const result = this.db.prepare('DELETE FROM documents WHERE id = ?').run(documentId);
+      this.notifications?.changed();
+      return result.changes !== 0;
+    });
+    if (!deleted) return false;
 
     await this.removeFile(document);
     return true;

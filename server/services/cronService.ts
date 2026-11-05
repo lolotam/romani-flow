@@ -27,18 +27,32 @@ export interface CronStatus {
   nextRun: string | null;
 }
 
+interface CronResult { sent: boolean; skipped?: string; error?: string }
+
 export class CronService {
   private task: ScheduledTask | null = null;
   private inFlight = false;
+  private reminderEnqueue: (() => Promise<unknown>) | null = null;
+  private readonly activeRuns = new Set<Promise<CronResult>>();
+  private closing = false;
 
   constructor(
     private readonly db: Db,
     private readonly mailer: Mailer,
   ) {}
 
+  setReminderEnqueue(action: () => Promise<unknown>): void { this.reminderEnqueue = action; }
+
+  private async enqueueReminders(source: 'cron' | 'manual'): Promise<void> {
+    if (source !== 'cron' || !this.reminderEnqueue) return;
+    try { await this.reminderEnqueue(); }
+    catch { console.error('[whatsapp] scheduled selection failed; details suppressed'); }
+  }
+
   /** Reads the schedule from the database and (re)arms the scheduler. */
   reschedule(): CronStatus {
     this.stop();
+    if (this.closing) return this.status();
 
     const enabled = getBoolean(this.db, 'cron.enabled');
     const schedule = getString(this.db, 'cron.schedule', '0 8 * * *');
@@ -68,18 +82,30 @@ export class CronService {
    * A run that is already in flight is not started twice, and an automatic run
    * that already happened today is skipped so a container restart cannot send a
    * second copy of the same report.
+   * WhatsApp selection remains idempotent and independent when a manual email
+   * report overlaps the real scheduled firing.
    */
-  async run(source: 'cron' | 'manual' = 'cron'): Promise<{ sent: boolean; skipped?: string; error?: string }> {
-    if (this.inFlight) {
-      return { sent: false, skipped: 'already_running' };
-    }
+  run(source: 'cron' | 'manual' = 'cron'): Promise<CronResult> {
+    if (this.closing) return Promise.resolve({ sent: false, skipped: 'shutting_down' });
+    const active = this.executeRun(source);
+    this.activeRuns.add(active);
+    void active.then(() => this.activeRuns.delete(active), () => this.activeRuns.delete(active));
+    return active;
+  }
 
-    if (source === 'cron' && shouldSkipAutomatedRun(this.db)) {
-      return { sent: false, skipped: 'already_run_today' };
+  private async executeRun(source: 'cron' | 'manual'): Promise<CronResult> {
+    if (this.inFlight) {
+      await this.enqueueReminders(source);
+      return { sent: false, skipped: 'already_running' };
     }
 
     this.inFlight = true;
     try {
+      // WhatsApp owns its checkpoint; an email success/disable must not suppress it.
+      await this.enqueueReminders(source);
+      if (source === 'cron' && shouldSkipAutomatedRun(this.db)) {
+        return { sent: false, skipped: 'already_run_today' };
+      }
       const result = await sendExpiryReport(this.db, this.mailer, source);
 
       if (source === 'cron') {
@@ -112,7 +138,7 @@ export class CronService {
     return {
       enabled: getBoolean(this.db, 'cron.enabled'),
       schedule: getString(this.db, 'cron.schedule', '0 8 * * *'),
-      running: this.inFlight,
+      running: this.activeRuns.size > 0,
       lastRunAt: getString(this.db, 'cron.last_run_at'),
       lastRunResult: getString(this.db, 'cron.last_run_result'),
       nextRun: this.task?.getNextRun()?.toISOString() ?? null,
@@ -124,6 +150,12 @@ export class CronService {
       this.task.stop();
       this.task = null;
     }
+  }
+
+  async shutdown(): Promise<void> {
+    this.closing = true;
+    this.stop();
+    await Promise.all([...this.activeRuns]);
   }
 
 }

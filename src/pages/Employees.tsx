@@ -18,7 +18,7 @@ import { EmployeeFormDialog } from '@/components/employees/EmployeeFormDialog';
 import { EmployeeViewDialogContent } from '@/components/employees/EmployeeViewDialogContent';
 import { EMPTY_EMPLOYEE_FORM } from '@/components/employees/employeeTypes';
 import type { EmployeeFormState } from '@/components/employees/employeeTypes';
-import { formatDateForInput, toEmployeeFlags } from '@/components/employees/employeeHelpers';
+import { buildEmployeePayload, formatDateForInput, relationForCompany, toEmployeeFlags } from '@/components/employees/employeeHelpers';
 
 export default function Employees() {
   const [employees, setEmployees] = useState<EmployeeWithRelations[]>([]);
@@ -30,6 +30,7 @@ export default function Employees() {
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
   const [selectedEmployee, setSelectedEmployee] = useState<EmployeeWithRelations | null>(null);
+  const [employeeChanges, setEmployeeChanges] = useState<Partial<Record<keyof EmployeeFormState, boolean>>>({});
   const [isViewDialogOpen, setIsViewDialogOpen] = useState(false);
   const [viewEmployee, setViewEmployee] = useState<EmployeeWithRelations | null>(null);
   const [sortField, setSortField] = useState<SortField>('name');
@@ -46,29 +47,6 @@ export default function Employees() {
       setSortDirection('asc');
     }
   };
-
-  /**
-   * Builds the payload sent to the API.
-   *
-   * Empty fields are sent as `null` on purpose: the server keeps a stored value
-   * when a key is absent, but clears it when the key is explicitly `null`.
-   */
-  const buildEmployeePayload = (formData: EmployeeFormState) => ({
-    name: formData.name,
-    email: formData.email || null,
-    mobile_no: formData.mobile_no || null,
-    position: formData.position || null,
-    hire_date: formData.hire_date || null,
-    birth_date: formData.birth_date || null,
-    civil_id_no: formData.civil_id_no || null,
-    residency_expiry_date: formData.residency_expiry_date || null,
-    driving_license: formData.driving_license,
-    driving_license_expiry_date: formData.driving_license
-      ? formData.driving_license_expiry_date || null
-      : null,
-    company_id: formData.company_id,
-    is_active: formData.is_active,
-  });
 
   const handleAddEmployee = async () => {
     if (!formData.name.trim() || !formData.company_id) {
@@ -128,24 +106,21 @@ export default function Employees() {
       const { data, error } = await api.update<EmployeeWithRelations>(
         'employees',
         selectedEmployee.id,
-        buildEmployeePayload(formData),
+        buildEmployeePayload(formData, employeeChanges),
       );
 
       if (error) throw error;
 
       // Update local state
-      const company = companies.find(c => c.id === formData.company_id);
       const updated = data ?? selectedEmployee;
       setEmployees(prev =>
-        prev.map(emp =>
-          emp.id === selectedEmployee.id
-            ? {
-                ...emp,
-                ...updated,
-                companies: company ?? emp.companies,
-              }
-            : emp,
-        ),
+        prev.map(emp => {
+          if (emp.id !== selectedEmployee.id) return emp;
+          const merged = { ...emp, ...updated };
+          // The relation follows the company id the server returned, never the
+          // (possibly stale) form value, so it can never contradict `company_id`.
+          return { ...merged, companies: relationForCompany(merged.company_id, [updated, emp], companies) };
+        }),
       );
 
       toast({
@@ -215,10 +190,12 @@ export default function Employees() {
 
   const openEditDialog = (employee: EmployeeWithRelations) => {
     setSelectedEmployee(employee);
+    setEmployeeChanges({});
     setFormData({
       name: employee.name,
       email: employee.email || '',
       mobile_no: employee.mobile_no || '',
+      whatsapp_notifications_enabled: employee.whatsapp_notifications_enabled ?? false,
       position: employee.position || '',
       hire_date: formatDateForInput(employee.hire_date),
       birth_date: formatDateForInput(employee.birth_date),
@@ -239,6 +216,7 @@ export default function Employees() {
         employee.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
         employee.email?.toLowerCase().includes(searchTerm.toLowerCase()) ||
         employee.mobile_no?.includes(searchTerm) ||
+        employee.phone?.includes(searchTerm) ||
         employee.position?.toLowerCase().includes(searchTerm.toLowerCase());
 
       const matchesCompany = selectedCompany === 'all' || employee.company_id === selectedCompany;
@@ -247,8 +225,8 @@ export default function Employees() {
     });
 
     return filtered.sort((a, b) => {
-      let aValue = a[sortField] || '';
-      let bValue = b[sortField] || '';
+      let aValue = sortField === 'mobile_no' ? a.mobile_no || a.phone || '' : a[sortField] || '';
+      let bValue = sortField === 'mobile_no' ? b.mobile_no || b.phone || '' : b[sortField] || '';
 
       if (sortDirection === 'desc') {
         [aValue, bValue] = [bValue, aValue];
@@ -293,7 +271,7 @@ export default function Employees() {
           const transformedEmployees = (employeesData || []).map(emp => ({
             ...emp,
             email: emp.email || '',
-            mobile_no: emp.mobile_no || emp.phone || '',
+            mobile_no: emp.mobile_no || '',
             is_active: emp.is_active !== undefined ? emp.is_active : true,
             document_count: 0, // Will be calculated separately
             // Ensure company object is populated
@@ -331,6 +309,7 @@ export default function Employees() {
   const [formData, setFormData] = useLastSubmissionState<EmployeeFormState>('employees', EMPTY_EMPLOYEE_FORM, isAddDialogOpen);
 
   const updateFormData = (patch: Partial<EmployeeFormState>) => {
+    if (isEditDialogOpen) setEmployeeChanges(previous => ({ ...previous, ...Object.fromEntries(Object.keys(patch).map(key => [key, true])) }));
     setFormData(prev => ({ ...prev, ...patch }));
   };
 
