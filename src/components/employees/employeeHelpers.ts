@@ -1,4 +1,4 @@
-import type { ExpiryStatus } from '@/types';
+import type { Company, EmployeeWithRelations, ExpiryStatus } from '@/types';
 import type { EmployeeFormState } from './employeeTypes';
 import { formPatch } from '../../lib/formPatch';
 
@@ -99,4 +99,23 @@ export function expiryDateClassName(expiryDate?: string | null): string {
   if (expiry < new Date()) return 'text-red-500';
   if (expiry < new Date(Date.now() + 30 * 24 * 60 * 60 * 1000)) return 'text-orange-500';
   return 'text-green-600';
+}
+
+/**
+ * The company relation an employee row should display for `companyId`.
+ *
+ * It never returns a relation that belongs to a different company: sources are
+ * only trusted when their own `company_id` matches, and the loaded company list
+ * is the fallback. This keeps the displayed company consistent with the id the
+ * server stored, even when another administrator changed it after the form opened.
+ */
+export function relationForCompany(
+  companyId: string | null | undefined,
+  sources: Array<Pick<EmployeeWithRelations, 'company_id' | 'companies'>>,
+  companies: Company[],
+): Company | null {
+  if (!companyId) return null;
+  const loaded = companies.find((company) => company.id === companyId);
+  if (loaded) return loaded;
+  return sources.find((source) => source.company_id === companyId && source.companies)?.companies ?? null;
 }

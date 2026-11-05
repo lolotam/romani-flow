@@ -77,11 +77,22 @@ export function createReminderRouter(reminders: WhatsAppReminders, env: NodeEnv)
       const clause = where.join(' AND ');
       const total = db.prepare(`SELECT count(*) total FROM whatsapp_jobs WHERE ${clause}`).get(...values)!.total;
       const hasCapacity = reminders.store.queueSize() < 2000;
-      const items = db.prepare(`SELECT * FROM whatsapp_jobs WHERE ${clause} ORDER BY created_at DESC,id LIMIT ? OFFSET ?`).all(...values, limit, offset)
+      const jobs = db.prepare(`SELECT * FROM whatsapp_jobs WHERE ${clause} ORDER BY created_at DESC,id LIMIT ? OFFSET ?`).all(...values, limit, offset);
+      // One query for the whole page instead of one per job (the page is capped at 100 rows).
+      const attemptsByJob = new Map<string, Record<string, unknown>[]>();
+      if (jobs.length) {
+        const rows = db.prepare(`SELECT * FROM whatsapp_attempts WHERE job_id IN (${jobs.map(() => '?').join(',')}) ORDER BY job_id,attempt`)
+          .all(...jobs.map(job => String(job.id)));
+        for (const row of rows) {
+          const key = String(row.job_id), list = attemptsByJob.get(key);
+          if (list) list.push(row); else attemptsByJob.set(key, [row]);
+        }
+      }
+      const items = jobs
         .map(job => ({ ...job,
           retry_allowed: Boolean(reminders.instance && reminders.instance === reminders.auditInstance) && isValidReminderText(job.text) && normalizeWhatsAppPhone(job.recipient) === job.recipient &&
             Number(job.attempt_count) < 4 && (job.state === 'retryable_failed' || (hasCapacity && job.state === 'permanent_failed' && isManualRetryFailure(job.error_code))),
-          attempts: db.prepare('SELECT * FROM whatsapp_attempts WHERE job_id=? ORDER BY attempt').all(String(job.id)) }));
+          attempts: attemptsByJob.get(String(job.id)) ?? [] }));
       res.json({ data: { items, total }, error: null });
     } catch (error) { next(error); }
   });

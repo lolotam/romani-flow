@@ -86,7 +86,7 @@ export function createDocumentsRouter(db: Db, documents: DocumentService): Route
         prepared.expiry_date = normalizeDate(prepared.expiry_date);
       }
 
-      const row = documents.createDocument(prepared, statusFor,
+      const row = await documents.createDocument(prepared, statusFor,
         (created) => rememberSubmission(db, req.user!.id, 'documents', created));
       // The envelope always carries a list, so the client's `insert()` contract
       // is the same for every resource.
