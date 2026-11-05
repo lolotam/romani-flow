@@ -52,7 +52,6 @@ export async function saveDocument(
     ? await api.update<Document>('documents', documentId, documentData)
     : await api.insert<Document>('documents', documentData);
   if (error) {
-    const key = documentId ? 'documents.messages.updateError' : 'documents.messages.saveError';
-    throw new Error(`${t(key)}: ${error.message}`);
+    throw error;
   }
 }

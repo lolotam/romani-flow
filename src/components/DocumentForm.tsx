@@ -84,7 +84,7 @@ function DocumentFormContent({
   }, [form, draft.session]);
   const closeForm = React.useCallback(async () => {
     if (submitting.current) return;
-    try { await draft.session.current?.flush(); onClose(); }
+    try { if (!draft.session.current || await draft.session.current.close(() => window.confirm(t('documents.form.closeUnsavedConfirm')))) onClose(); }
     catch { toast.error(t('documents.messages.saveError')); }
   }, [draft.session, onClose, t]);
   React.useEffect(() => {
@@ -132,7 +132,7 @@ function DocumentFormContent({
       onClose();
       return true;
     } catch (error) {
-      draft.session.current?.resume();
+      draft.session.current?.resume(error);
       console.error(t('documents.messages.consoleError') + ':', error);
       toast.error(error instanceof Error ? error.message : t('documents.messages.error'));
       return false;
@@ -247,7 +247,7 @@ function DocumentFormContent({
 
             {/* Actions */}
             <div className="flex justify-between pt-4 border-t">
-              <Button type="button" variant="outline" onClick={() => void closeForm()} disabled={isSubmitting || ['loading', 'failed', 'conflict'].includes(draft.status)}>
+              <Button type="button" variant="outline" onClick={() => void closeForm()} disabled={isSubmitting}>
                 <X className="h-4 w-4 ml-2" />
                 {t('documents.form.buttons.cancel')}
               </Button>

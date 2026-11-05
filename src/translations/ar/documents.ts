@@ -97,6 +97,10 @@ export const documents = {
 
   // Document form
   form: {
+    previewNoFile: 'لم يتم اختيار ملف',
+    closeUnsavedConfirm: 'لم تُحفظ آخر التعديلات. هل تريد إغلاق الفورم بدونها؟ ستظل آخر مسودة محفوظة كما هي.',
+    previewHint: 'اختر ملف PDF أو صورة لمعاينته أثناء تعبئة الحقول.',
+    previewOpen: 'افتح الملف في تبويب جديد إذا لم تتوفر المعاينة',
     title: 'عنوان الوثيقة',
     beneficiaryType: 'نوع المستفيد',
     company: 'الشركة',
@@ -138,6 +142,7 @@ export const documents = {
 
     // Validation messages
     validation: {
+      entityNameTooLong: 'اسم الجهة يجب ألا يتجاوز 100 حرف',
       reviewFields: 'راجع الأخطاء الموضحة في حقول النموذج قبل الحفظ.',
       noDocumentTypes: 'أضف نوع وثيقة من الإعدادات أولًا، ثم ارجع لإكمال الحفظ.',
       noEmployees: 'لا يوجد موظفون. أضف موظفًا أولًا أو اختر شركة كمستفيد.',

@@ -8,8 +8,7 @@ import { createDocumentPreview } from '@/lib/documentPreview';
 type Props = Pick<DocumentFormProps, 'uploadedFile' | 'editingDocument'>;
 
 export function DocumentAttachment({ uploadedFile, editingDocument }: Props) {
-  const { t, language } = useLanguage();
-  const ar = language === 'ar';
+  const { t } = useLanguage();
   const [local, setLocal] = useState<{ file: File; url: string } | null>(null);
   const localType = uploadedFile?.type;
   const allowed = localType === 'application/pdf' || localType === 'image/png' || localType === 'image/jpeg';
@@ -26,10 +25,10 @@ export function DocumentAttachment({ uploadedFile, editingDocument }: Props) {
   const type = uploadedFile ? uploadedFile.type : editingDocument?.mime_type ?? (/\.pdf$/i.test(name) ? 'application/pdf' : /\.(png|jpe?g|gif|webp)$/i.test(name) ? 'image/jpeg' : '');
   return <section className="space-y-3 rounded-lg border bg-muted/20 p-3 lg:sticky lg:top-4" aria-label={t('documents.actions.preview')}>
     {/* File Upload Info */}
-    <div className="flex items-center gap-2"><FileText className="h-5 w-5 shrink-0" /><span className="break-all text-sm">{name || (ar ? '?? ??? ?????? ???' : 'No file selected')}</span></div>
+    <div className="flex items-center gap-2"><FileText className="h-5 w-5 shrink-0" /><span className="break-all text-sm">{name || t('documents.form.previewNoFile')}</span></div>
     {source && type.startsWith('image/') ? <img src={source} alt={t('documents.actions.preview')} className="max-h-[65vh] w-full rounded border object-contain" />
       : source && type === 'application/pdf' ? <iframe src={source} title={t('documents.actions.preview') + ': ' + name} className="h-[55vh] min-h-72 w-full rounded border" />
-      : <p className="text-sm text-muted-foreground">{ar ? '????? ??? PDF ?? ???? ???? ???????? ????? ??? ????????.' : 'Select a PDF or image to preview while filling the fields.'}</p>}
-    {source && <a href={source} target="_blank" rel="noopener noreferrer" className="inline-block text-sm text-primary underline">{ar ? '??? ????? ?? ????? ???? ?? ???????? ??? ?????' : 'Open file in a new tab if preview is unavailable'}</a>}
+      : <p className="text-sm text-muted-foreground">{t('documents.form.previewHint')}</p>}
+    {source && <a href={source} target="_blank" rel="noopener noreferrer" className="inline-block text-sm text-primary underline">{t('documents.form.previewOpen')}</a>}
   </section>;
 }

@@ -16,7 +16,7 @@ import { toast } from 'sonner';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { useDocumentDraft } from '@/hooks/useDocumentDraft';
 import { draftValues } from '@/lib/documentDraftSession';
-import { restoreFormDate } from '@/lib/formDefaults';
+import { employeeDocumentDraft } from '@/lib/documentFormDrafts';
 import { useAuth } from '@/hooks/useAuth';
 import { DocumentDraftStatus } from './documents/DocumentDraftStatus';
 import { DocumentAttachment } from './documents/DocumentAttachment';
@@ -57,8 +57,7 @@ function EmployeeDocumentFormContent({
   const [formData, setFormData] = useState(emptyForm);
   const dirty = useRef(false);
   const draft = useDocumentDraft('employee:' + employeeId, saved => {
-    setFormData({ ...emptyForm, ...(saved ?? {}),
-      issue_date: restoreFormDate(saved?.issue_date) ?? null, expiry_date: restoreFormDate(saved?.expiry_date) ?? null });
+    setFormData(employeeDocumentDraft(saved, uploadedFile?.name));
   }, isOpen);
   useEffect(() => { if (isOpen) dirty.current = false; }, [isOpen, employeeId]);
   useLastSubmissionRestore('documents', isOpen && draft.status === 'saved' && !draft.hasDraft, (saved) => {
@@ -135,7 +134,7 @@ function EmployeeDocumentFormContent({
       const { error: dbError } = await api.insert<Document>('documents', payload);
 
       if (dbError) {
-        throw new Error(`${t('documents.employeeDocumentForm.saveError')}: ${dbError.message}`);
+        throw dbError;
       }
 
       draft.session.current?.committed();
@@ -144,7 +143,7 @@ function EmployeeDocumentFormContent({
       onSave();
       onClose();
     } catch (error) {
-      draft.session.current?.resume();
+      draft.session.current?.resume(error);
       console.error('Error saving document:', error);
       toast.error(error instanceof Error ? error.message : t('documents.employeeDocumentForm.saveError'));
     } finally {
@@ -155,7 +154,7 @@ function EmployeeDocumentFormContent({
 
   const handleClose = async () => {
     if (submitting.current) return;
-    try { await draft.session.current?.flush(); onClose(); }
+    try { if (!draft.session.current || await draft.session.current.close(() => window.confirm(t('documents.form.closeUnsavedConfirm')))) onClose(); }
     catch { toast.error(t('documents.employeeDocumentForm.saveError')); }
   };
 

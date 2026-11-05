@@ -24,6 +24,8 @@ export class DocumentDraftSession {
   private restoring = false;
   private edited = false;
   private failure: Error | null = null;
+  private prepared: DraftValues | null = null;
+  private discarding: Promise<void> | null = null;
   hasDraft = false;
 
   constructor(readonly scope: string, private restore: (values: DraftValues | null) => void,
@@ -87,18 +89,45 @@ export class DocumentDraftSession {
     this.change(values);
     await this.flush();
     this.paused = true;
+    this.prepared = values;
     return { scope: this.scope, revision: this.revision };
   }
 
-  resume(): void { this.paused = false; }
+  resume(error?: unknown): void {
+    this.paused = false;
+    if (this.prepared) {
+      this.pending = this.prepared; this.prepared = null;
+      if (error instanceof ApiRequestError && error.code === 'draft_conflict') this.fail(error);
+      else if (!this.failure) this.status('saving');
+    }
+  }
 
-  committed(): void { this.paused = true; this.pending = null; clearTimeout(this.timer); }
+  committed(): void { this.paused = true; this.pending = null; this.prepared = null; clearTimeout(this.timer); }
 
-  async discard(): Promise<void> {
+  /** Closing after failure requires an explicit choice to drop only unsaved local changes. */
+  async close(confirmDiscard: () => boolean): Promise<boolean> {
+    try { await this.flush(); return true; }
+    catch {
+      if (!confirmDiscard()) return false;
+      this.committed(); this.dispose(); return true;
+    }
+  }
+
+  discard(): Promise<void> {
+    if (this.discarding) return this.discarding;
+    const operation = this.discardOnce();
+    this.discarding = operation;
+    void operation.then(() => { this.discarding = null; }, () => { this.discarding = null; });
+    return operation;
+  }
+
+  private async discardOnce(): Promise<void> {
     this.paused = true; clearTimeout(this.timer); this.pending = null;
+    this.status('saving');
     try {
       await this.loaded; await this.serial;
       if (this.failure) throw this.failure;
+      this.status('saving');
       const result = await this.transport<{ revision: string }>(this.url, { method: 'DELETE', body: { revision: this.revision } });
       if (result.error || !result.data) throw result.error ?? new Error('Draft unavailable');
       this.revision = result.data.revision; this.hasDraft = false;

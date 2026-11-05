@@ -21,3 +21,6 @@ function CompanyFixture() {
   /></LanguageProvider></FormProvider>;
 }
 export function companyMarkup(): string { return renderToStaticMarkup(<CompanyFixture />); }
+export function emptyPreviewMarkup(): string {
+  return renderToStaticMarkup(<LanguageProvider><DocumentAttachment uploadedFile={null} /></LanguageProvider>);
+}

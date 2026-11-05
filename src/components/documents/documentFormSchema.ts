@@ -8,7 +8,7 @@ export const createDocumentSchema = (t: (key: string) => string) => z.object({
   employee_id: z.string().optional(),
   document_type_id: z.string().optional(),
   ministry_id: z.string().optional(),
-  entity_name: z.string().optional(),
+  entity_name: z.string().max(100, t('documents.form.validation.entityNameTooLong')).optional(),
   notes: z.string().optional(),
 }).superRefine((data, ctx) => {
   // Attach required-field errors to rendered controls, never an invisible root error.

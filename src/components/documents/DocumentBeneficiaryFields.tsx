@@ -128,7 +128,7 @@ export function DocumentBeneficiaryFields({ companies, employees, documentTypes,
                 <FormItem>
                   <FormLabel>{t('documents.form.entityNameLabel')}</FormLabel>
                   <FormControl>
-                    <Input placeholder={t('documents.form.entityNamePlaceholder')} {...field} />
+                          <Input maxLength={100} placeholder={t('documents.form.entityNamePlaceholder')} {...field} />
                   </FormControl>
                   <FormMessage />
                 </FormItem>

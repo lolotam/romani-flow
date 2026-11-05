@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import type { Db } from '../db/connection.js';
 import { RepositoryError, type Row } from './base.js';
 import { normalizeDate } from '../utils/dates.js';
+import { getString } from './settings.js';
 
 export interface DraftReference { scope: string; revision: string; account?: string }
 const LIMITS: Record<string, number> = { title: 120, beneficiary_type: 8, company_id: 128, employee_id: 128,
@@ -25,7 +26,7 @@ export function draftReference(value: unknown): DraftReference {
   if (!value || typeof value !== 'object' || Array.isArray(value)) invalid();
   const row = value as Row;
   if (Object.keys(row).some(key => !['scope', 'revision', 'account'].includes(key)) || typeof row.scope !== 'string' ||
-      typeof row.revision !== 'string' || !/^(none|[a-f0-9-]{32,36})$/.test(row.revision)) invalid();
+      typeof row.revision !== 'string' || !/^(none(?::[a-f0-9-]{32,36})?|[a-f0-9-]{32,36})$/.test(row.revision)) invalid();
   if (row.account !== undefined && typeof row.account !== 'string') invalid();
   return { scope: row.scope, revision: row.revision, account: row.account as string | undefined };
 }
@@ -54,7 +55,12 @@ export function readDraft(db: Db, userId: string, scope: string): { revision: st
     if (values[field] && !(field === 'ministry_id' && values[field] === 'other') &&
         !db.prepare(`SELECT id FROM ${table} WHERE id=?`).get(String(values[field]))) values[field] = '';
   }
-  return { revision: row ? String(row.revision) : 'none', values };
+  return { revision: row ? String(row.revision) : emptyRevision(db), values };
+}
+
+function emptyRevision(db: Db): string {
+  const epoch = getString(db, 'document_drafts.epoch', '0');
+  return epoch === '0' ? 'none' : `none:${epoch}`;
 }
 
 /** A tombstone preserves the CAS version after discard/save, rejecting late autosaves. */
@@ -64,7 +70,10 @@ export function writeDraft(db: Db, userId: string, ref: DraftReference, values: 
   if (values && ref.scope.startsWith('company:')) values = { ...values, beneficiary_type: 'company', company_id: ref.scope.slice(8), employee_id: '' };
   const revision = randomUUID(), now = new Date().toISOString();
   const json = values === null ? null : JSON.stringify(values);
-  const changes = ref.revision === 'none'
+  if (ref.revision.startsWith('none') && ref.revision !== emptyRevision(db)) {
+    throw new RepositoryError('Draft predates business erase. Reload before continuing.', 'draft_conflict', 409);
+  }
+  const changes = ref.revision.startsWith('none')
     ? db.prepare('INSERT INTO document_drafts(user_id,scope,revision,values_json,updated_at) VALUES(?,?,?,?,?) ON CONFLICT(user_id,scope) DO NOTHING')
       .run(userId, ref.scope, revision, json, now).changes
     : db.prepare('UPDATE document_drafts SET revision=?,values_json=?,updated_at=? WHERE user_id=? AND scope=? AND revision=?')

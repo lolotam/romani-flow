@@ -6,11 +6,13 @@ import { ApiRequestError } from '../src/lib/api/http.ts';
 import { DocumentDraftSession, draftValues } from '../src/lib/documentDraftSession.ts';
 import { createDocumentPreview } from '../src/lib/documentPreview.ts';
 import { createServer } from 'vite';
+import { employeeDocumentDraft } from '../src/lib/documentFormDrafts.ts';
+import { createDocumentSchema } from '../src/components/documents/documentFormSchema.ts';
 
 test('actual form preview components render authenticated PDF/image sources and keep fixed company selection disabled', async () => {
   const vite = await createServer({ server: { middlewareMode: true, hmr: false }, appType: 'custom', logLevel: 'error' });
   try {
-    const { previewMarkup, companyMarkup } = await vite.ssrLoadModule('/scripts/fixtures/document-preview-render.tsx');
+    const { previewMarkup, companyMarkup, emptyPreviewMarkup } = await vite.ssrLoadModule('/scripts/fixtures/document-preview-render.tsx');
     const pdf = previewMarkup('application/pdf', 'synthetic.pdf');
     assert.match(pdf, /<iframe/); assert.match(pdf, /\/api\/files\/synthetic-document\/preview/);
     assert.match(pdf, /rel="noopener noreferrer"/);
@@ -19,8 +21,80 @@ test('actual form preview components render authenticated PDF/image sources and 
     const unsupported = previewMarkup('text/html', 'synthetic.html');
     assert.doesNotMatch(unsupported, /<iframe|<img/);
     assert.match(companyMarkup(), /role="combobox"[^>]*disabled/);
+    assert.match(emptyPreviewMarkup(), /لم يتم اختيار ملف/);
+    assert.match(emptyPreviewMarkup(), /اختر ملف PDF/);
+    assert.doesNotMatch(emptyPreviewMarkup(), /\?\?/);
+    assert.match(pdf, /افتح الملف في تبويب جديد/);
   } finally { await vite.close(); }
 });
+
+test('empty first-write references cannot revive text after business erase', () => reminderApi(async f => {
+  const api = transport(f), initial = (await api(url('new'))).data;
+  assert.equal(initial.values, null); assert.equal(initial.revision, 'none');
+  assert.equal((await f.request('/api/backup/erase', { method: 'POST', body: {} })).status, 200);
+  assert.equal((await api(url('new'), { method: 'PUT', body: { revision: initial.revision, values: { notes: 'Before erase' } } })).error.code, 'draft_conflict');
+  const fresh = (await api(url('new'))).data;
+  assert.notEqual(fresh.revision, initial.revision);
+  assert.equal((await api(url('new'), { method: 'PUT', body: { revision: fresh.revision, values: { notes: 'New session after erase' } } })).error, null);
+}));
+
+test('failed loads and conflicts allow explicit close without changing the saved server draft', () => reminderApi(async f => {
+  const api = transport(f), states = [];
+  const failed = new DocumentDraftSession('employee:missing', () => {}, state => states.push(state), api);
+  await assert.rejects(failed.flush());
+  assert.equal(await failed.close(() => false), false);
+  assert.equal(await failed.close(() => true), true);
+  assert.ok(states.includes('failed'));
+  const session = new DocumentDraftSession('new', () => {}, state => states.push(state), api);
+  await session.flush(); session.change({ notes: 'My draft' }); await session.flush();
+  const snapshot = (await api(url('new'))).data;
+  await api(url('new'), { method: 'PUT', body: { revision: snapshot.revision, values: { notes: 'Other device' } } });
+  session.change({ notes: 'Local unsaved change' }); await assert.rejects(session.flush());
+  assert.equal(await session.close(() => false), false);
+  assert.equal(await session.close(() => true), true);
+  assert.equal((await api(url('new'))).data.values.notes, 'Other device');
+}));
+
+test('concurrent discard clicks share one delete and do not manufacture a conflict', () => reminderApi(async f => {
+  const api = transport(f); let release, deletes = 0;
+  const gate = new Promise(resolve => { release = resolve; });
+  const states = [];
+  const session = new DocumentDraftSession('new', () => {}, state => states.push(state), async (path, options) => {
+    if (options?.method === 'DELETE') { deletes++; const result = await api(path, options); await gate; return result; }
+    return api(path, options);
+  });
+  await session.flush(); session.change({ notes: 'Discard me' }); await session.flush();
+  const first = session.discard(), second = session.discard();
+  assert.equal(first, second); assert.equal(states.at(-1), 'saving');
+  release(); await Promise.all([first, second]);
+  assert.equal(deletes, 1); assert.equal(states.at(-1), 'saved');
+  assert.equal((await api(url('new'))).data.values, null); session.dispose();
+}));
+
+test('a document-save CAS conflict is visible and retains the prepared local values', () => reminderApi(async f => {
+  const api = transport(f), states = [], session = new DocumentDraftSession('new', () => {}, state => states.push(state), api);
+  const prepared = await session.prepare({ notes: 'Prepared local values' });
+  await api(url('new'), { method: 'PUT', body: { revision: prepared.revision, values: { notes: 'Newer device' } } });
+  const response = await f.request('/api/documents', { method: 'POST', body: { title: 'Conflict', employee_id: f.employee.id, document_type_id: f.type.id, expiry_date: '2029-01-01', draft: { ...prepared, account: 'admin' } } });
+  assert.equal(response.status, 409);
+  session.resume(new ApiRequestError(response.json.error.message, response.json.error.code, 409));
+  assert.equal(states.at(-1), 'conflict'); await assert.rejects(session.flush());
+  assert.equal(await session.close(() => false), false);
+  assert.equal((await api(url('new'))).data.values.notes, 'Newer device');
+  session.dispose();
+}));
+
+test('custom entity limit is shared by the draft API and form; empty draft keeps filename title', () => reminderApi(async f => {
+  const api = transport(f), values = { ...fields, beneficiary_type: 'company', company_id: f.company.id, ministry_id: 'other', entity_name: 'x'.repeat(100), document_type_id: f.type.id };
+  const schema = createDocumentSchema(key => key);
+  assert.equal(schema.safeParse({ ...values, issue_date: new Date(2028, 1, 29), expiry_date: new Date(2029, 0, 1) }).success, true);
+  assert.equal(schema.safeParse({ ...values, entity_name: 'x'.repeat(101), issue_date: new Date(2028, 1, 29), expiry_date: new Date(2029, 0, 1) }).success, false);
+  const saved = await api(url('new'), { method: 'PUT', body: { revision: 'none', values } });
+  assert.equal(saved.error, null);
+  assert.equal((await api(url('new'), { method: 'PUT', body: { revision: saved.data.revision, values: { ...values, entity_name: 'x'.repeat(101) } } })).error.code, 'invalid_draft');
+  assert.equal(employeeDocumentDraft(null, 'work.permit.pdf').title, 'work.permit');
+  assert.equal(employeeDocumentDraft({ title: 'Edited title' }, 'upload.pdf').title, 'Edited title');
+}));
 
 test('local PDF/image preview retains original bytes and releases URLs without accepting active content', async () => {
   for (const [type, name] of [['application/pdf', 'test.pdf'], ['image/jpeg', 'test.jpg'], ['image/png', 'test.png']]) {
