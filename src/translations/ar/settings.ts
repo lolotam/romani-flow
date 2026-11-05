@@ -19,6 +19,8 @@ export const settings = {
   whatsappReminders: {
     loading: 'جارٍ تحميل إعدادات واتساب…',
     enabledUnknown: 'حالة الإرسال غير متاحة. أعد التحميل قبل تغييرها.',
+    recipientsUnavailable: 'تعذّر تحميل أرقام الإدارة. أعد التحميل للمحاولة مرة أخرى.',
+    logUnavailable: 'تعذّر تحميل سجل التذكيرات. أعد التحميل للمحاولة مرة أخرى.',
     failureReason: 'السبب',
     errors: {
       whatsapp_not_configured: 'يلزم مراجعة إعدادات التكامل على الخادم قبل إعادة المحاولة.',

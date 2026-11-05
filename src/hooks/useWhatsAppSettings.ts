@@ -13,6 +13,7 @@ export function useWhatsAppSettings() {
   const [filter, setFilter] = useState<WhatsAppLogFilter>({});
   const [recipients, setRecipients] = useState<WhatsAppRecipient[]>([]), [recipientTotal, setRecipientTotal] = useState(0);
   const [log, setLog] = useState<WhatsAppLogItem[]>([]), [logTotal, setLogTotal] = useState(0);
+  const [recipientsAvailable, setRecipientsAvailable] = useState(false), [logAvailable, setLogAvailable] = useState(false);
   const [enabled, setEnabled] = useState<boolean | null>(null), [busy, setBusy] = useState(false), [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
 
@@ -24,6 +25,7 @@ export function useWhatsAppSettings() {
     const results = await loadWhatsAppReminderSettings(recipientOffset, filter, signal);
     if (signal?.aborted || active.current !== identity || generation.current !== version) return;
     setLoading(false);
+    setRecipientsAvailable(results.people !== null); setLogAvailable(results.jobs !== null);
     setRecipients(results.people?.items ?? []); setRecipientTotal(results.people?.total ?? 0);
     setLog(results.jobs?.items ?? []); setLogTotal(results.jobs?.total ?? 0);
     setEnabled(results.enabled); setError(results.failed ? 'failed' : '');
@@ -52,7 +54,7 @@ export function useWhatsAppSettings() {
     } finally { if (active.current === identity) setBusy(false); }
   };
 
-  return { recipients, recipientTotal, recipientOffset, setRecipientOffset, log, logTotal, filter, setFilter,
+  return { recipients, recipientTotal, recipientOffset, setRecipientOffset, recipientsAvailable, log, logTotal, logAvailable, filter, setFilter,
     enabled: active.current === identity ? enabled : null, busy, loading, error, act, reload: () => void load(),
     setEnabled: (value: boolean) => enabled === null ? Promise.resolve(false) : act(() => request('/api/settings', { method: 'PUT', body: { settings: { 'whatsapp.enabled': value } } })) };
 }

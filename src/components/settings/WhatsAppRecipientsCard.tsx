@@ -14,6 +14,8 @@ export function WhatsAppRecipientsCard({ state }: { state: ReturnType<typeof use
   const [form, setForm] = useState<Omit<WhatsAppRecipient, 'id'>>(empty), [editId, setEditId] = useState<string>();
   const reset = () => { setForm(empty); setEditId(undefined); };
   return <Card><CardHeader><CardTitle>{t('settings.whatsappReminders.recipients')}</CardTitle></CardHeader><CardContent className="space-y-4">
+    {!state.recipientsAvailable && <p role="status">{t('settings.whatsappReminders.recipientsUnavailable')}</p>}
+    <div hidden={!state.recipientsAvailable} className="space-y-4">
     <form className="grid gap-3 sm:grid-cols-2" onSubmit={async event => {
       event.preventDefault();
       if (await state.act(() => whatsappReminders.saveRecipient(form, editId))) reset();
@@ -32,5 +34,6 @@ export function WhatsAppRecipientsCard({ state }: { state: ReturnType<typeof use
       </div>
     </div>)}
     <div className="flex items-center gap-3"><Button type="button" variant="outline" disabled={state.recipientOffset === 0} onClick={() => state.setRecipientOffset(Math.max(0, state.recipientOffset - 20))}>{t('settings.whatsappReminders.previous')}</Button><span>{state.recipientTotal}</span><Button type="button" variant="outline" disabled={state.recipientOffset + 20 >= state.recipientTotal} onClick={() => state.setRecipientOffset(state.recipientOffset + 20)}>{t('settings.whatsappReminders.next')}</Button></div>
+    </div>
   </CardContent></Card>;
 }
