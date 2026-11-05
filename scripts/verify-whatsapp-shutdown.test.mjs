@@ -7,6 +7,44 @@ import {WhatsAppReminders} from '../server/notifications/whatsapp/service.ts';
 import {reminderApi} from './fixtures/whatsapp-api.mjs';
 import {CronService} from '../server/services/cronService.ts';
 import {setSetting,getString} from '../server/repositories/settings.ts';
+import {stopRequestWork} from '../server/middleware/requestWork.ts';
+import {signSession} from '../server/middleware/auth.ts';
+
+test('closed async API admission rejects new document sends without an attempt or SMTP call',()=>reminderApi(async f=>{
+ let smtpCalls=0;f.mailer.send=async()=>{smtpCalls++;throw Error('SMTP must not be reached');};
+ await stopRequestWork(f.app);
+ const response=await f.request('/api/email/send-documents',{method:'POST',body:{document_ids:[f.document.id],to:['synthetic@example.invalid']}});
+ assert.equal(response.status,503);assert.equal(response.json.error.code,'shutting_down');
+ assert.equal(smtpCalls,0);assert.equal(f.db.prepare('SELECT count(*) n FROM email_log').get().n,0);
+}));
+
+for(const [outcome,drainFails] of [['sent',false],['failed',false],['sent',true]])test(`detached SMTP persists ${outcome} before shutdown completes (drain failure: ${drainFails})`,()=>reminderApi(async f=>{
+ const file=await f.storage.save(Buffer.from('%PDF-1.4\nSynthetic shutdown fixture\n%%EOF'),'synthetic.pdf','application/pdf');
+ f.db.prepare('UPDATE documents SET file_path=?,file_name=?,mime_type=? WHERE id=?').run(file.relativePath,file.fileName,file.mimeType,f.document.id);
+ let release,entered;
+ const blocked=new Promise(resolve=>release=resolve),started=new Promise(resolve=>entered=resolve);
+ // SMTP is the external boundary; the authenticated route, log and SQLite are real.
+ f.mailer.send=async()=>{entered();await blocked;if(outcome==='failed')throw Error('Synthetic SMTP failure');return{status:'sent',accepted:['synthetic@example.invalid'],rejected:[],messageId:'synthetic-detached'};};
+ const controller=new AbortController();
+ const cookie=f.config.cookieName+'='+signSession(f.config,{id:'admin',role:'admin',name:'Synthetic',email:'admin@example.invalid'});
+ const request=fetch(f.base+'/api/email/send-documents',{method:'POST',signal:controller.signal,
+  headers:{cookie,'content-type':'application/json'},body:JSON.stringify({document_ids:[f.document.id],to:['synthetic@example.invalid']})}).catch(error=>assert.equal(error.name,'AbortError'));
+ try{
+  await started;controller.abort();await request;
+  const socketsClosed=new Promise(resolve=>f.server.once('close',resolve));
+  let dbClosed=false;const exits=[];
+  const shutdown=drainApplication({server:f.server,stopReminders:async()=>{await f.reminders.stop();if(drainFails)throw Error('Synthetic failed drain');},stopCron:()=>f.cron.shutdown(),
+   stopHandlers:()=>stopRequestWork(f.app),closeDatabase:()=>{
+    assert.equal(f.db.prepare("SELECT status FROM email_log WHERE kind='documents'").get().status,outcome);dbClosed=true;
+   },exit:code=>exits.push(code)});
+  await socketsClosed;
+  assert.equal(dbClosed,false);assert.deepEqual(exits,[]);
+  assert.equal(f.db.prepare("SELECT status FROM email_log WHERE kind='documents'").get().status,'sending');
+  release();await shutdown;
+  assert.equal(f.db.prepare("SELECT status FROM email_log WHERE kind='documents'").get().status,outcome);
+  assert.equal(dbClosed,!drainFails);assert.deepEqual(exits,[drainFails?1:0]);
+ }finally{release();controller.abort();await request;}
+}));
 
 test('shutdown waits for active scheduled SMTP beyond the old deadline and rejects new cron/manual work',t=>reminderApi(async f=>{
  let release,entered;const started=new Promise(resolve=>entered=resolve),blocked=new Promise(resolve=>release=resolve);
@@ -18,7 +56,7 @@ test('shutdown waits for active scheduled SMTP beyond the old deadline and rejec
  try{
   await started;
   t.mock.timers.enable({apis:['setTimeout']});
-  const shutdown=drainApplication({server,stopCron:()=>cron.shutdown(),stopReminders:()=>f.reminders.stop(),closeDatabase:()=>{
+  const shutdown=drainApplication({server,stopHandlers:async()=>{},stopCron:()=>cron.shutdown(),stopReminders:()=>f.reminders.stop(),closeDatabase:()=>{
    assert.equal(f.db.prepare("SELECT count(*) n FROM email_log WHERE status='sent'").get().n,1);
    assert.ok(getString(f.db,'cron.last_run_date'));dbClosed=true;
   },exit:code=>exits.push(code)});
@@ -49,7 +87,7 @@ for(const first of ['send','http'])test(`shutdown stops claims and retains DB wi
   f.db.prepare('UPDATE employees SET whatsapp_notifications_enabled=1,residency_expiry_date=NULL').run();
   reminders.store.saveRecipient({label:'Synthetic manager',phone:MANAGER_PHONE,enabled:true});await reminders.schedule();
   const draining=reminders.drain();await Promise.all([sending,httpStarted]);
-  const shutdown=drainApplication({server,stopReminders:()=>reminders.stop(),stopCron:async()=>{},closeDatabase:()=>{dbClosed=true;},exit:code=>exits.push(code)});
+  const shutdown=drainApplication({server,stopHandlers:async()=>{},stopReminders:()=>reminders.stop(),stopCron:async()=>{},closeDatabase:()=>{dbClosed=true;},exit:code=>exits.push(code)});
   assert.ok(SHUTDOWN_DEADLINE_MS>15_000);
   if(first==='send'){
    releaseSend();await draining;
@@ -76,7 +114,7 @@ test('hard shutdown deadline exits unsuccessfully without closing an in-use DB',
  try{
   await httpStarted;const exits=[];let closed=false;
   t.mock.timers.enable({apis:['setTimeout']});
-  const shutdown=drainApplication({server,stopReminders:async()=>{},stopCron:async()=>{},closeDatabase:()=>{closed=true;},exit:code=>exits.push(code)});
+  const shutdown=drainApplication({server,stopHandlers:async()=>{},stopReminders:async()=>{},stopCron:async()=>{},closeDatabase:()=>{closed=true;},exit:code=>exits.push(code)});
   t.mock.timers.tick(SHUTDOWN_DEADLINE_MS-1);assert.deepEqual(exits,[]);
   t.mock.timers.tick(1);assert.deepEqual(exits,[1]);assert.equal(closed,false);
   t.mock.timers.reset();releaseHttp();await request;await shutdown;

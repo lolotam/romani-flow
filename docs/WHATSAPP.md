@@ -37,6 +37,11 @@ post-auth query-override concern in [WHATSAPP_SEND_CONTRACT.md](WHATSAPP_SEND_CO
 remains a separate pre-live-send isolation gate. The adapter uses the exact
 server-derived `/message/sendText/romani` URL with no query string.
 
+Plain HTTP does not encrypt the scoped key or reminder content. Production transport
+requires a separately accepted HTTPS or dedicated-network isolation disposition before
+live sending; local compatibility with HTTP is not that proof. This feature does not
+change the shared service, network or environment to satisfy that gate.
+
 Keep live sends off until that isolation gate, production release/migration,
 approved holder pairing and scoped smoke are explicitly dispositioned. QR, webhook
 activation and first live reminder are separate recorded steps. No customer or
@@ -104,11 +109,15 @@ duplicates.
 
 Owner-approved phone-change exception: when an existing employee or management
 recipient number changes, replace already-prepared, still-eligible unsent work
-for the same item/expiry/bucket on the same day. Cancellation and replacement
+for the same source item on the same day, using its current eligible expiry/bucket.
+This includes a combined phone/expiry edit and a prepared job that crossed a bucket
+boundary. Cancellation and replacement
 commit with the phone edit. Accepted/unknown work cannot authorize a replacement;
 an existing accepted/unknown identity at the new destination still suppresses it.
-Only pending/retryable or proven-safe permanent failures qualify. New audiences,
-new documents, global enable and expiry changes do not trigger immediate enqueue.
+Only pending/retryable or proven-safe permanent failures qualify, including exhausted
+DNS/refused failures proven to occur before HTTP handoff. Exhaustion still forbids
+retrying that old identity. New audiences,
+new documents, global enable and expiry-only changes do not trigger immediate enqueue.
 Capacity overflow remains subject to the next scheduled selection described above.
 
 Renewal commits expiry change and unsent-job cancellation in the same SQLite
@@ -162,6 +171,13 @@ remain required regressions. Preserve original assertions and exact-head receipt
 
 ## Reminder readiness and shutdown
 
+The settings screen applies successful recipient, audit and global-state reads
+independently. If the global setting itself is unavailable or malformed, it displays
+an unavailable state and disables the switch rather than presenting an editable OFF.
+Restart recovery is scoped to the runtime's own jobs and linked attempts; an invalid
+runtime neither starts the worker nor rewrites any outbox namespace. Audit access
+remains read-only and separate from admission readiness.
+
 Employee opt-in writes reject a canonical mobile already used by another opted-in
 employee, including inactive opted-in records. Validation and the business write
 share the same transaction/coordinator. Legacy collisions bypassing that path
@@ -186,8 +202,10 @@ fixture namespace/prefix compatibility does not make a configuration send-ready.
 For example, an explicit default port or uppercase URL spelling that differs from
 the normalized origin is refused for reminders before provider access.
 
-On shutdown the worker and cron stop new admission immediately while HTTP drains
-in parallel. The database closes only after all three drains finish. The application hard
+On shutdown the worker, cron and async API handlers stop new admission immediately while HTTP drains
+in parallel. Handler work is tracked separately from sockets: a disconnected client does not
+discard an in-flight SMTP result. The database closes only after the worker, cron, HTTP and
+handler drains finish. The application hard
 deadline is 90 seconds, allowing the SMTP phase timers and worker drain; interrupted sends
 remain durable for unknown recovery. Before deployment verify that the managed
 container stop grace allows this deadline with operational margin. Current host
@@ -219,3 +237,10 @@ Verify actual managed stop grace exceeds this ceiling with margin before release
 no production grace change or proof is implied by local lifecycle tests.
 
 Phone correction cancels the old destination identity and uses the approved safe-unsent replacement or scheduled selection. A locally invalid-number failure is not a same-identity manual retry; accepted/unknown work remains suppressed.
+
+Final handoff selection reads the claimed item and destination rather than rebuilding
+all document/residency candidates. Employee delivery still checks a minimal projection
+of opted-in mobile numbers to detect legacy canonical collisions; management-only
+claims do not require that projection. Daily selection and full mutation refresh remain.
+Business erase cancels unsent jobs in the fixed audit namespace inside its transaction,
+even when sending configuration is invalid; accepted/unknown and other namespaces survive.

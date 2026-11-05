@@ -250,8 +250,8 @@ export default function Employees() {
     });
 
     return filtered.sort((a, b) => {
-      let aValue = a[sortField] || '';
-      let bValue = b[sortField] || '';
+      let aValue = sortField === 'mobile_no' ? a.mobile_no || a.phone || '' : a[sortField] || '';
+      let bValue = sortField === 'mobile_no' ? b.mobile_no || b.phone || '' : b[sortField] || '';
 
       if (sortDirection === 'desc') {
         [aValue, bValue] = [bValue, aValue];

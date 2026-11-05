@@ -1,5 +1,5 @@
 import type { Db } from '../../db/connection.js';
-import type { ReminderCandidate } from './contracts.js';
+import { sameReminderItem, type ReminderCandidate } from './contracts.js';
 import { normalizeWhatsAppPhone } from './phone.js';
 import { optedPhoneCounts } from './employeePolicy.js';
 
@@ -37,18 +37,13 @@ export function snapshotDestinations(db: Db, candidates: ReminderCandidate[]): D
   return sources;
 }
 
-function sameOccurrence(a: ReminderCandidate, b: ReminderCandidate): boolean {
-  return a.instance === b.instance && a.item_type === b.item_type && a.item_id === b.item_id &&
-    a.expiry_date === b.expiry_date && a.bucket === b.bucket;
-}
-
 export function changedDestinations(before: DestinationSnapshot, after: DestinationSnapshot): DestinationReplacement[] {
   const replacements: DestinationReplacement[] = [];
   for (const [source, current] of after) {
     const previous = before.get(source);
     if (!previous?.phone || !current.phone || previous.phone === current.phone) continue;
     for (const candidate of current.candidates) {
-      const original = previous.candidates.find(old => sameOccurrence(old, candidate));
+      const original = previous.candidates.find(old => sameReminderItem(old, candidate));
       if (original) replacements.push({ previous: original, current: candidate });
     }
   }

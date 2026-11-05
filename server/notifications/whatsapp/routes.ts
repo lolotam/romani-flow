@@ -59,7 +59,7 @@ export function createReminderRouter(reminders: WhatsAppReminders, env: NodeEnv)
   }));
   router.get('/log', (req, res, next) => {
     try {
-      const { limit, offset } = page(req), where = ['instance=?'], values: (string | number)[] = [reminders.instance];
+      const { limit, offset } = page(req), where = ['instance=?'], values: (string | number)[] = [reminders.auditInstance];
       if (req.query.state !== undefined) {
         if (typeof req.query.state !== 'string' || !['pending', 'sending', 'provider_accepted', 'retryable_failed', 'permanent_failed', 'unknown', 'cancelled'].includes(req.query.state)) throw new RepositoryError('Invalid state.', 'invalid_query', 400);
         where.push('state=?'); values.push(req.query.state);
@@ -79,14 +79,15 @@ export function createReminderRouter(reminders: WhatsAppReminders, env: NodeEnv)
       const hasCapacity = reminders.store.queueSize() < 2000;
       const items = db.prepare(`SELECT * FROM whatsapp_jobs WHERE ${clause} ORDER BY created_at DESC,id LIMIT ? OFFSET ?`).all(...values, limit, offset)
         .map(job => ({ ...job,
-          retry_allowed: isValidReminderText(job.text) && normalizeWhatsAppPhone(job.recipient) === job.recipient &&
+          retry_allowed: Boolean(reminders.instance && reminders.instance === reminders.auditInstance) && isValidReminderText(job.text) && normalizeWhatsAppPhone(job.recipient) === job.recipient &&
             Number(job.attempt_count) < 4 && (job.state === 'retryable_failed' || (hasCapacity && job.state === 'permanent_failed' && isManualRetryFailure(job.error_code))),
           attempts: db.prepare('SELECT * FROM whatsapp_attempts WHERE job_id=? ORDER BY attempt').all(String(job.id)) }));
       res.json({ data: { items, total }, error: null });
     } catch (error) { next(error); }
   });
   router.post('/jobs/:id/retry', asyncHandler(async (req, res) => {
-    if (Object.keys(body(req)).length || Object.keys(req.query).length) throw new RepositoryError('Retry accepts no overrides.', 'invalid_body', 400);
+    const payload = req.body === undefined ? {} : body(req);
+    if (Object.keys(payload).length || Object.keys(req.query).length) throw new RepositoryError('Retry accepts no overrides.', 'invalid_body', 400);
     await reminders.retry(String(req.params.id));
     res.json({ data: { queued: true }, error: null });
   }));

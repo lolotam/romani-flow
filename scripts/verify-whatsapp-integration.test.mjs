@@ -6,18 +6,78 @@ import {MessageClient} from '../server/whatsapp/messageClient.ts';
 import {WhatsAppReminders} from '../server/notifications/whatsapp/service.ts';
 import {setSetting} from '../server/repositories/settings.ts';
 import {createReminderRuntime} from '../server/whatsapp/runtime.ts';
+import {createApp} from '../server/app.ts';
+import {signSession} from '../server/middleware/auth.ts';
 
-test('restart with invalid local configuration cannot admit jobs, replacements or a daily checkpoint',()=>loopbackEvolution(async e=>reminderApi(async f=>{
+test('business erase with invalid sending config cancels only its unsent namespace and rolls back on failure',()=>reminderApi(async f=>{
+ await f.request('/api/whatsapp/recipients',{method:'POST',body:{label:'Synthetic manager',phone:MANAGER_PHONE,enabled:true}});
+ await f.request('/api/documents',{method:'POST',body:{title:'Another synthetic document',employee_id:f.employee.id,document_type_id:f.type.id,expiry_date:'2026-01-01'}});
+ await f.reminders.schedule();
+ for(const outcome of [{kind:'unknown',code:'transport_interrupted'},{kind:'provider_accepted',messageId:'synthetic-retained'}]){
+  const claim=f.reminders.store.claim(f.reminders.store.due()[0].id);f.reminders.store.finish(claim.job,claim.attemptId,outcome);
+ }
+ const {selectReminders}=await import('../server/notifications/whatsapp/selection.ts');
+ const other=new WhatsAppReminders(f.db,'other-isolated-fixture',{status:async()=>({configured:false,state:'unconfigured'}),sendText:async()=>{throw Error('No handoff allowed');}},()=>f.clock.now);
+ other.store.enqueue(selectReminders(f.db,other.instance,f.clock.now));
+ const original=f.db.prepare('SELECT * FROM whatsapp_jobs ORDER BY id').all(),attempts=f.db.prepare('SELECT * FROM whatsapp_attempts ORDER BY id').all();
+ const invalid=createReminderRuntime(f.db,{url:'',apiKey:'',instance:'',webhookSecret:''});
+ const app=createApp({config:f.config,db:f.db,mailer:f.mailer,cron:f.cron,storage:f.storage,documents:f.documents,reminders:invalid,staticDir:f.config.dataDir});
+ const server=app.listen(0,'127.0.0.1');await new Promise(resolve=>server.on('listening',resolve));
+ const cookie=f.config.cookieName+'='+signSession(f.config,{id:'admin',role:'admin',name:'Synthetic',email:'admin@example.invalid'});
+ const erase=()=>fetch('http://127.0.0.1:'+server.address().port+'/api/backup/erase',{method:'POST',headers:{cookie,'content-type':'application/json'},body:'{}'});
+ try{
+  f.db.exec("CREATE TRIGGER reject_invalid_erase BEFORE UPDATE ON whatsapp_jobs BEGIN SELECT RAISE(ABORT,'Synthetic cancellation rejection'); END;");
+  assert.equal((await erase()).status,500);assert.deepEqual(f.db.prepare('SELECT * FROM whatsapp_jobs ORDER BY id').all(),original);
+  assert.equal(f.db.prepare('SELECT count(*) n FROM employees').get().n,1);
+  assert.equal(f.db.prepare("SELECT value FROM settings WHERE key='whatsapp.enabled'").get().value,'true');
+  f.db.exec('DROP TRIGGER reject_invalid_erase');
+  assert.equal((await erase()).status,200);assert.equal(f.db.prepare('SELECT count(*) n FROM employees').get().n,0);
+  assert.equal(f.db.prepare("SELECT value FROM settings WHERE key='whatsapp.enabled'").get().value,'false');
+  assert.equal(f.db.prepare("SELECT count(*) n FROM whatsapp_jobs WHERE state='cancelled'").get().n,1);
+  assert.deepEqual(f.db.prepare("SELECT * FROM whatsapp_jobs WHERE instance!='romani' OR state IN ('provider_accepted','unknown') ORDER BY id").all(),original.filter(job=>job.instance!=='romani'||['provider_accepted','unknown'].includes(job.state)));
+  assert.deepEqual(f.db.prepare('SELECT * FROM whatsapp_attempts ORDER BY id').all(),attempts);
+  assert.equal(f.calls.length,0);
+ }finally{server.closeAllConnections();await new Promise(resolve=>server.close(resolve));}
+}));
+
+test('missing employee PATCH returns 404 before WhatsApp validation or write hooks',()=>reminderApi(async f=>{
+ await f.request('/api/employees/'+f.employee.id,{method:'PATCH',body:{whatsapp_notifications_enabled:true}});
+ const before=f.db.prepare('SELECT total_changes() n').get().n;
+ for(const mobile_no of ['',f.employee.mobile_no]){
+  const result=await f.request('/api/employees/nonexistent-synthetic-id',{method:'PATCH',body:{whatsapp_notifications_enabled:true,mobile_no}});
+  assert.equal(result.status,404);assert.equal(result.json.error.code,'not_found');
+ }
+ assert.equal(f.db.prepare('SELECT total_changes() n').get().n,before);assert.equal(f.calls.length,0);
+}));
+
+for(const initialState of ['pending','permanent_failed'])test(`invalid configuration preserves ${initialState} history without admission or usable retries`,()=>loopbackEvolution(async e=>reminderApi(async f=>{
  await f.request('/api/employees/'+f.employee.id,{method:'PATCH',body:{whatsapp_notifications_enabled:true,residency_expiry_date:null}});
  await f.reminders.schedule();const original=f.db.prepare('SELECT * FROM whatsapp_jobs ORDER BY id').all();assert.equal(original.length,1);
+ if(initialState==='permanent_failed'){
+  const failed=f.reminders.store.claim(original[0].id);f.reminders.store.finish(failed.job,failed.attemptId,{kind:'permanent_failed',code:'invalid_text'});
+ }
+ const retained=f.db.prepare('SELECT * FROM whatsapp_jobs ORDER BY id').all();
+ assert.equal((await f.request('/api/whatsapp/log')).json.data.items[0].retry_allowed,initialState==='permanent_failed');
  f.db.prepare("DELETE FROM settings WHERE key='whatsapp.last_enqueue_date'").run();
  for(const config of [{...e.config,instance:'romani_test'},{...e.config,url:e.config.url+'/prefix'}]){
   const invalid=createReminderRuntime(f.db,config);assert.equal(invalid.instance,'');
   assert.equal(await invalid.schedule(),0);
   await invalid.mutate(()=>f.db.prepare('UPDATE employees SET mobile_no=?').run(MANAGER_PHONE));
   assert.equal(await invalid.drain(),0);
+  const app=createApp({config:f.config,db:f.db,mailer:f.mailer,cron:f.cron,storage:f.storage,documents:f.documents,reminders:invalid,staticDir:f.config.dataDir});
+  const server=app.listen(0,'127.0.0.1');await new Promise(resolve=>server.on('listening',resolve));
+  try{
+   const cookie=f.config.cookieName+'='+signSession(f.config,{id:'admin',role:'admin',name:'Synthetic',email:'admin@example.invalid'});
+   const response=await fetch('http://127.0.0.1:'+server.address().port+'/api/whatsapp/log',{headers:{cookie}});
+   assert.equal(response.status,200);const audit=(await response.json()).data;
+   assert.equal(audit.total,original.length);assert.deepEqual(audit.items.map(job=>job.id),original.map(job=>job.id));
+   assert.ok(audit.items.every(job=>job.retry_allowed===false));
+   const before=f.db.prepare('SELECT total_changes() n').get().n;
+   const retry=await fetch('http://127.0.0.1:'+server.address().port+'/api/whatsapp/jobs/'+original[0].id+'/retry',{method:'POST',headers:{cookie}});
+   assert.equal(retry.status,409);assert.equal(f.db.prepare('SELECT total_changes() n').get().n,before);
+  }finally{server.closeAllConnections();await new Promise(resolve=>server.close(resolve));}
   assert.equal(f.db.prepare("SELECT value FROM settings WHERE key='whatsapp.last_enqueue_date'").get(),undefined);
-  assert.deepEqual(f.db.prepare('SELECT * FROM whatsapp_jobs ORDER BY id').all(),original);
+  assert.deepEqual(f.db.prepare('SELECT * FROM whatsapp_jobs ORDER BY id').all(),retained);
  }
  assert.equal(e.requests.length,0);assert.equal(e.sends.length,0);
  const corrected=createReminderRuntime(f.db,e.config);assert.equal(await corrected.schedule(),1);
@@ -64,7 +124,10 @@ test('correcting a zero-fetch invalid-text failure permits only an explicit boun
  assert.equal((await f.request('/api/documents/'+f.document.id,{method:'PATCH',body:{title:'Corrected synthetic document'}})).status,200);
  assert.equal((await f.request('/api/whatsapp/log')).json.data.items[0].retry_allowed,true);
  assert.equal(await f.reminders.drain(),0);assert.equal(e.sends.length,0);
- assert.equal((await f.request('/api/whatsapp/jobs/'+job.id+'/retry',{method:'POST',body:{}})).status,200);
+ const beforeRetry=f.db.prepare('SELECT total_changes() n').get().n;
+ for(const body of [null,[],{instance:'foreign'},{text:'override'}])assert.equal((await f.request('/api/whatsapp/jobs/'+job.id+'/retry',{method:'POST',body})).status,400);
+ assert.equal(f.db.prepare('SELECT total_changes() n').get().n,beforeRetry);
+ assert.equal((await f.request('/api/whatsapp/jobs/'+job.id+'/retry',{method:'POST'})).status,200);
  assert.equal(await f.reminders.drain(),1);assert.equal(e.sends.length,1);
  const attempts=f.db.prepare('SELECT text,error_code,state FROM whatsapp_attempts WHERE job_id=? ORDER BY attempt').all(job.id);
  assert.equal(attempts.length,2);assert.ok(attempts[0].text.length>4096);assert.equal(attempts[0].error_code,'invalid_text');

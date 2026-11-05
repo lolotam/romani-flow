@@ -151,6 +151,7 @@ export function createResourceRouter(
 
       const row = atomic(db, () => {
         const existing = findRow(db, tableName, String(req.params.id), []);
+        if (!existing) return null;
         const prepared = options.transformWrite ? options.transformWrite(payload, db, existing ?? undefined) : payload;
         const updated = updateRow(db, tableName, String(req.params.id), prepared);
         options.afterWrite?.();
