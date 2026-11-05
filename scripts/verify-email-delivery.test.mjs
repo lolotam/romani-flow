@@ -104,7 +104,7 @@ test('a timed-out grouped handoff is unknown, stops subsequent groups and never 
     await sendExpiryReport(f.db, f.mailer, 'cron');
     insertRow(f.db, 'documents', { title: 'Synthetic B', employee_id: f.employee.id, document_type_id: f.type.id, expiry_date: expiry });
     setSetting(f.db, 'email.cc', [CC]);
-    const result = await sendExpiryReport(f.db, f.mailer, 'cron', { budgetMs: 25 });
+    const result = await sendExpiryReport(f.db, f.mailer, 'cron', { budgetMs: 25, minimumSendMs: 1 });
     assert.equal(result.sent, false); assert.match(result.error, /unknown/); assert.equal(calls.length, 2);
     assert.equal(f.db.prepare("SELECT count(*) n FROM email_log WHERE status='unknown'").get().n, 1);
     finish(); await new Promise(resolve => setImmediate(resolve));
@@ -149,4 +149,22 @@ test('a failed settings load cannot send default configuration writes; successfu
   assert.ok(blocked.error); assert.equal(writes, 0); assert.equal(getString(f.db, 'email.language'), 'en');
   const saved = await writeLoadedEmailSettings({ 'email.language': 'ar' }, true);
   assert.equal(saved.error, null); assert.equal(writes, 1); assert.equal(getString(f.db, 'email.language'), 'ar');
+}));
+
+for (const code of ['ETIMEDOUT','ECONNRESET','ECONNREFUSED']) test('SMTP failure '+code+' preserves uncertainty classification', t => withMail(t, async f => {
+ f.db.prepare('UPDATE documents SET expiry_date=?').run(new Date().toISOString().slice(0,10));
+ setSetting(f.db,'email.recipients',[TO[0]]);
+ await sendExpiryReport(f.db,f.mailer,'cron');
+ assert.equal(f.db.prepare("SELECT status FROM email_log WHERE kind='expiry_report' ORDER BY rowid DESC LIMIT 1").get().status,code==='ECONNREFUSED'?'failed':'unknown');
+},()=>{throw Object.assign(new Error('Synthetic failure'),{code});}));
+test('insufficient SMTP admission budget leaves identities pending', t => withMail(t,async(f,calls)=>{
+ setSetting(f.db,'email.recipients',[TO[0]]);
+ const result=await sendExpiryReport(f.db,f.mailer,'cron',{budgetMs:5});
+ assert.equal(result.sent,false);assert.equal(calls.length,0);
+ assert.equal(f.db.prepare("SELECT count(*) n FROM email_log WHERE status IN ('sending','unknown')").get().n,0);
+}));
+test('explicit null CC never falls back to saved recipients', t=>withMail(t,async(f,calls)=>{
+ setSetting(f.db,'email.cc',[CC]);
+ await f.request('/api/email/test',{method:'POST',body:{to:[TO[0]],cc:null}});
+ assert.equal(calls.some(mail=>mail.cc?.includes(CC)),false);
 }));

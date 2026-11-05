@@ -235,6 +235,10 @@ ceiling is 90 seconds, not a delivery guarantee. A forced process/host terminati
 can still leave an email outcome uncertain; no exactly-once email claim is added.
 Grouped expiry emails share a 60-second whole-run budget and stop admitting
 further groups after a transport error. Groups not started remain pending.
+Admission requires at least 15 seconds remaining; a smaller remainder defers
+the group without creating an SMTP attempt. DNS failure or connection refusal
+is a proven non-send; socket timeouts, resets and other unclassified SMTP errors
+are recorded as unknown rather than automatically retried.
 If the budget expires during SMTP, that attempt is recorded as `unknown`; the
 underlying transport may still complete, but its late result cannot update the
 ledger. Its exact item/recipient identities remain suppressed on automatic runs,

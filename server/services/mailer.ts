@@ -127,7 +127,9 @@ export class Mailer {
       };
     } catch (error) {
       const detail = error instanceof Error ? error.message : String(error);
-      throw new MailError(`The message could not be sent: ${detail}`, 'send_failed', 502);
+      const code = error && typeof error === 'object' && 'code' in error ? String(error.code) : '';
+      const provenUnsent = ['ENOTFOUND', 'EAI_AGAIN', 'ECONNREFUSED'].includes(code);
+      throw new MailError(`The message could not be sent: ${detail}`, provenUnsent ? 'connection_failed' : 'send_failed', 502);
     }
   }
 

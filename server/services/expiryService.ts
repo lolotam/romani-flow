@@ -16,7 +16,7 @@ import {
   type TriggerSource,
 } from './emailLog.js';
 import { EXPIRED_BUCKET, parseIntervals, resolveBucket, type NotificationInterval } from './intervals.js';
-import type { Mailer } from './mailer.js';
+import { MailError, type Mailer } from './mailer.js';
 import { EmailDeadlineError, withinEmailDeadline } from './emailDeadline.js';
 import {
   expiryReportHtml,
@@ -264,7 +264,7 @@ export async function sendExpiryReport(
   db: Db,
   mailer: Mailer,
   triggerSource: TriggerSource,
-  options: { budgetMs?: number } = {},
+  options: { budgetMs?: number; minimumSendMs?: number } = {},
 ): Promise<ExpiryReportResult> {
   const deadline = performance.now() + Math.min(60_000, Math.max(1, options.budgetMs ?? 60_000));
   const enabled = getBoolean(db, 'email.enabled');
@@ -344,7 +344,7 @@ export async function sendExpiryReport(
   const results: ExpiryReportResult[] = [];
   const items = new Set<string>();
   for (const group of groups.values()) {
-    if (performance.now() >= deadline) {
+    if (deadline - performance.now() < (options.minimumSendMs ?? 15_000)) {
       results.push({ sent: false, error: 'Email run deadline reached; remaining groups deferred.', recipients: [], itemCount: 0 });
       break;
     }
@@ -437,7 +437,8 @@ async function sendReportGroup(db: Db, mailer: Mailer, triggerSource: TriggerSou
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error);
 
-    finishEmailAttempt(db, logId, { status: error instanceof EmailDeadlineError ? 'unknown' : 'failed', error: detail });
+    const uncertain = error instanceof EmailDeadlineError || (error instanceof MailError && error.code === 'send_failed');
+    finishEmailAttempt(db, logId, { status: uncertain ? 'unknown' : 'failed', error: detail });
 
     setSetting(db, 'email.last_result', `failed: ${detail}`);
 

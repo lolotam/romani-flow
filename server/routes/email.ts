@@ -84,7 +84,7 @@ export function createEmailRouter(
     asyncHandler(async (req, res) => {
       const { valid, invalid: invalidTo } = parseAddressList(req.body?.to);
       const recipients = Object.hasOwn(req.body ?? {}, 'to') ? valid : getStringList(db, 'email.recipients');
-      const copies = parseAddressList(req.body?.cc ?? getStringList(db, 'email.cc'));
+      const copies = parseAddressList(Object.hasOwn(req.body ?? {}, 'cc') ? req.body.cc : getStringList(db, 'email.cc'));
       const cc = [...new Set(copies.valid)].filter(address => !recipients.includes(address));
       const invalid = [...invalidTo, ...copies.invalid];
       const allRecipients = [...recipients, ...cc];
