@@ -24,8 +24,8 @@ export function useWhatsAppSettings() {
     const results = await loadWhatsAppReminderSettings(recipientOffset, filter, signal);
     if (signal?.aborted || active.current !== identity || generation.current !== version) return;
     setLoading(false);
-    if (results.people) { setRecipients(results.people.items); setRecipientTotal(results.people.total); }
-    if (results.jobs) { setLog(results.jobs.items); setLogTotal(results.jobs.total); }
+    setRecipients(results.people?.items ?? []); setRecipientTotal(results.people?.total ?? 0);
+    setLog(results.jobs?.items ?? []); setLogTotal(results.jobs?.total ?? 0);
     setEnabled(results.enabled); setError(results.failed ? 'failed' : '');
   }, [identity, recipientOffset, filter]);
   const latestLoad = useRef(load);
