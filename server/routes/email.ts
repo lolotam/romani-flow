@@ -83,7 +83,7 @@ export function createEmailRouter(
     requireAdmin,
     asyncHandler(async (req, res) => {
       const { valid, invalid: invalidTo } = parseAddressList(req.body?.to);
-      const recipients = valid.length > 0 ? valid : getStringList(db, 'email.recipients');
+      const recipients = Object.hasOwn(req.body ?? {}, 'to') ? valid : getStringList(db, 'email.recipients');
       const copies = parseAddressList(req.body?.cc ?? getStringList(db, 'email.cc'));
       const cc = [...new Set(copies.valid)].filter(address => !recipients.includes(address));
       const invalid = [...invalidTo, ...copies.invalid];

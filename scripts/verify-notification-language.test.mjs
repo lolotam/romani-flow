@@ -6,6 +6,7 @@ import { selectReminders } from '../server/notifications/whatsapp/selection.ts';
 import { sendExpiryReport } from '../server/services/expiryService.ts';
 import { insertRow } from '../server/repositories/base.ts';
 import { setSetting } from '../server/repositories/settings.ts';
+import { signSession } from '../server/middleware/auth.ts';
 
 test('company reminders select the stored name matching the channel language with Arabic fallback', () => reminderApi(async f => {
   insertRow(f.db, 'documents', { title: 'Synthetic company document', company_id: f.company.id, document_type_id: f.type.id, expiry_date: '2026-01-01' });
@@ -20,6 +21,9 @@ test('company reminders select the stored name matching the channel language wit
   setSetting(f.db, 'whatsapp.language', 'ar');
   assert.equal(selectReminders(f.db, 'romani', f.clock.now).find(row => row.item_name === 'Synthetic company document').owner_name, f.company.name);
   assert.equal(f.calls.length, 0);
+  f.db.prepare('UPDATE companies SET name=?,name_ar=? WHERE id=?').run('   ', 'اسم الشركة', f.company.id);
+  setSetting(f.db, 'whatsapp.language', 'en');
+  assert.equal(selectReminders(f.db, 'romani', f.clock.now).find(row => row.item_name === 'Synthetic company document').owner_name, 'اسم الشركة');
 }));
 
 test('channel languages persist independently; invalid writes are atomic and viewers cannot change or preview templates', () => reminderApi(async f => {
@@ -72,6 +76,10 @@ test('synthetic previews and actual email reports use bilingual renderers withou
   f.db.prepare('UPDATE documents SET expiry_date=?').run(new Date().toISOString().slice(0, 10));
   await f.request('/api/settings', { method: 'PUT', body: { settings: { 'email.recipients': ['synthetic@example.invalid'] } } });
   for (const language of ['ar', 'en']) {
+    const response = await fetch(f.base + '/api/whatsapp/template-preview?channel=email&language=' + language, {
+      headers: { cookie: f.config.cookieName + '=' + signSession(f.config, { id: 'admin', role: 'admin', name: 'Synthetic', email: 'admin@example.invalid' }) },
+    });
+    assert.equal(response.headers.get('cache-control'), 'no-store');
     const wa = await f.request('/api/whatsapp/template-preview?channel=whatsapp&language=' + language);
     assert.equal(wa.status, 200); assert.equal(wa.json.data.samples.length, 3);
     assert.ok(wa.json.data.samples.every(row => row.text.includes('15/01/2030')));

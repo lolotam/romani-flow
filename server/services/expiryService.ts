@@ -304,59 +304,39 @@ export async function sendExpiryReport(
   // An automated run only includes the items that have not been notified for
   // this threshold, expiry date and recipient yet. A manual run always shows
   // the full picture and never consumes a notification.
-  let employees = report.employees;
-  let documents = report.documents;
-  let targetRecipients = recipients;
-  let targetCc = cc.filter(address => !recipients.includes(address));
-
-  if (triggerSource === 'cron') {
-    const pendingRecipients = new Set<string>();
-
-    const isPending = (
-      itemType: string,
-      itemId: string,
-      expiryDate: string,
-      intervalDays: number,
-    ): boolean => {
-      let pending = false;
-      for (const recipient of allRecipients) {
-        if (!alreadyNotified(db, itemType, itemId, expiryDate, intervalDays, recipient)) {
-          pendingRecipients.add(recipient);
-          pending = true;
-        }
-      }
-      return pending;
-    };
-
-    employees = employees.filter((item) =>
-      isPending('employee', item.id, item.expiryDate, item.intervalDays),
-    );
-    documents = documents.filter((item) =>
-      isPending('document', item.id, item.expiryDate, item.intervalDays),
-    );
-
-    // Only the recipients that still miss a notification receive the report.
-    targetRecipients = recipients.filter((recipient) => pendingRecipients.has(recipient));
-    targetCc = targetCc.filter(recipient => pendingRecipients.has(recipient));
+  // Recipients only share a report when their pending item sets are identical.
+  const groups = new Map<string, { report: ExpiryReport; to: string[]; cc: string[] }>();
+  for (const recipient of allRecipients) {
+    const employees = report.employees.filter(item => triggerSource !== 'cron' || !alreadyNotified(db, 'employee', item.id, item.expiryDate, item.intervalDays, recipient));
+    const documents = report.documents.filter(item => triggerSource !== 'cron' || !alreadyNotified(db, 'document', item.id, item.expiryDate, item.intervalDays, recipient));
+    if (!employees.length && !documents.length) continue;
+    const key = JSON.stringify([employees.map(item => [item.id, item.expiryDate, item.intervalDays]), documents.map(item => [item.id, item.expiryDate, item.intervalDays])]);
+    let group = groups.get(key);
+    if (!group) { group = { report: { ...report, employees, documents }, to: [], cc: [] }; groups.set(key, group); }
+    (recipients.includes(recipient) ? group.to : group.cc).push(recipient);
   }
+  if (!groups.size) {
+    writeEmailLog(db, { kind: 'expiry_report', recipients: allRecipients, subject: expiryReportSubject(report), status: 'skipped', error: 'No items are due for this interval.', triggerSource });
+    return { sent: false, skipped: 'nothing_due', recipients: allRecipients, itemCount: 0 };
+  }
+  const results: ExpiryReportResult[] = [];
+  const items = new Set<string>();
+  for (const group of groups.values()) {
+    for (const item of group.report.employees) items.add('employee:' + item.id);
+    for (const item of group.report.documents) items.add('document:' + item.id);
+    results.push(await sendReportGroup(db, mailer, triggerSource, group.report, group.to, group.cc, intervals));
+  }
+  const sent = results.every(result => result.sent);
+  const error = results.find(result => result.error)?.error;
+  setSetting(db, 'email.last_result', error ? 'failed: ' + error : sent ? 'sent' : 'partial');
+  return { sent, ...(error ? { error } : {}), recipients: results.flatMap(result => result.recipients), itemCount: items.size };
+}
 
+async function sendReportGroup(db: Db, mailer: Mailer, triggerSource: TriggerSource, finalReport: ExpiryReport,
+  targetRecipients: string[], targetCc: string[], intervals: NotificationInterval[]): Promise<ExpiryReportResult> {
+  const { employees, documents, windowDays } = finalReport;
+  const subject = expiryReportSubject(finalReport);
   const itemCount = employees.length + documents.length;
-  const subject = expiryReportSubject({ ...report, employees, documents });
-
-  if (itemCount === 0 || targetRecipients.length + targetCc.length === 0) {
-    writeEmailLog(db, {
-      kind: 'expiry_report',
-      recipients,
-      subject,
-      status: 'skipped',
-      error: 'No items are due for this interval.',
-      triggerSource,
-    });
-    return { sent: false, skipped: 'nothing_due', recipients, itemCount: 0 };
-  }
-
-  const finalReport: ExpiryReport = { ...report, employees, documents };
-
   // The attempt is recorded before the message is handed to SMTP.
   const logId = startEmailAttempt(db, {
     kind: 'expiry_report',
@@ -429,7 +409,7 @@ export async function sendExpiryReport(
 
     setSetting(db, 'email.last_result', `failed: ${detail}`);
 
-    return { sent: false, error: detail, recipients, itemCount };
+    return { sent: false, error: detail, recipients: [...targetRecipients, ...targetCc], itemCount };
   }
 }
 

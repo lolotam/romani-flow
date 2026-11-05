@@ -6,8 +6,34 @@ import { reminderApi } from './fixtures/whatsapp-api.mjs';
 import { setSetting, getString } from '../server/repositories/settings.ts';
 import { sendExpiryReport } from '../server/services/expiryService.ts';
 import { writeLoadedEmailSettings } from '../src/lib/emailSettingsWrite.ts';
+import { insertRow } from '../server/repositories/base.ts';
 
 const TO = ['first@example.invalid', 'second@example.invalid'], CC = 'copy@example.invalid';
+test('an explicit empty To override never restores saved recipients', t => withMail(t, async (f, calls) => {
+  setSetting(f.db, 'email.recipients', TO); setSetting(f.db, 'email.cc', [CC]);
+  assert.equal((await f.request('/api/email/test', { method: 'POST', body: { to: [], cc: [CC] } })).status, 200);
+  assert.deepEqual(calls[0].to, []); assert.deepEqual(calls[0].cc, [CC]);
+  assert.equal((await f.request('/api/email/test', { method: 'POST', body: { to: [], cc: [] } })).status, 400);
+  assert.equal(calls.length, 1);
+}));
+
+test('different per-recipient item histories do not receive a cross-product of old notifications', t => withMail(t, async (f, calls) => {
+  const expiry = new Date().toISOString().slice(0, 10);
+  f.db.prepare('UPDATE documents SET title=?,expiry_date=?').run('Synthetic A', expiry);
+  f.db.prepare('UPDATE employees SET residency_expiry_date=NULL').run();
+  setSetting(f.db, 'email.recipients', [TO[0]]); setSetting(f.db, 'email.cc', []);
+  assert.equal((await sendExpiryReport(f.db, f.mailer, 'cron')).sent, true);
+  insertRow(f.db, 'documents', { title: 'Synthetic B', employee_id: f.employee.id, document_type_id: f.type.id, expiry_date: expiry });
+  setSetting(f.db, 'email.cc', [CC]);
+  assert.equal((await sendExpiryReport(f.db, f.mailer, 'cron')).sent, true);
+  assert.equal(calls.length, 3);
+  const primary = calls.slice(1).find(message => message.to.includes(TO[0]));
+  const copy = calls.slice(1).find(message => message.cc?.includes(CC));
+  assert.ok(primary.text.includes('Synthetic B')); assert.equal(primary.text.includes('Synthetic A'), false);
+  assert.ok(copy.text.includes('Synthetic A')); assert.ok(copy.text.includes('Synthetic B'));
+  assert.equal(f.db.prepare('SELECT count(*) n FROM expiry_notifications').get().n, 4);
+  assert.equal((await sendExpiryReport(f.db, f.mailer, 'cron')).skipped, 'nothing_due'); assert.equal(calls.length, 3);
+}));
 test('the installed Nodemailer transport builds a CC-only envelope without opening SMTP', async () => {
   const mail = nodemailer.createTransport({ jsonTransport: true });
   const result = await mail.sendMail({ from: 'sender@example.invalid', to: [], cc: [CC], subject: 'Synthetic', text: 'Synthetic' });
