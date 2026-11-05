@@ -18,7 +18,7 @@ import { EmployeeFormDialog } from '@/components/employees/EmployeeFormDialog';
 import { EmployeeViewDialogContent } from '@/components/employees/EmployeeViewDialogContent';
 import { EMPTY_EMPLOYEE_FORM } from '@/components/employees/employeeTypes';
 import type { EmployeeFormState } from '@/components/employees/employeeTypes';
-import { buildEmployeePayload, formatDateForInput, relationForCompany, toEmployeeFlags } from '@/components/employees/employeeHelpers';
+import { buildEmployeePayload, employeeSaveErrorKey, formatDateForInput, relationForCompany, toEmployeeFlags } from '@/components/employees/employeeHelpers';
 
 export default function Employees() {
   const [employees, setEmployees] = useState<EmployeeWithRelations[]>([]);
@@ -86,7 +86,7 @@ export default function Employees() {
       console.error('Error adding employee:', error);
       toast({
         title: t('employees.messages.error'),
-        description: t('employees.messages.addError') || 'Failed to add employee',
+        description: t(employeeSaveErrorKey(error, 'employees.messages.addError')),
         variant: 'destructive',
       });
     }
@@ -134,7 +134,7 @@ export default function Employees() {
       console.error('Error updating employee:', error);
       toast({
         title: t('employees.messages.error'),
-        description: t('employees.messages.editError') || 'Failed to update employee',
+        description: t(employeeSaveErrorKey(error, 'employees.messages.updateError')),
         variant: 'destructive',
       });
     }
