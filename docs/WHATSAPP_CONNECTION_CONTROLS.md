@@ -31,13 +31,23 @@ Every settled disconnect attempt also refreshes the sibling reminder settings,
 including failures after the backend may already have disabled sending.
 
 The browser polls the admin status GET every3seconds during visible pairing for
-a single absolute 180-second window established when that pairing attempt starts.
+a single absolute 180-second window captured before the explicit connect request
+starts. Initial/manual status reads and remounts cannot create a polling window;
+a slow connect response consumes that same budget rather than extending it.
 QR expiry/hiding, status errors and subscription cleanup do not renew the window;
 only an explicit new QR attempt can start a fresh window. Temporary network/provider
 status failures retain the still-visible, unexpired QR and allow the next check.
 Authentication, instance mismatch and invalid-response failures clear it and stop
 polling. A verified successful logout clears the prior connect cooldown; failed
-logout does not. No polling action generates QR or sends a message. Actual
+logout does not. An already-closed no-op does not reset the connect cooldown.
+A known pending QR requires an actual scoped logout and closed-state verification
+even when the initial state reads closed; rejection is not reported as revocation.
+The browser disconnect request has a 60-second transport timeout to accommodate
+the three bounded 10-second provider calls plus normal queue/response margin.
+It is not a guarantee against arbitrary coordinator congestion; a transport
+timeout never authorizes an automatic logout retry or proves its final outcome.
+Malformed provider JSON and upstream authentication denial are terminal sanitized
+errors for pairing, not transient outages. No polling action generates QR or sends a message. Actual
 connected state clears QR and displays a green check/Connected control. Hidden
 pages discard QR and skip background checks; transient QR bytes are held only in
 the QR state, not duplicated into connection-status state or persisted. User/

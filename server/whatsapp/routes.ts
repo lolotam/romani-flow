@@ -23,6 +23,7 @@ export function createPairingRouter(config: PairingConfig, env: NodeEnv, reminde
   let connecting = false;
   let lastConnectAt = 0;
   let lastDisconnectAt = 0;
+  let pendingPairingUntil = 0;
   router.use(requireAdmin, (_req, res, next) => {
     res.setHeader('Cache-Control', 'no-store');
     res.setHeader('Referrer-Policy', 'no-referrer');
@@ -41,8 +42,8 @@ export function createPairingRouter(config: PairingConfig, env: NodeEnv, reminde
     connecting = true;
     lastDisconnectAt = Date.now();
     try {
-      const status = await reminders.withSendingDisabled(() => client.disconnect());
-      lastConnectAt = 0;
+      const { status, logoutVerified } = await reminders.withSendingDisabled(() => client.disconnect(pendingPairingUntil > Date.now()));
+      if (logoutVerified) { lastConnectAt = 0; pendingPairingUntil = 0; }
       res.json({ data: status, error: null });
     } catch (error) { const e = error instanceof PairingError ? error : new PairingError('provider_unavailable'); fail(res, e.status, e.code); }
     finally { connecting = false; }
@@ -59,7 +60,11 @@ export function createPairingRouter(config: PairingConfig, env: NodeEnv, reminde
     }
     connecting = true;
     lastConnectAt = Date.now();
-    try { res.json({ data: await client.connect(), error: null }); }
+    try {
+      const result = await client.connect();
+      pendingPairingUntil = result.qr ? Date.now() + 60_000 : 0;
+      res.json({ data: result, error: null });
+    }
     catch (error) { const e = error instanceof PairingError ? error : new PairingError('provider_unavailable'); fail(res, e.status, e.code); }
     finally { connecting = false; }
   }));

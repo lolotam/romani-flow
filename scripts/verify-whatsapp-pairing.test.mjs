@@ -17,6 +17,7 @@ import { pairingConfiguration, readPairingConfig } from '../server/whatsapp/conf
 import { createServer as createViteServer } from 'vite';
 import { stopRequestWork } from '../server/middleware/requestWork.ts';
 import { createReminderRuntime } from '../server/whatsapp/runtime.ts';
+import { whatsappPairing } from '../src/lib/api/whatsapp.ts';
 
 // Synthetic loopback provider only; no .env, production accounts or real QR scan.
 const PNG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jGDkAAAAASUVORK5CYII=';
@@ -39,6 +40,7 @@ async function fixture(run, overrides = {}, providerPath = '/api') {
     if (mode.redirect) { res.writeHead(302, { location: '/instance/connectionState/curemed' }); res.end(); return; }
     res.writeHead(mode.status, { 'content-type': 'application/json' });
     if (mode.status !== 200) { res.end(JSON.stringify({ apikey: apiKey, session: 'must-not-leak' })); return; }
+    if (mode.malformed) { res.end('{"invalid":'); return; }
     if (mode.oversized) { res.end(JSON.stringify({ base64: 'a'.repeat(410_000) })); return; }
     if (mode.errorBody) { res.end(JSON.stringify({ error: 'must-not-leak', instance: { instanceName: mode.instance, state: 'open' } })); return; }
     if (req.url.includes('/connectionState/')) res.end(JSON.stringify({ instance: { instanceName: mode.instance, state: mode.state }, apikey: apiKey, chats: ['must-not-leak'] }));
@@ -192,6 +194,12 @@ test('provider redirect, failure and oversized response stay sanitized', () => f
   f.mode.status = 200; f.mode.oversized = true; assert.equal((await f.request('/api/whatsapp/status')).status, 502);
 }));
 
+test('malformed provider JSON is a terminal invalid response, not a temporary outage',()=>fixture(async f=>{
+ f.mode.malformed=true;
+ const response=await f.request('/api/whatsapp/status');
+ assert.equal(response.status,502);assert.equal(response.json.error.code,'invalid_provider_response');
+}));
+
 test('SVG or non-image QR response cannot reach browser', () => fixture(async f => {
   f.mode.qr = 'data:image/svg+xml,<svg onload="alert(1)" />';
   const r = await f.request('/api/whatsapp/connect', { method: 'POST', body: {} });
@@ -298,6 +306,35 @@ test('logout acknowledgement without actual closed state never reports successfu
  assert.equal(response.status,409);assert.equal(response.json.error.code,'disconnect_pending');assert.equal(response.json.data,null);
  assert.equal(getBoolean(f.db,'whatsapp.enabled'),false);assert.equal(f.calls.filter(call=>call.method==='DELETE').length,1);
  assert.equal((await f.request('/api/whatsapp/connect',{method:'POST',body:{}})).status,429);
+}));
+
+for(const pendingQr of [false,true])test(`closed disconnect preserves throttle unless it revokes a known pending QR (pending: ${pendingQr})`,()=>fixture(async f=>{
+ if(!pendingQr)f.mode.status=503;
+ assert.equal((await f.request('/api/whatsapp/connect',{method:'POST',body:{}})).status,pendingQr?200:502);
+ f.mode.status=200;f.mode.state='close';
+ const response=await f.request('/api/whatsapp/disconnect',{method:'POST',body:{}});
+ assert.equal(response.status,200);assert.equal(response.json.data.state,'disconnected');
+ assert.equal(f.calls.filter(call=>call.method==='DELETE').length,pendingQr?1:0);
+ assert.equal((await f.request('/api/whatsapp/connect',{method:'POST',body:{}})).status,pendingQr?200:429);
+}));
+
+test('disconnect browser client waits beyond the old 30-second deadline for its verified outcome',t=>fixture(async f=>{
+ f.mode.state='open';let release,entered;
+ const blocked=new Promise(resolve=>release=resolve),started=new Promise(resolve=>entered=resolve);
+ f.mode.beforeResponse=async req=>{if(req.method==='DELETE'){entered();await blocked;}};
+ const nativeFetch=globalThis.fetch;
+ t.mock.method(globalThis,'fetch',(url,options)=>typeof url==='string'&&url.startsWith('/')
+  ?nativeFetch(f.base+url,{...options,headers:{...options?.headers,cookie:f.cookie()}}):nativeFetch(url,options));
+ t.mock.timers.enable({apis:['setTimeout']});
+ let settled=false;
+ const request=whatsappPairing.disconnect().then(result=>{settled=true;return result;});
+ try{
+  await started;t.mock.timers.tick(30_001);
+  await new Promise(resolve=>setImmediate(resolve));await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(settled,false,'a valid slow disconnect must not be reported as a client timeout at 30 seconds');
+  release();const response=await request;
+  assert.equal(response.error,null);assert.equal(response.data.state,'disconnected');
+ }finally{release();await request;await stopRequestWork(f.app);t.mock.timers.reset();t.mock.restoreAll();}
 }));
 
 test('shutdown drains detached disconnect work and refuses further pairing provider calls',()=>fixture(async f=>{

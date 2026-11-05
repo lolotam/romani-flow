@@ -29,7 +29,11 @@ export default function WhatsAppPairingSettings({ onDisconnectSettled }: { onDis
     const id = ++operation.current;
     setBusy(true);
     setError(false);
-    if (action !== 'status') { setQr(null); setExpired(false); pollDeadline.current = 0; setPollingUntil(0); }
+    if (action !== 'status') {
+      setQr(null); setExpired(false); expiresAt.current = 0;
+      pollDeadline.current = action === 'connect' ? Date.now() + 180_000 : 0;
+      setPollingUntil(0);
+    }
     if (action === 'disconnect') setStatus(null);
     const failed = (error: unknown) => {
       setError(true);
@@ -37,7 +41,7 @@ export default function WhatsAppPairingSettings({ onDisconnectSettled }: { onDis
         if (document.hidden || Date.now() >= expiresAt.current) { setQr(null); setExpired(true); }
         return;
       }
-      setQr(null); setStatus(null); setPollingUntil(0);
+      setQr(null); setStatus(null); pollDeadline.current = 0; setPollingUntil(0);
     };
     try {
       const result = action === 'connect' ? await whatsappPairing.connect() : action === 'disconnect' ? await whatsappPairing.disconnect() : await whatsappPairing.status();
@@ -45,11 +49,8 @@ export default function WhatsAppPairingSettings({ onDisconnectSettled }: { onDis
       if (result.error || !result.data) { failed(result.error); return; }
       setStatus({ configured: result.data.configured, state: result.data.state });
       if (result.data.configured && result.data.state === 'connecting') {
-        if (pollDeadline.current === 0) {
-          pollDeadline.current = Date.now() + 180_000;
-          setPollingUntil(pollDeadline.current);
-        }
-      } else { setPollingUntil(0); setQr(null); }
+        if (pollDeadline.current > Date.now()) setPollingUntil(pollDeadline.current);
+      } else { pollDeadline.current = 0; setPollingUntil(0); setQr(null); }
       if (result.data.state === 'connected' || !result.data.configured) { setQr(null); setExpired(false); }
       if ('qr' in result.data && typeof result.data.qr === 'string') {
         if (document.hidden) { setQr(null); setExpired(true); return; }
