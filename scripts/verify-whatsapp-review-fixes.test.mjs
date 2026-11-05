@@ -6,7 +6,7 @@ import { ReminderStore } from '../server/notifications/whatsapp/repository.ts';
 import { selectReminders } from '../server/notifications/whatsapp/selection.ts';
 import { NotificationCoordinator } from '../server/notifications/coordinator.ts';
 import { DocumentService } from '../server/services/documentService.ts';
-import { relationForCompany } from '../src/components/employees/employeeHelpers.ts';
+import { relationForCompany, employeeSaveErrorKey } from '../src/components/employees/employeeHelpers.ts';
 
 const phone = (n) => '+999' + String(n).padStart(8, '0');
 
@@ -111,3 +111,17 @@ test('the audit log reads attempts once per page and keeps per-job order and con
   }
   assert.deepEqual(log.json.data.items.map((item) => item.attempts.length).sort(), [1, 1, 2]);
 }));
+
+test('a rejected employee save names the WhatsApp reason and only uses translation keys that exist', async () => {
+  const { employees: en } = await import('../src/translations/en/employees.ts');
+  const { employees: ar } = await import('../src/translations/ar/employees.ts');
+  assert.equal(employeeSaveErrorKey({ code: 'invalid_whatsapp_phone' }, 'employees.messages.updateError'), 'employees.messages.whatsappPhoneInvalid');
+  assert.equal(employeeSaveErrorKey({ code: 'duplicate_employee_whatsapp_phone' }, 'x'), 'employees.messages.whatsappPhoneDuplicate');
+  assert.equal(employeeSaveErrorKey({ code: 'http_error' }, 'employees.messages.updateError'), 'employees.messages.updateError');
+  assert.equal(employeeSaveErrorKey(null, 'fallback'), 'fallback');
+  for (const lang of [en, ar]) {
+    for (const key of ['updateError', 'addError', 'whatsappPhoneInvalid', 'whatsappPhoneDuplicate']) {
+      assert.equal(typeof lang.messages[key], 'string', key);
+    }
+  }
+});

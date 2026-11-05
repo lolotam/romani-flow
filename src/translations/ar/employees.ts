@@ -133,6 +133,8 @@ export const employees = {
     updateError: 'فشل في تحديث بيانات الموظف',
     deleteError: 'فشل في حذف الموظف',
     requiredFields: 'يرجى ملء جميع الحقول المطلوبة',
+    whatsappPhoneInvalid: 'أدخل رقم الجوال مع كود الدولة (مثال: ‎+96555123456) لتفعيل تذكيرات واتساب.',
+    whatsappPhoneDuplicate: 'رقم الجوال هذا مستخدم لموظف آخر مفعّل له تذكيرات واتساب.',
     exportSuccess: 'تم تصدير بيانات الموظفين إلى ملف {{format}}',
     exportError: 'فشل في تصدير البيانات'
   },
