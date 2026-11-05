@@ -133,7 +133,7 @@ export const employees = {
     updateError: 'Failed to update employee information',
     deleteError: 'Failed to delete employee',
     requiredFields: 'Please fill in all required fields',
-    whatsappPhoneInvalid: 'Enter the mobile number with the country code (for example +96555123456) to enable WhatsApp reminders.',
+    whatsappPhoneInvalid: 'Enter the mobile number in international format: start with + or 00, followed by the country code, with 8-15 digits in total (for example +96555123456), to enable WhatsApp reminders.',
     whatsappPhoneDuplicate: 'This mobile number is already used by another employee with WhatsApp reminders enabled.',
     exportSuccess: 'Employee data exported to {{format}} file',
     exportError: 'Failed to export data'
