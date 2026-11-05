@@ -17,7 +17,6 @@ import { DocumentDateFields } from './documents/DocumentDateFields';
 import { saveDocument } from './documents/saveDocument';
 import { useStagedDocumentUpload } from './documents/useStagedDocumentUpload';
 import { useLastSubmissionRestore } from '@/hooks/useLastSubmission';
-import { restoreFormDate } from '@/lib/formDefaults';
 
 export function DocumentForm({
   uploadedFile,
@@ -51,7 +50,7 @@ export function DocumentForm({
       notes: editingDocument.notes || '',
     } : {
       title: fileName ? fileName.replace(/\.[^/.]+$/, '') : '', // Remove file extension
-      beneficiary_type: preselectedCompanyId ? 'company' : preselectedEmployeeId ? 'employee' : 'employee',
+      beneficiary_type: preselectedEmployeeId ? 'employee' : preselectedCompanyId ? 'company' : 'employee',
       company_id: preselectedCompanyId || '',
       employee_id: preselectedEmployeeId || (employees.length > 0 ? employees[0].id : ''),
       notes: '',
@@ -63,11 +62,11 @@ export function DocumentForm({
   useLastSubmissionRestore('documents', !editingDocument, (saved) => {
     form.reset({ ...form.getValues(),
       title: fileName ? fileName.replace(/\.[^/.]+$/, '') : String(saved.title ?? ''),
-      beneficiary_type: preselectedCompanyId ? 'company' : preselectedEmployeeId ? 'employee' : saved.employee_id ? 'employee' : 'company',
-      company_id: preselectedCompanyId ?? String(saved.company_id ?? ''),
+      beneficiary_type: preselectedEmployeeId ? 'employee' : preselectedCompanyId ? 'company' : saved.employee_id ? 'employee' : 'company',
+      company_id: preselectedEmployeeId ? '' : preselectedCompanyId ?? String(saved.company_id ?? ''),
       employee_id: preselectedEmployeeId ?? String(saved.employee_id ?? ''),
       document_type_id: String(saved.document_type_id ?? ''), ministry_id: String(saved.ministry_id ?? ''),
-      issue_date: restoreFormDate(saved.issue_date), expiry_date: restoreFormDate(saved.expiry_date), notes: String(saved.notes ?? ''),
+      notes: String(saved.notes ?? ''),
     });
   }, () => !formIsDirty);
 
@@ -89,7 +88,7 @@ export function DocumentForm({
       const uploadId = uploadedFile
         ? await stageFile(uploadedFile, t('documents.messages.saveError'))
         : undefined;
-      await saveDocument(data, editingDocument?.id, uploadId, t);
+      await saveDocument(preselectedEmployeeId ? { ...data, beneficiary_type: 'employee', employee_id: preselectedEmployeeId, company_id: '' } : data, editingDocument?.id, uploadId, t);
       clearUpload();
       toast.success(editingDocument ? t('documents.messages.editSuccess') : t('documents.messages.addSuccess'));
       onSuccess();
@@ -138,6 +137,7 @@ export function DocumentForm({
                   <FormItem>
                     <FormLabel>{t('documents.form.beneficiaryType')} *</FormLabel>
                     <Select 
+                      disabled={!!preselectedEmployeeId}
                       onValueChange={(value: 'company' | 'employee') => {
                         field.onChange(value);
                         // Reset dependent fields
@@ -176,6 +176,7 @@ export function DocumentForm({
             </div>
 
             <DocumentBeneficiaryFields
+              preselectedEmployeeId={preselectedEmployeeId}
               key={form.watch('beneficiary_type')}
               companies={companies}
               employees={employees}
@@ -236,7 +237,10 @@ export function DocumentForm({
                       // Reset form for new document
                       form.reset({
                         title: '',
-                        beneficiary_type: 'employee',
+                        beneficiary_type: preselectedEmployeeId ? 'employee' : preselectedCompanyId ? 'company' : 'employee',
+                        employee_id: preselectedEmployeeId || '',
+                        company_id: preselectedCompanyId || '',
+                        issue_date: undefined, expiry_date: undefined,
                         notes: '',
                       });
                     }}

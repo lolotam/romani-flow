@@ -5,7 +5,7 @@ import type { Row } from './base.js';
 const FIELDS: Record<string, readonly string[]> = {
   employees: ['name', 'email', 'position', 'hire_date', 'birth_date', 'civil_id_no',
     'residency_expiry_date', 'driving_license', 'driving_license_expiry_date', 'company_id', 'is_active'],
-  documents: ['title', 'company_id', 'employee_id', 'document_type_id', 'ministry_id', 'issue_date', 'expiry_date', 'notes'],
+  documents: ['title', 'company_id', 'employee_id', 'document_type_id', 'ministry_id', 'notes'],
   companies: ['name', 'name_ar', 'description'],
   positions: ['name', 'name_ar', 'value'],
   ministries: ['name', 'name_ar'],
@@ -30,6 +30,7 @@ export function readSubmission(db: Db, userId: string, formKey: string): Row {
   const stored = db.prepare('SELECT values_json FROM form_defaults WHERE user_id=? AND form_key=?')
     .get(userId, formKey) as { values_json: string } | undefined;
   const values: Row = stored ? JSON.parse(stored.values_json) as Row : {};
+  if (formKey === 'documents') { delete values.issue_date; delete values.expiry_date; }
   if (formKey === 'employees') {
     delete values.mobile_no;
     delete values.whatsapp_notifications_enabled;

@@ -96,8 +96,8 @@ function EmployeeDocumentsPage({ employeeId }: { employeeId: string }) {
         </AlertDescription>
       </Alert>}
       {employee && <>
-        <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}
-          className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-6">
+        <motion.div initial={false} animate={{ opacity: 1, y: 0 }}
+          className="flex flex-col items-center gap-6 rounded-2xl border border-teal-300/50 bg-gradient-to-br from-teal-100 via-emerald-50 to-sky-100 p-6 shadow-sm dark:border-teal-800 dark:from-teal-950 dark:via-emerald-950 dark:to-slate-900">
           <EmployeeDocumentsHeader employee={employee} documentCount={data.documents.length} onPhotoChange={data.reload} />
           <DocumentUploadDialog open={uploadOpen} onOpenChange={setUploadOpen}
             copy={{ trigger: t('employeeDocuments.uploadNew'), title: t('employeeDocuments.uploadTitle', { name: employee.name }),
