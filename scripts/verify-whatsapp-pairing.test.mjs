@@ -15,36 +15,44 @@ import { DocumentService } from '../server/services/documentService.ts';
 import { CronService } from '../server/services/cronService.ts';
 import { pairingConfiguration, readPairingConfig } from '../server/whatsapp/config.ts';
 import { createServer as createViteServer } from 'vite';
+import { stopRequestWork } from '../server/middleware/requestWork.ts';
+import { createReminderRuntime } from '../server/whatsapp/runtime.ts';
+import { whatsappPairing } from '../src/lib/api/whatsapp.ts';
+import { setSetting } from '../server/repositories/settings.ts';
 
 // Synthetic loopback provider only; no .env, production accounts or real QR scan.
 const PNG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jGDkAAAAASUVORK5CYII=';
 const listen = server => new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
 const stop = server => new Promise(resolve => { server.close(resolve); server.closeAllConnections(); });
 
-async function fixture(run, overrides = {}) {
+async function fixture(run, overrides = {}, providerPath = '/api') {
   const apiKey = randomBytes(32).toString('hex');
   const webhookSecret = randomBytes(32).toString('hex');
   const curemedKey = randomBytes(32).toString('hex');
   const calls = [];
-  const mode = { state: 'close', instance: 'romani-fixture', qr: PNG, status: 200, delay: 0, redirect: false, oversized: false, connectResponse: null, errorBody: false };
+  const instance = overrides.ROMANI_EVOLUTION_INSTANCE ?? 'romani-fixture';
+  const mode = { state: 'close', instance, qr: PNG, status: 200, delay: 0, redirect: false, oversized: false, connectResponse: null, errorBody: false };
   const provider = http.createServer(async (req, res) => {
     calls.push({ path: req.url, method: req.method, authorized: req.headers.apikey === apiKey });
     // Emulate a project-scoped provider boundary; Curemed key cannot read Romani.
-    if (req.headers.apikey !== apiKey || !req.url.endsWith('/romani-fixture')) { res.writeHead(403); res.end('not allowed'); return; }
+    if (req.headers.apikey !== apiKey || !req.url.endsWith('/' + instance)) { res.writeHead(403); res.end('not allowed'); return; }
+    if (mode.beforeResponse) await mode.beforeResponse(req);
     if (mode.delay) await new Promise(resolve => setTimeout(resolve, mode.delay));
     if (mode.redirect) { res.writeHead(302, { location: '/instance/connectionState/curemed' }); res.end(); return; }
     res.writeHead(mode.status, { 'content-type': 'application/json' });
     if (mode.status !== 200) { res.end(JSON.stringify({ apikey: apiKey, session: 'must-not-leak' })); return; }
+    if (mode.malformed) { res.end('{"invalid":'); return; }
     if (mode.oversized) { res.end(JSON.stringify({ base64: 'a'.repeat(410_000) })); return; }
     if (mode.errorBody) { res.end(JSON.stringify({ error: 'must-not-leak', instance: { instanceName: mode.instance, state: 'open' } })); return; }
     if (req.url.includes('/connectionState/')) res.end(JSON.stringify({ instance: { instanceName: mode.instance, state: mode.state }, apikey: apiKey, chats: ['must-not-leak'] }));
     else if (req.url.includes('/connect/')) res.end(JSON.stringify(mode.connectResponse ?? { base64: mode.qr, code: 'must-not-leak', pairingCode: 'must-not-leak', apikey: apiKey }));
+    else if (req.url.includes('/logout/') && req.method === 'DELETE') { mode.state = mode.logoutState ?? 'close'; res.end(JSON.stringify({status:'SUCCESS',error:false,response:{message:'Instance logged out'}})); }
     else { res.end('{}'); }
   });
   await listen(provider);
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'romani-pairing-'));
   const config = loadConfig({ NODE_ENV: 'test', JWT_SECRET: randomBytes(32).toString('hex'),
-    ROMANI_EVOLUTION_URL: `http://127.0.0.1:${provider.address().port}/api`, ROMANI_EVOLUTION_API_KEY: apiKey,
+    ROMANI_EVOLUTION_URL: `http://127.0.0.1:${provider.address().port}${providerPath}`, ROMANI_EVOLUTION_API_KEY: apiKey,
     ROMANI_EVOLUTION_INSTANCE: 'romani-fixture', ROMANI_EVOLUTION_WEBHOOK_SECRET: webhookSecret, ...overrides });
   const db = new DatabaseSync(path.join(dir, 'romani.db'));
   db.exec('PRAGMA foreign_keys=ON'); runMigrations(db, path.resolve('server/db/migrations'));
@@ -54,7 +62,8 @@ async function fixture(run, overrides = {}) {
   const mailer = { isConfigured: () => false };
   const storage = new StorageService(path.join(dir, 'uploads')); storage.ensureDirectories();
   const cron = new CronService(db, mailer);
-  const app = createApp({ config, db, mailer, cron, storage, documents: new DocumentService(db, storage), staticDir: dir });
+  const reminders = createReminderRuntime(db, config.whatsapp);
+  const app = createApp({ config, db, mailer, cron, storage, documents: new DocumentService(db, storage), staticDir: dir, reminders });
   const server = http.createServer(app); await listen(server);
   const base = `http://127.0.0.1:${server.address().port}`;
   const cookie = (role = 'admin', cfg = config) => `${config.cookieName}=${signSession(cfg, { id: role, role, name: 'Synthetic', email: `${role}@example.invalid` })}`;
@@ -66,7 +75,7 @@ async function fixture(run, overrides = {}) {
     assert.ok(!JSON.stringify(json).includes('must-not-leak'));
     return { status: res.status, headers: res.headers, json };
   };
-  try { await run({ request, config, db, mode, calls, cookie, webhookSecret, curemedKey, base }); }
+  try { await run({ request, config, db, mode, calls, cookie, webhookSecret, curemedKey, base, app, server, reminders }); }
   finally { cron.stop(); await stop(server); await stop(provider); db.close(); fs.rmSync(dir, { recursive: true, force: true }); }
 }
 
@@ -186,6 +195,12 @@ test('provider redirect, failure and oversized response stay sanitized', () => f
   f.mode.status = 200; f.mode.oversized = true; assert.equal((await f.request('/api/whatsapp/status')).status, 502);
 }));
 
+test('malformed provider JSON is a terminal invalid response, not a temporary outage',()=>fixture(async f=>{
+ f.mode.malformed=true;
+ const response=await f.request('/api/whatsapp/status');
+ assert.equal(response.status,502);assert.equal(response.json.error.code,'invalid_provider_response');
+}));
+
 test('SVG or non-image QR response cannot reach browser', () => fixture(async f => {
   f.mode.qr = 'data:image/svg+xml,<svg onload="alert(1)" />';
   const r = await f.request('/api/whatsapp/connect', { method: 'POST', body: {} });
@@ -264,3 +279,135 @@ test('TLS-terminated production accepts only its fixed HTTPS public origin over 
   const r = await f.request('/api/whatsapp/connect', { method: 'POST', body: {}, headers: { origin: 'https://romani.curemedkw.com' } });
   assert.equal(r.status, 200); assert.equal(r.json.data.qr, PNG);
 }, { NODE_ENV: 'production' }));
+
+test('admin disconnect stops reminders, uses only scoped logout and permits a fresh QR without deleting audit',()=>fixture(async f=>{
+ const {setSetting,getBoolean}=await import('../server/repositories/settings.ts');
+ const initial=await f.request('/api/whatsapp/connect',{method:'POST',body:{}});
+ assert.equal(initial.status,200);assert.equal(initial.json.data.qr,PNG);
+ f.mode.state='open';setSetting(f.db,'whatsapp.enabled',true);
+ const before=f.calls.length;
+ for(const [role,status] of [['viewer',403],[null,401]])assert.equal((await f.request('/api/whatsapp/disconnect',{method:'POST',body:{},role})).status,status);
+ assert.equal((await f.request('/api/whatsapp/disconnect',{method:'POST',body:{},headers:{origin:'https://foreign.example.invalid'}})).status,403);
+ assert.equal((await f.request('/api/whatsapp/disconnect?instance=curemed',{method:'POST',body:{}})).status,400);
+ assert.equal(f.calls.length,before);assert.equal(getBoolean(f.db,'whatsapp.enabled'),true);
+ const response=await f.request('/api/whatsapp/disconnect',{method:'POST',body:{}});
+ assert.equal(response.status,200);assert.equal(response.json.data.state,'disconnected');assert.equal(response.headers.get('cache-control'),'no-store');
+ assert.equal(getBoolean(f.db,'whatsapp.enabled'),false);
+ const writes=f.calls.filter(call=>call.method==='DELETE');assert.equal(writes.length,1);assert.equal(writes[0].path,'/api/instance/logout/romani-fixture');assert.equal(writes[0].authorized,true);
+ assert.equal(f.calls.some(call=>call.path.includes('/delete/')||call.path.includes('curemed')),false);
+ const qr=await f.request('/api/whatsapp/connect',{method:'POST',body:{}});assert.equal(qr.status,200);assert.equal(qr.json.data.state,'connecting');
+ assert.equal(getBoolean(f.db,'whatsapp.enabled'),false);
+}));
+
+test('logout acknowledgement without actual closed state never reports successful disconnection',()=>fixture(async f=>{
+ const {setSetting,getBoolean}=await import('../server/repositories/settings.ts');
+ assert.equal((await f.request('/api/whatsapp/connect',{method:'POST',body:{}})).status,200);
+ f.mode.state='open';f.mode.logoutState='open';setSetting(f.db,'whatsapp.enabled',true);
+ const response=await f.request('/api/whatsapp/disconnect',{method:'POST',body:{}});
+ assert.equal(response.status,409);assert.equal(response.json.error.code,'disconnect_pending');assert.equal(response.json.data,null);
+ assert.equal(getBoolean(f.db,'whatsapp.enabled'),false);assert.equal(f.calls.filter(call=>call.method==='DELETE').length,1);
+ assert.equal((await f.request('/api/whatsapp/connect',{method:'POST',body:{}})).status,429);
+}));
+
+for(const pendingQr of [false,true])test(`closed disconnect preserves throttle unless it revokes a known pending QR (pending: ${pendingQr})`,()=>fixture(async f=>{
+ if(!pendingQr)f.mode.status=503;
+ assert.equal((await f.request('/api/whatsapp/connect',{method:'POST',body:{}})).status,pendingQr?200:502);
+ f.mode.status=200;f.mode.state='close';
+ const response=await f.request('/api/whatsapp/disconnect',{method:'POST',body:{}});
+ assert.equal(response.status,200);assert.equal(response.json.data.state,'disconnected');
+ assert.equal(f.calls.filter(call=>call.method==='DELETE').length,pendingQr?1:0);
+ assert.equal((await f.request('/api/whatsapp/connect',{method:'POST',body:{}})).status,pendingQr?200:429);
+}));
+
+test('disconnect browser client waits beyond the old 30-second deadline for its verified outcome',t=>fixture(async f=>{
+ f.mode.state='open';let release,entered;
+ const blocked=new Promise(resolve=>release=resolve),started=new Promise(resolve=>entered=resolve);
+ f.mode.beforeResponse=async req=>{if(req.method==='DELETE'){entered();await blocked;}};
+ const nativeFetch=globalThis.fetch;
+ t.mock.method(globalThis,'fetch',(url,options)=>typeof url==='string'&&url.startsWith('/')
+  ?nativeFetch(f.base+url,{...options,headers:{...options?.headers,cookie:f.cookie()}}):nativeFetch(url,options));
+ t.mock.timers.enable({apis:['setTimeout']});
+ let settled=false;
+ const request=whatsappPairing.disconnect().then(result=>{settled=true;return result;});
+ try{
+  await started;t.mock.timers.tick(30_001);
+  await new Promise(resolve=>setImmediate(resolve));await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(settled,false,'a valid slow disconnect must not be reported as a client timeout at 30 seconds');
+  release();const response=await request;
+  assert.equal(response.error,null);assert.equal(response.data.state,'disconnected');
+ }finally{release();await request;await stopRequestWork(f.app);t.mock.timers.reset();t.mock.restoreAll();}
+}));
+
+test('shutdown drains detached disconnect work and refuses further pairing provider calls',()=>fixture(async f=>{
+ f.mode.state='open';
+ let release,entered;
+ const blocked=new Promise(resolve=>release=resolve),started=new Promise(resolve=>entered=resolve);
+ f.mode.beforeResponse=async req=>{if(req.method==='DELETE'){entered();await blocked;}};
+ const controller=new AbortController();
+ const request=fetch(f.base+'/api/whatsapp/disconnect',{method:'POST',signal:controller.signal,
+  headers:{cookie:f.cookie(),'content-type':'application/json'},body:'{}'}).catch(error=>assert.equal(error.name,'AbortError'));
+ try{
+  await started;controller.abort();await request;
+  let drained=false;
+  const drain=stopRequestWork(f.app).then(()=>{drained=true;});
+  await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(drained,false,'a detached logout must remain admitted work until its provider operation finishes');
+  const before=f.calls.length;
+  for(const [url,method] of [['status','GET'],['connect','POST'],['disconnect','POST']]){
+   const response=await f.request('/api/whatsapp/'+url,{method,...(method==='POST'?{body:{}}:{})});
+   assert.equal(response.status,503);assert.equal(response.json.error.code,'shutting_down');
+  }
+  assert.equal(f.calls.length,before);
+  release();await drain;
+  assert.equal(drained,true);assert.equal(f.mode.state,'close');
+  assert.equal(f.calls.filter(call=>call.method==='DELETE').length,1);
+ }finally{release();controller.abort();await request;}
+}));
+
+test('a queued enable cannot slip between disconnect disable and provider logout',()=>fixture(async f=>{
+ const {setSetting,getBoolean}=await import('../server/repositories/settings.ts');
+ f.mode.state='open';setSetting(f.db,'whatsapp.enabled',true);
+ let release,entered;
+ const blocked=new Promise(resolve=>release=resolve),started=new Promise(resolve=>entered=resolve);
+ const held=f.reminders.coordinator.runExclusive(async()=>{entered();await blocked;});
+ await started;
+ const admitted=path=>new Promise(resolve=>{
+  const observe=req=>{if(req.url===path){f.server.off('request',observe);setImmediate(resolve);}};
+  f.server.on('request',observe);
+ });
+ const disconnectAdmitted=admitted('/api/whatsapp/disconnect');
+ const disconnect=f.request('/api/whatsapp/disconnect',{method:'POST',body:{}});
+ try{
+  await disconnectAdmitted;
+  const enableAdmitted=admitted('/api/settings');
+  const enable=f.request('/api/settings',{method:'PUT',body:{settings:{'whatsapp.enabled':true}}});
+  await enableAdmitted;release();await held;
+  assert.equal((await disconnect).status,200);
+  const response=await enable;
+  assert.equal(response.status,409);assert.equal(response.json.error.code,'whatsapp_not_connected');
+  assert.equal(getBoolean(f.db,'whatsapp.enabled'),false);
+  assert.equal(f.mode.state,'close');assert.equal(f.calls.filter(call=>call.method==='DELETE').length,1);
+ }finally{release();await held;await disconnect;}
+},{ROMANI_EVOLUTION_INSTANCE:'romani'},''));
+
+test('status keeps reporting connecting while a server-issued QR is valid, and connected wins', () => fixture(async f => {
+  assert.equal((await f.request('/api/whatsapp/connect', { method: 'POST', body: {} })).status, 200);
+  f.mode.state = 'close'; // the provider keeps reporting `close` while the QR is pending
+  assert.deepEqual((await f.request('/api/whatsapp/status')).json.data, { configured: true, state: 'connecting' });
+  f.mode.state = 'open';
+  assert.deepEqual((await f.request('/api/whatsapp/status')).json.data, { configured: true, state: 'connected' });
+  f.mode.state = 'close';
+  setSetting(f.db, 'system.whatsapp_pairing_pending_until', Date.now() - 1);
+  assert.deepEqual((await f.request('/api/whatsapp/status')).json.data, { configured: true, state: 'disconnected' });
+}));
+
+test('a pending QR is revoked by disconnect even when the window was opened by another process', () => fixture(async f => {
+  // Simulates a restart or another worker: the window exists only in the shared database.
+  setSetting(f.db, 'system.whatsapp_pairing_pending_until', Date.now() + 60_000);
+  f.mode.state = 'close';
+  const response = await f.request('/api/whatsapp/disconnect', { method: 'POST', body: {} });
+  assert.equal(response.status, 200);
+  assert.equal(response.json.data.state, 'disconnected');
+  assert.equal(f.calls.filter(call => call.method === 'DELETE').length, 1);
+  assert.deepEqual((await f.request('/api/whatsapp/status')).json.data, { configured: true, state: 'disconnected' });
+}));

@@ -8,10 +8,10 @@ import { useWhatsAppSettings } from '@/hooks/useWhatsAppSettings';
 import { WhatsAppRecipientsCard } from './WhatsAppRecipientsCard';
 import { WhatsAppLogCard } from './WhatsAppLogCard';
 
-export default function WhatsAppSettings() {
+export default function WhatsAppSettings({ refreshKey = 0 }: { refreshKey?: number }) {
   const { user } = useAuth();
   const { t, isRTL } = useLanguage();
-  const state = useWhatsAppSettings();
+  const state = useWhatsAppSettings(refreshKey);
   if (user?.role !== 'admin') return null;
   return <div dir={isRTL ? 'rtl' : 'ltr'} className="space-y-5 text-start">
     <Card aria-busy={state.loading}><CardHeader><CardTitle>{t('settings.whatsappReminders.title')}</CardTitle></CardHeader><CardContent className="space-y-3">

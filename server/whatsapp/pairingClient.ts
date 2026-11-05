@@ -3,6 +3,7 @@ import { pairingConfiguration, type PairingConfig } from './config.js';
 export type PairingState = 'unconfigured' | 'connected' | 'connecting' | 'disconnected' | 'unknown';
 export interface PairingStatus { configured: boolean; state: PairingState }
 export interface PairingResult extends PairingStatus { qr?: string; expiresInSeconds?: number }
+export interface PairingDisconnectResult { status: PairingStatus; logoutVerified: boolean }
 
 export class PairingError extends Error {
   constructor(readonly code: string, readonly status = 503) {
@@ -25,20 +26,26 @@ function qrImage(value: unknown): string {
   return value;
 }
 
-/** Fixed-instance v2 contract. No discovery, provisioning, logout or message methods. */
+/** Fixed-instance v2 contract. No discovery, provisioning, instance deletion or messages. */
 export class PairingClient {
   constructor(private readonly config: PairingConfig) {}
 
-  private async call(action: 'connectionState' | 'connect'): Promise<Record<string, unknown>> {
+  private async call(action: 'connectionState' | 'connect' | 'logout'): Promise<Record<string, unknown>> {
     if (pairingConfiguration(this.config) !== 'valid') throw new PairingError('whatsapp_not_configured');
     const url = `${this.config.url.replace(/\/+$/, '')}/instance/${action}/${encodeURIComponent(this.config.instance)}`;
     try {
       const response = await fetch(url, {
+        method: action === 'logout' ? 'DELETE' : 'GET',
         headers: { apikey: this.config.apiKey }, redirect: 'error', signal: AbortSignal.timeout(10_000),
       });
       if (!response.ok) {
         await response.body?.cancel();
-        throw new PairingError(response.status === 404 ? 'instance_not_ready' : 'provider_unavailable', 502);
+        const code = response.status === 404 ? 'instance_not_ready'
+          : response.status === 401 || response.status === 403 ? 'provider_unauthorized' : 'provider_unavailable';
+        throw new PairingError(code, 502);
+      }
+      if (action === 'logout' && response.status !== 200) {
+        await response.body?.cancel(); throw new PairingError('invalid_provider_response', 502);
       }
       const reader = response.body?.getReader();
       if (!reader) throw new PairingError('invalid_provider_response', 502);
@@ -51,7 +58,10 @@ export class PairingClient {
         if (size > 400_000) { await reader.cancel(); throw new PairingError('invalid_provider_response', 502); }
         chunks.push(part.value);
       }
-      const payload = record(JSON.parse(Buffer.concat(chunks).toString('utf8')));
+      let decoded: unknown;
+      try { decoded = JSON.parse(Buffer.concat(chunks).toString('utf8')); }
+      catch { throw new PairingError('invalid_provider_response', 502); }
+      const payload = record(decoded);
       if (payload.error || (typeof payload.status === 'number' && payload.status >= 400)) throw new PairingError('provider_unavailable', 502);
       return payload;
     } catch (error) {
@@ -90,5 +100,18 @@ export class PairingClient {
       if (reported.state === 'connected') return reported;
     }
     return { configured: true, state: 'connecting', qr: qrImage(payload.base64), expiresInSeconds: 60 };
+  }
+
+  async disconnect(revokePending = false): Promise<PairingDisconnectResult> {
+    const before = await this.status();
+    if (!before.configured) throw new PairingError('whatsapp_not_configured');
+    if (before.state === 'disconnected' && !revokePending) return { status: before, logoutVerified: false };
+    if (before.state === 'unknown') throw new PairingError('connection_state_unknown');
+    const result = await this.call('logout');
+    if (result.status !== 'SUCCESS' || result.error !== false) throw new PairingError('invalid_provider_response', 502);
+    // Provider acknowledgement is not proof of completed logout; read actual state.
+    const after = await this.status();
+    if (after.state !== 'disconnected') throw new PairingError('disconnect_pending', 409);
+    return { status: after, logoutVerified: true };
   }
 }

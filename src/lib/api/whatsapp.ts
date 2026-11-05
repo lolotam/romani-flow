@@ -14,6 +14,7 @@ export interface WhatsAppPairingResult extends WhatsAppPairingStatus {
 export const whatsappPairing = {
   status: () => request<WhatsAppPairingStatus>('/api/whatsapp/status'),
   connect: () => request<WhatsAppPairingResult>('/api/whatsapp/connect', { method: 'POST', body: {} }),
+  disconnect: () => request<WhatsAppPairingStatus>('/api/whatsapp/disconnect', { method: 'POST', body: {}, timeoutMs: 60_000 }),
 };
 
 export interface WhatsAppRecipient { id: string; label: string; phone: string; enabled: boolean }

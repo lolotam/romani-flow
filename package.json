@@ -17,7 +17,7 @@
     "verify:api": "node scripts/verify-api.mjs",
     "test:config": "node --import tsx --test scripts/verify-config.test.mjs",
     "test:operations": "node --import tsx --test scripts/verify-operations.test.mjs",
-    "test:whatsapp-pairing": "node --import tsx --test scripts/verify-whatsapp-pairing.test.mjs",
+    "test:whatsapp-pairing": "node --import tsx --test scripts/verify-whatsapp-pairing.test.mjs scripts/verify-whatsapp-polling.test.mjs",
     "test:forms": "node --import tsx --test scripts/verify-form-defaults.test.mjs scripts/verify-settings-translations.test.mjs scripts/verify-document-validation.test.mjs scripts/verify-whatsapp-settings-load.test.mjs",
     "lint": "eslint . && npm run check:sizes",
     "preview": "vite preview",

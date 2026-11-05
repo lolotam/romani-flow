@@ -73,11 +73,21 @@ export class WhatsAppReminders {
   async saveSettings(settings: Record<string, SettingValue>): Promise<void> {
     await this.aroundWrite(async () => {
       if (settings['whatsapp.enabled'] === true && !getBoolean(this.db, 'whatsapp.enabled')) await this.assertCanEnable();
-      atomic(this.db, () => {
-        setSettings(this.db, settings);
-        this.reconcile();
-      });
+      this.applySettings(settings);
     });
+  }
+
+  /** Disable and disconnect share one lock; queued enables must observe the resulting connection state. */
+  withSendingDisabled<T>(disconnect: () => Promise<T>): Promise<T> {
+    return this.aroundWrite(async () => {
+      this.applySettings({ 'whatsapp.enabled': false });
+      return disconnect();
+    });
+  }
+
+  /** Caller holds the coordinator; the SQLite transaction ends before provider I/O. */
+  private applySettings(settings: Record<string, SettingValue>): void {
+    atomic(this.db, () => { setSettings(this.db, settings); this.reconcile(); });
   }
 
   async assertCanEnable(): Promise<void> {
