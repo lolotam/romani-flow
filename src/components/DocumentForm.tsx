@@ -111,7 +111,7 @@ function DocumentFormContent({
       document_type_id: String(saved.document_type_id ?? ''), ministry_id: String(saved.ministry_id ?? ''),
       notes: String(saved.notes ?? ''),
     });
-  }, () => !formIsDirty);
+  }, () => allowLastSubmission.current && !formIsDirty);
 
   const handleSubmit = async (data: DocumentFormData, keepOpen = false): Promise<boolean> => {
     if (submitting.current || ['loading', 'discarding', 'failed', 'conflict'].includes(draft.status)) return false;

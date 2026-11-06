@@ -64,16 +64,17 @@ function EmployeeDocumentFormContent({
     commitFormData(next);
   }, []);
   const dirty = useRef(false);
+  const allowLastSubmission = useRef(true);
   const draft = useDocumentDraft('employee:' + employeeId, saved => {
     dirty.current = false;
     setFormData(employeeDocumentDraft(saved, selectedFile?.name));
   }, isOpen);
-  useEffect(() => { if (isOpen) dirty.current = false; }, [isOpen, employeeId]);
-  useLastSubmissionRestore('documents', isOpen && draft.status === 'saved' && !draft.hasDraft, (saved) => {
+  useEffect(() => { if (isOpen) { dirty.current = false; allowLastSubmission.current = true; } }, [isOpen, employeeId]);
+  useLastSubmissionRestore('documents', allowLastSubmission.current && isOpen && draft.status === 'saved' && !draft.hasDraft, (saved) => {
     setFormData(current => ({ ...current, title: selectedFile ? selectedFile.name.replace(/\.[^/.]+$/, '').slice(0, 120) : String(saved.title ?? ''),
       document_type_id: String(saved.document_type_id ?? ''), ministry_id: String(saved.ministry_id ?? ''),
       notes: String(saved.notes ?? '') }));
-  }, () => !dirty.current);
+  }, () => allowLastSubmission.current && !dirty.current);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -203,7 +204,10 @@ function EmployeeDocumentFormContent({
           <fieldset disabled={isSubmitting || draft.status === 'discarding'} className="space-y-6">
           {formData.title.length > 120 && <p role="alert" className="text-destructive">{t('documents.form.validation.titleMaxLength')}</p>}
           {formData.notes.length > 5000 && <p role="alert" className="text-destructive">{t('documents.form.validation.notesTooLong')}</p>}
-          <DocumentDraftStatus status={draft.status} restored={draft.hasDraft} needsFile={!selectedFile} onDiscard={() => void draft.session.current?.discard().catch(() => toast.error(t('documents.employeeDocumentForm.saveError')))} />
+          <DocumentDraftStatus status={draft.status} restored={draft.hasDraft} needsFile={!selectedFile} onDiscard={() => {
+            allowLastSubmission.current = false;
+            void draft.session.current?.discard().catch(() => toast.error(t('documents.employeeDocumentForm.saveError')));
+          }} />
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div className="md:col-span-2">
               <Label htmlFor="title">{t('documents.form.title')} *</Label>
