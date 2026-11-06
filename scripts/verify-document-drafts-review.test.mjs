@@ -8,6 +8,7 @@ import { seedDatabase, writeSeedMarker } from '../server/db/seed.ts';
 import { newDocumentDefaults } from '../src/lib/documentFormDrafts.ts';
 import { fileAccept } from '../src/lib/fileAccept.ts';
 import { signSession } from '../server/middleware/auth.ts';
+import { writeDraft } from '../server/repositories/documentDrafts.ts';
 
 const file = { buffer: Buffer.from('synthetic document'), originalname: 'fixture.pdf', mimetype: 'application/pdf' };
 const deferred = () => { let resolve; const promise = new Promise(r => { resolve = r; }); return { promise, resolve }; };
@@ -26,6 +27,35 @@ async function stageDraftFile(f, draft) {
   assert.equal(response.status, 201);
   return (await response.json()).data[0].upload_id;
 }
+
+test('a replacement waiting for the coordinator rechecks its draft revision before touching either file', () => reminderApi(async f => {
+  const [original] = await f.documents.stageUploads([file]);
+  await f.documents.replaceFile(f.document.id, original.uploadId);
+  const draft = { account: 'admin', scope: 'edit:' + f.document.id, revision: 'none' };
+  const uploadId = await stageDraftFile(f, draft), replacementPath = f.documents.resolveUpload(uploadId).filePath;
+  const endpoint = '/api/documents/' + f.document.id + '/file';
+  assert.equal((await f.request(endpoint, { method: 'PUT', body: { upload_id: uploadId } })).status, 403);
+  assert.equal((await f.request(endpoint, { method: 'PUT', body: { upload_id: uploadId, draft: { ...draft, scope: 'new' } } })).status, 400);
+  const entered = deferred(), release = deferred(), received = deferred();
+  let currentRevision;
+  const otherDevice = f.reminders.coordinator.runExclusive(async () => {
+    entered.resolve(); await release.promise;
+    currentRevision = writeDraft(f.db, 'admin', draft, { notes: 'newer device draft' });
+  });
+  await entered.promise;
+  const onRequest = req => { if (req.url === endpoint) received.resolve(); };
+  f.server.on('request', onRequest);
+  const stale = f.request(endpoint, { method: 'PUT', body: { upload_id: uploadId, draft } });
+  await received.promise; release.resolve(); await otherDevice;
+  const result = await stale; f.server.off('request', onRequest);
+  assert.equal(result.status, 409);
+  assert.equal(f.db.prepare('SELECT file_path FROM documents WHERE id=?').get(f.document.id).file_path, original.filePath);
+  assert.equal(f.storage.exists(original.filePath), true); assert.equal(f.storage.exists(replacementPath), true);
+  assert.notEqual(f.documents.resolveUpload(uploadId), null);
+  const current = await f.request(endpoint, { method: 'PUT', body: { upload_id: uploadId, draft: { ...draft, revision: currentRevision } } });
+  assert.equal(current.status, 200); assert.equal(f.storage.exists(original.filePath), false);
+  assert.equal(f.db.prepare('SELECT file_path FROM documents WHERE id=?').get(f.document.id).file_path, replacementPath);
+}));
 
 test('draft-owned uploads reject foreign validation and every foreign or missing-context claim', () => reminderApi(async f => {
   const own = { account: 'admin', scope: 'new', revision: 'none' };

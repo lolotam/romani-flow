@@ -350,11 +350,12 @@ export class DocumentService {
   }
 
   /** Replaces the attachment of a document, keeping the old file until the swap succeeded. */
-  async replaceFile(documentId: string, uploadId: string, owner?: UploadOwner): Promise<Row | null> {
-    return this.serialize(() => this.replaceFileLocked(documentId, uploadId, owner));
+  async replaceFile(documentId: string, uploadId: string, owner?: UploadOwner, guard?: () => void): Promise<Row | null> {
+    return this.serialize(() => this.replaceFileLocked(documentId, uploadId, owner, guard));
   }
 
-  private async replaceFileLocked(documentId: string, uploadId: string, owner?: UploadOwner): Promise<Row | null> {
+  private async replaceFileLocked(documentId: string, uploadId: string, owner?: UploadOwner, guard?: () => void): Promise<Row | null> {
+    guard?.();
     const document = findRow(this.db, 'documents', documentId, []);
     if (!document) return null;
 

@@ -24,6 +24,8 @@ import type { WhatsAppReminders } from './notifications/whatsapp/service.js';
 import { createReminderRuntime } from './whatsapp/runtime.js';
 import { createReminderRouter } from './notifications/whatsapp/routes.js';
 import { createDocumentDraftsRouter } from './routes/documentDrafts.js';
+import { assertCurrentDraft, draftReference } from './repositories/documentDrafts.js';
+import { RepositoryError } from './repositories/base.js';
 import { prepareEmployee } from './notifications/whatsapp/employeePolicy.js';
 
 /**
@@ -162,7 +164,12 @@ export function createApp(deps: AppDependencies): Express {
         return;
       }
 
-      const updated = await documents.replaceFile(String(req.params.id), uploadId, { userId: req.user!.id, scope: 'edit:' + String(req.params.id) });
+      const scope = 'edit:' + String(req.params.id);
+      const draft = req.body?.draft === undefined ? undefined : draftReference(req.body.draft);
+      if (draft && draft.scope !== scope) throw new RepositoryError('Draft does not match this document.', 'invalid_draft', 400);
+      const updated = await documents.replaceFile(String(req.params.id), uploadId,
+        draft ? { userId: req.user!.id, scope } : undefined,
+        draft ? () => assertCurrentDraft(db, req.user!.id, draft) : undefined);
       if (!updated) {
         res.status(404).json({
           data: null,
