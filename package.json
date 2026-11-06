@@ -19,7 +19,7 @@
     "test:config": "node --import tsx --test scripts/verify-config.test.mjs",
     "test:operations": "node --import tsx --test scripts/verify-operations.test.mjs",
     "test:whatsapp-pairing": "node --import tsx --test scripts/verify-whatsapp-pairing.test.mjs scripts/verify-whatsapp-polling.test.mjs",
-    "test:forms": "node --import tsx --test scripts/verify-form-defaults.test.mjs scripts/verify-settings-translations.test.mjs scripts/verify-document-validation.test.mjs scripts/verify-whatsapp-settings-load.test.mjs scripts/verify-document-drafts.test.mjs",
+    "test:forms": "node --import tsx --test scripts/verify-form-defaults.test.mjs scripts/verify-settings-translations.test.mjs scripts/verify-document-validation.test.mjs scripts/verify-whatsapp-settings-load.test.mjs scripts/verify-document-drafts.test.mjs scripts/verify-document-drafts-review.test.mjs",
     "lint": "eslint . && npm run check:sizes",
     "preview": "vite preview",
     "test:whatsapp": "node --import tsx --test scripts/verify-whatsapp-data.test.mjs scripts/verify-whatsapp-selection.test.mjs scripts/verify-whatsapp-dispatch.test.mjs scripts/verify-whatsapp-renewal.test.mjs scripts/verify-whatsapp-provider.test.mjs scripts/verify-whatsapp-integration.test.mjs scripts/verify-whatsapp-recovery.test.mjs scripts/verify-whatsapp-shutdown.test.mjs scripts/verify-whatsapp-review-fixes.test.mjs scripts/verify-notification-language.test.mjs"

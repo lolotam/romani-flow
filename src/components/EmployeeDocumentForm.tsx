@@ -109,7 +109,7 @@ function EmployeeDocumentFormContent({
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (submitting.current) return;
+    if (submitting.current || ['loading', 'discarding', 'failed', 'conflict'].includes(draft.status)) return;
     if (!uploadedFile) { toast.error(t('documents.employeeDocumentForm.requiredFieldsError')); return; }
     
     if (!formData.title || !formData.document_type_id) {
@@ -184,7 +184,7 @@ function EmployeeDocumentFormContent({
         <div className="grid items-start gap-6 lg:grid-cols-2">
         <DocumentAttachment uploadedFile={uploadedFile ?? null} />
         <form onSubmit={handleSubmit} className="space-y-6">
-          <fieldset disabled={isSubmitting} className="space-y-6">
+          <fieldset disabled={isSubmitting || draft.status === 'discarding'} className="space-y-6">
           {formData.title.length > 120 && <p role="alert" className="text-destructive">{t('documents.form.validation.titleMaxLength')}</p>}
           {formData.notes.length > 5000 && <p role="alert" className="text-destructive">{t('documents.form.validation.notesTooLong')}</p>}
           <DocumentDraftStatus status={draft.status} restored={draft.hasDraft} needsFile={!uploadedFile} onDiscard={() => void draft.session.current?.discard().catch(() => toast.error(t('documents.employeeDocumentForm.saveError')))} />
@@ -317,7 +317,7 @@ function EmployeeDocumentFormContent({
           </div>
 
           <div className="flex gap-2 pt-4">
-            <Button type="submit" disabled={isSubmitting || ['loading', 'failed', 'conflict'].includes(draft.status)} className="flex-1">
+            <Button type="submit" disabled={isSubmitting || ['loading', 'discarding', 'failed', 'conflict'].includes(draft.status)} className="flex-1">
               {isSubmitting ? (
                 <div className="flex items-center gap-2">
                   <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>

@@ -91,6 +91,7 @@ export function createBackupRouter(db: Db, documents: DocumentService, reminders
       db.exec('PRAGMA foreign_keys = OFF;');
       try {
         db.exec('BEGIN');
+        setSetting(db, 'document_drafts.erase_active', true);
         // Keep failed removals discoverable after business rows are erased.
         for (const path of uniquePaths) db.prepare('INSERT OR IGNORE INTO upload_cleanup_queue(file_path,created_at) VALUES(?,?)').run(path, new Date().toISOString());
         for (const table of BUSINESS_TABLES) {
@@ -111,7 +112,7 @@ export function createBackupRouter(db: Db, documents: DocumentService, reminders
         // The seed marker is written here as well: erasing the data must never
         // let the next boot import the seed and resurrect it.
         setSetting(db, 'system.seed_version', '1');
-
+        db.prepare("DELETE FROM settings WHERE key='document_drafts.erase_active'").run();
         db.exec('COMMIT');
       } catch (error) {
         db.exec('ROLLBACK');

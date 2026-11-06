@@ -21,6 +21,7 @@ import { draftValues } from '@/lib/documentDraftSession';
 import { restoreFormDate } from '@/lib/formDefaults';
 import { useAuth } from '@/hooks/useAuth';
 import { DocumentDraftStatus } from './documents/DocumentDraftStatus';
+import { UploadDropzone } from './ui/UploadDropzone';
 import { useLastSubmissionRestore } from '@/hooks/useLastSubmission';
 
 export function DocumentForm(props: DocumentFormProps) {
@@ -47,6 +48,7 @@ function DocumentFormContent({
 
   const submitting = React.useRef(false);
   const [isSubmitting, setIsSubmitting] = React.useState(false);
+  const [selectedFile, setSelectedFile] = React.useState(uploadedFile);
   const form = useForm<DocumentFormData>({
     resolver: zodResolver(documentSchema),
     defaultValues: editingDocument ? {
@@ -96,7 +98,7 @@ function DocumentFormContent({
   const formIsDirty = form.formState.isDirty;
   useLastSubmissionRestore('documents', !editingDocument && draft.status === 'saved' && !draft.hasDraft, (saved) => {
     form.reset({ ...form.getValues(),
-      title: fileName ? fileName.replace(/\.[^/.]+$/, '').slice(0, 120) : String(saved.title ?? ''),
+      title: selectedFile ? selectedFile.name.replace(/\.[^/.]+$/, '').slice(0, 120) : String(saved.title ?? ''),
       beneficiary_type: preselectedEmployeeId ? 'employee' : preselectedCompanyId ? 'company' : saved.employee_id ? 'employee' : 'company',
       company_id: preselectedEmployeeId ? '' : preselectedCompanyId ?? String(saved.company_id ?? ''),
       employee_id: preselectedEmployeeId ?? String(saved.employee_id ?? ''),
@@ -106,30 +108,30 @@ function DocumentFormContent({
   }, () => !formIsDirty);
 
   const handleSubmit = async (data: DocumentFormData, keepOpen = false): Promise<boolean> => {
-    if (submitting.current || ['loading', 'failed', 'conflict'].includes(draft.status)) return false;
+    if (submitting.current || ['loading', 'discarding', 'failed', 'conflict'].includes(draft.status)) return false;
     submitting.current = true;
     setIsSubmitting(true);
     try {
-      if (!uploadedFile && !editingDocument) {
+      if (!selectedFile && !editingDocument) {
         throw new Error(t('documents.messages.noFileError'));
       }
       // Handle file validation for new uploads
-      if (uploadedFile) {
+      if (selectedFile) {
         const maxSize = 20 * 1024 * 1024; // 20MB
         const allowedTypes = ['application/pdf', 'image/jpeg', 'image/png'];
-        if (uploadedFile.size > maxSize) throw new Error(t('documents.messages.fileSizeError'));
-        if (!allowedTypes.includes(uploadedFile.type)) throw new Error(t('documents.messages.fileTypeError'));
+        if (selectedFile.size > maxSize) throw new Error(t('documents.messages.fileSizeError'));
+        if (!allowedTypes.includes(selectedFile.type)) throw new Error(t('documents.messages.fileTypeError'));
       }
       const draftRef = await draft.prepare(draftValues(data));
-      const uploadId = uploadedFile
-        ? await stageFile(uploadedFile, t('documents.messages.saveError'), draftRef)
+      const uploadId = selectedFile
+        ? await stageFile(selectedFile, t('documents.messages.saveError'), draftRef)
         : undefined;
       await saveDocument(preselectedEmployeeId ? { ...data, beneficiary_type: 'employee', employee_id: preselectedEmployeeId, company_id: '' } : data, editingDocument?.id, uploadId, t, draftRef);
       draft.session.current?.committed();
       clearUpload();
       toast.success(editingDocument ? t('documents.messages.editSuccess') : t('documents.messages.addSuccess'));
       onSuccess();
-      if (keepOpen) await draft.session.current?.restart();
+      if (keepOpen) { setSelectedFile(null); await draft.session.current?.restart(); }
       else onClose();
       return true;
     } catch (error) {
@@ -146,11 +148,16 @@ function DocumentFormContent({
   return (
     <Card className="w-full" dir={isRTL ? 'rtl' : 'ltr'}>
       <CardContent className="grid items-start gap-6 p-4 lg:grid-cols-2 lg:p-6">
-        <DocumentAttachment uploadedFile={uploadedFile} editingDocument={editingDocument} />
+        <div className="space-y-3">
+          <DocumentAttachment uploadedFile={selectedFile} editingDocument={editingDocument} />
+          {!selectedFile && !editingDocument && <UploadDropzone maxFiles={1} maxFileSize={20 * 1024 * 1024}
+            acceptedFileTypes={['.pdf', '.jpg', '.jpeg', '.png']} disabled={isSubmitting || draft.status === 'discarding'}
+            onFilesAccepted={files => { if (files[0]) { setSelectedFile(files[0]); form.setValue('title', files[0].name.replace(/\.[^/.]+$/, '').slice(0, 120), { shouldDirty: true }); } }} />}
+        </div>
         <Form {...form}>
           <form onSubmit={form.handleSubmit(data => handleSubmit(data), () => toast.error(t('documents.form.validation.reviewFields')))} className="space-y-6">
-            <fieldset disabled={isSubmitting} className="space-y-6">
-            <DocumentDraftStatus status={draft.status} restored={draft.hasDraft} needsFile={!uploadedFile && !editingDocument} onDiscard={() => void draft.session.current?.discard().catch(() => toast.error(t('documents.messages.saveError')))} />
+            <fieldset disabled={isSubmitting || draft.status === 'discarding'} className="space-y-6">
+            <DocumentDraftStatus status={draft.status} restored={draft.hasDraft} needsFile={!selectedFile && !editingDocument} onDiscard={() => void draft.session.current?.discard().catch(() => toast.error(t('documents.messages.saveError')))} />
             {(form.watch('title')?.length ?? 0) > 120 && <p role="alert" className="text-destructive">{t('documents.form.validation.titleMaxLength')}</p>}
             {(form.watch('notes')?.length ?? 0) > 5000 && <p role="alert" className="text-destructive">{t('documents.form.validation.notesTooLong')}</p>}
             {documentTypes.length === 0 && <p role="alert" className="text-destructive">{t('documents.form.validation.noDocumentTypes')}</p>}
@@ -258,7 +265,7 @@ function DocumentFormContent({
               <div className="flex space-x-2">
                 <Button 
                   type="submit" 
-                  disabled={isSubmitting || ['loading', 'failed', 'conflict'].includes(draft.status)}
+                  disabled={isSubmitting || !selectedFile && !editingDocument || ['loading', 'discarding', 'failed', 'conflict'].includes(draft.status)}
                   className="shadow-elegant hover:shadow-glow transition-all"
                 >
                   <Save className="h-4 w-4 ml-2" />
@@ -272,7 +279,7 @@ function DocumentFormContent({
                   <Button
                     type="button"
                     variant="secondary"
-                    disabled={isSubmitting || ['loading', 'failed', 'conflict'].includes(draft.status)}
+                    disabled={isSubmitting || !selectedFile || ['loading', 'discarding', 'failed', 'conflict'].includes(draft.status)}
                     onClick={async () => {
                       let saved = false;
                       await form.handleSubmit(async (data) => { saved = await handleSubmit(data, true); },

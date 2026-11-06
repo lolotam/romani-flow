@@ -3,7 +3,7 @@ import { request, ApiRequestError, type ApiEnvelope, type RequestOptions } from 
 
 export type DraftValues = Record<string, string | null>;
 export interface DraftReference { scope: string; revision: string; account?: string }
-export type DraftStatus = 'loading' | 'saved' | 'saving' | 'failed' | 'conflict';
+export type DraftStatus = 'loading' | 'saved' | 'saving' | 'discarding' | 'failed' | 'conflict';
 type Transport = <T>(url: string, options?: RequestOptions) => Promise<ApiEnvelope<T>>;
 
 /** Draft dates remain local date-only values; files and undefined values never enter the payload. */
@@ -26,6 +26,7 @@ export class DocumentDraftSession {
   private failure: Error | null = null;
   private prepared: DraftValues | null = null;
   private discarding: Promise<void> | null = null;
+  private discardEdits: DraftValues | null = null;
   private ready = false;
   hasDraft = false;
 
@@ -56,12 +57,14 @@ export class DocumentDraftSession {
   }
 
   change(values: DraftValues): void {
-    if (this.disposed || this.paused || this.restoring) return;
+    if (this.disposed || this.restoring) return;
+    if (this.discarding) { this.edited = true; this.discardEdits = values; return; }
+    if (this.paused) return;
     this.edited = true; this.pending = values;
     // A rejected field value is a proven non-write; corrected input may be saved again.
     if (this.failure instanceof ApiRequestError && this.failure.code === 'invalid_draft') this.failure = null;
     if (this.failure) return;
-    this.status('saving');
+    this.status(this.ready ? 'saving' : 'loading');
     clearTimeout(this.timer);
     this.timer = setTimeout(() => { void this.flush().catch(() => undefined); }, 500);
   }
@@ -136,19 +139,25 @@ export class DocumentDraftSession {
 
   private async discardOnce(): Promise<void> {
     this.paused = true; clearTimeout(this.timer); this.pending = null;
-    this.status('saving');
+    this.status('discarding');
     try {
       await this.loaded; await this.serial;
       if (this.failure) throw this.failure;
-      this.status('saving');
+      this.status('discarding');
       const result = await this.transport<{ revision: string }>(this.url, { method: 'DELETE', body: { revision: this.revision } });
       if (result.error || !result.data) throw result.error ?? new Error('Draft unavailable');
       this.revision = result.data.revision; this.hasDraft = false;
-      this.restoring = true;
-      try { this.restore(null); } finally { this.restoring = false; }
-      this.status('saved');
+      if (!this.discardEdits) {
+        this.restoring = true;
+        try { this.restore(null); } finally { this.restoring = false; }
+        this.status('saved');
+      }
     } catch (error) { this.fail(error as Error); throw error; }
-    finally { this.paused = false; }
+    finally {
+      this.paused = false;
+      if (this.discardEdits) { this.pending = this.discardEdits; this.discardEdits = null; }
+    }
+    if (this.pending) await this.flush();
   }
 
   dispose(flush = false): void {

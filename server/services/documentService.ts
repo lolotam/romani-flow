@@ -59,9 +59,12 @@ export class DocumentService {
       const paths: string[] = [];
       try {
       for (const file of files) {
-        const stored = await this.storage.save(file.buffer, file.originalname, file.mimetype);
-        paths.push(stored.relativePath);
+        const stored = await this.storage.save(file.buffer, file.originalname, file.mimetype, path => {
+          this.db.prepare('INSERT INTO upload_cleanup_queue(file_path,created_at) VALUES(?,?)').run(path, new Date().toISOString());
+          paths.push(path);
+        });
         uploads.push(this.registerUpload({ fileName: stored.fileName, filePath: stored.relativePath, fileSize: stored.size, mimeType: stored.mimeType }));
+        this.db.prepare('DELETE FROM upload_cleanup_queue WHERE file_path=?').run(stored.relativePath);
       }
       return uploads;
       } catch (error) {
@@ -311,6 +314,10 @@ export class DocumentService {
 
   /** Replaces the attachment of a document, keeping the old file until the swap succeeded. */
   async replaceFile(documentId: string, uploadId: string): Promise<Row | null> {
+    return this.serialize(() => this.replaceFileLocked(documentId, uploadId));
+  }
+
+  private async replaceFileLocked(documentId: string, uploadId: string): Promise<Row | null> {
     const document = findRow(this.db, 'documents', documentId, []);
     if (!document) return null;
 
@@ -343,6 +350,10 @@ export class DocumentService {
 
   /** Detaches the file from a document without deleting the record. */
   async detachFile(documentId: string): Promise<Row | null> {
+    return this.serialize(() => this.detachFileLocked(documentId));
+  }
+
+  private async detachFileLocked(documentId: string): Promise<Row | null> {
     const document = findRow(this.db, 'documents', documentId, []);
     if (!document) return null;
 

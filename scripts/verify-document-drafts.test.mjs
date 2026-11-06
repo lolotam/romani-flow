@@ -82,7 +82,7 @@ test('concurrent discard clicks share one delete and do not manufacture a confli
   });
   await session.flush(); session.change({ notes: 'Discard me' }); await session.flush();
   const first = session.discard(), second = session.discard();
-  assert.equal(first, second); assert.equal(states.at(-1), 'saving');
+  assert.equal(first, second); assert.equal(states.at(-1), 'discarding');
   release(); await Promise.all([first, second]);
   assert.equal(deletes, 1); assert.equal(states.at(-1), 'saved');
   assert.equal((await api(url('new'))).data.values, null); session.dispose();

@@ -19,6 +19,24 @@ CREATE TABLE upload_cleanup_queue (
   created_at TEXT NOT NULL
 );
 
+-- Known pre-008 erase handlers write the seed marker before committing but do
+-- not invalidate drafts or collect queue-only files. Abort that transaction.
+-- The current handler's authorization exists only inside its erase transaction.
+CREATE TRIGGER require_draft_aware_erase_update BEFORE UPDATE OF value ON settings
+WHEN NEW.key='system.seed_version'
+  AND NOT EXISTS (SELECT 1 FROM settings WHERE key='document_drafts.erase_active' AND value='true')
+BEGIN
+  SELECT RAISE(ABORT, 'erase_requires_draft_aware_runtime');
+END;
+CREATE TRIGGER require_draft_aware_erase_insert BEFORE INSERT ON settings
+WHEN NEW.key='system.seed_version'
+  AND (EXISTS (SELECT 1 FROM settings WHERE key='system.seed_version')
+       OR EXISTS (SELECT 1 FROM document_drafts) OR EXISTS (SELECT 1 FROM upload_cleanup_queue))
+  AND NOT EXISTS (SELECT 1 FROM settings WHERE key='document_drafts.erase_active' AND value='true')
+BEGIN
+  SELECT RAISE(ABORT, 'erase_requires_draft_aware_runtime');
+END;
+
 CREATE TRIGGER invalidate_employee_drafts AFTER DELETE ON employees BEGIN
   UPDATE document_drafts SET values_json=NULL, revision=lower(hex(randomblob(16))), updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now')
   WHERE scope='employee:' || OLD.id OR json_extract(values_json,'$.employee_id')=OLD.id;
