@@ -19,7 +19,7 @@ import { draftValues } from '@/lib/documentDraftSession';
 import { employeeDocumentDraft } from '@/lib/documentFormDrafts';
 import { useAuth } from '@/hooks/useAuth';
 import { DocumentDraftStatus } from './documents/DocumentDraftStatus';
-import { DocumentAttachment } from './documents/DocumentAttachment';
+import { DocumentAttachmentPicker } from './documents/DocumentAttachmentPicker';
 import { useLastSubmissionRestore } from '@/hooks/useLastSubmission';
 
 const emptyForm = {
@@ -48,10 +48,12 @@ function EmployeeDocumentFormContent({
   uploadedFile
 }: EmployeeDocumentFormProps) {
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [selectedFile, setSelectedFile] = useState<File | null>(uploadedFile ?? null);
+  useEffect(() => { setSelectedFile(isOpen ? uploadedFile ?? null : null); }, [isOpen, uploadedFile]);
   const [documentTypes, setDocumentTypes] = useState<DocumentType[]>([]);
   const [ministries, setMinistries] = useState<Ministry[]>([]);
   const { t, isRTL } = useLanguage();
-  const { stageFile, clearUpload } = useStagedDocumentUpload();
+  const { stageFile, clearUpload, abandonUpload, hasPendingUpload } = useStagedDocumentUpload();
   const submitting = useRef(false);
   
   const [formData, commitFormData] = useState(emptyForm);
@@ -64,11 +66,11 @@ function EmployeeDocumentFormContent({
   const dirty = useRef(false);
   const draft = useDocumentDraft('employee:' + employeeId, saved => {
     dirty.current = false;
-    setFormData(employeeDocumentDraft(saved, uploadedFile?.name));
+    setFormData(employeeDocumentDraft(saved, selectedFile?.name));
   }, isOpen);
   useEffect(() => { if (isOpen) dirty.current = false; }, [isOpen, employeeId]);
   useLastSubmissionRestore('documents', isOpen && draft.status === 'saved' && !draft.hasDraft, (saved) => {
-    setFormData(current => ({ ...current, title: uploadedFile ? uploadedFile.name.replace(/\.[^/.]+$/, '').slice(0, 120) : String(saved.title ?? ''),
+    setFormData(current => ({ ...current, title: selectedFile ? selectedFile.name.replace(/\.[^/.]+$/, '').slice(0, 120) : String(saved.title ?? ''),
       document_type_id: String(saved.document_type_id ?? ''), ministry_id: String(saved.ministry_id ?? ''),
       notes: String(saved.notes ?? '') }));
   }, () => !dirty.current);
@@ -107,10 +109,23 @@ function EmployeeDocumentFormContent({
     draft.session.current?.change(draftValues(next));
   };
 
+  const changeFile = async () => {
+    if (submitting.current) return;
+    submitting.current = true; setIsSubmitting(true);
+    try {
+      const cleanupPending = await abandonUpload(draft.reference);
+      setSelectedFile(null);
+      if (cleanupPending) toast.warning(t('documents.form.fileCleanupPending'));
+    } catch (error) { toast.error(error instanceof Error ? error.message : t('documents.employeeDocumentForm.saveError')); }
+    finally { submitting.current = false; setIsSubmitting(false); }
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (submitting.current || ['loading', 'discarding', 'failed', 'conflict'].includes(draft.status)) return;
-    if (!uploadedFile) { toast.error(t('documents.employeeDocumentForm.requiredFieldsError')); return; }
+    if (!selectedFile) { toast.error(t('documents.employeeDocumentForm.requiredFieldsError')); return; }
+    if (selectedFile.size > 20 * 1024 * 1024) { toast.error(t('documents.messages.fileSizeError')); return; }
+    if (!['application/pdf', 'image/jpeg', 'image/png'].includes(selectedFile.type)) { toast.error(t('documents.messages.fileTypeError')); return; }
     
     if (!formData.title || !formData.document_type_id) {
       toast.error(t('documents.employeeDocumentForm.requiredFieldsError'));
@@ -124,9 +139,7 @@ function EmployeeDocumentFormContent({
     
     try {
       const draftRef = await draft.prepare(draftValues(formData));
-      const uploadId = uploadedFile
-        ? await stageFile(uploadedFile, t('documents.employeeDocumentForm.saveError'), draftRef)
-        : undefined;
+      const uploadId = await stageFile(selectedFile, t('documents.employeeDocumentForm.saveError'), draftRef);
 
       // Save metadata and claim the staged upload in one server transaction.
       const payload = {
@@ -182,12 +195,15 @@ function EmployeeDocumentFormContent({
         </DialogHeader>
 
         <div className="grid items-start gap-6 lg:grid-cols-2">
-        <DocumentAttachment uploadedFile={uploadedFile ?? null} />
+        <DocumentAttachmentPicker file={selectedFile} disabled={isSubmitting || draft.status === 'discarding' || hasPendingUpload() && ['loading', 'failed', 'conflict'].includes(draft.status)}
+          onChange={() => void changeFile()} onSelect={file => {
+            setSelectedFile(file); editForm({ title: file.name.replace(/\.[^/.]+$/, '').slice(0, 120) });
+          }} />
         <form onSubmit={handleSubmit} className="space-y-6">
           <fieldset disabled={isSubmitting || draft.status === 'discarding'} className="space-y-6">
           {formData.title.length > 120 && <p role="alert" className="text-destructive">{t('documents.form.validation.titleMaxLength')}</p>}
           {formData.notes.length > 5000 && <p role="alert" className="text-destructive">{t('documents.form.validation.notesTooLong')}</p>}
-          <DocumentDraftStatus status={draft.status} restored={draft.hasDraft} needsFile={!uploadedFile} onDiscard={() => void draft.session.current?.discard().catch(() => toast.error(t('documents.employeeDocumentForm.saveError')))} />
+          <DocumentDraftStatus status={draft.status} restored={draft.hasDraft} needsFile={!selectedFile} onDiscard={() => void draft.session.current?.discard().catch(() => toast.error(t('documents.employeeDocumentForm.saveError')))} />
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div className="md:col-span-2">
               <Label htmlFor="title">{t('documents.form.title')} *</Label>
@@ -305,19 +321,19 @@ function EmployeeDocumentFormContent({
               />
             </div>
 
-            {uploadedFile && (
+            {selectedFile && (
               <div className="md:col-span-2 p-4 bg-muted rounded-lg">
                 <div className="flex items-center gap-2">
                   <FileText className="h-4 w-4 text-primary" />
                   <span className="text-sm font-medium">{t('documents.employeeDocumentForm.attachedFile')}</span>
-                  <span className="text-sm text-muted-foreground">{uploadedFile.name}</span>
+                  <span className="text-sm text-muted-foreground">{selectedFile.name}</span>
                 </div>
               </div>
             )}
           </div>
 
           <div className="flex gap-2 pt-4">
-            <Button type="submit" disabled={isSubmitting || ['loading', 'discarding', 'failed', 'conflict'].includes(draft.status)} className="flex-1">
+            <Button type="submit" disabled={isSubmitting || !selectedFile || ['loading', 'discarding', 'failed', 'conflict'].includes(draft.status)} className="flex-1">
               {isSubmitting ? (
                 <div className="flex items-center gap-2">
                   <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>

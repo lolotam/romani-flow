@@ -27,6 +27,35 @@ async function stageDraftFile(f, draft) {
   return (await response.json()).data[0].upload_id;
 }
 
+test('draft-owned uploads reject foreign validation and every foreign or missing-context claim', () => reminderApi(async f => {
+  const own = { account: 'admin', scope: 'new', revision: 'none' };
+  const uploadId = await stageDraftFile(f, own);
+  f.db.prepare("INSERT INTO admin_users(id,email,name,role,password_hash,created_at,updated_at) VALUES('admin2','admin2@example.invalid','Synthetic','admin','unused','x','x')").run();
+  const cookie = f.config.cookieName + '=' + signSession(f.config, { id: 'admin2', role: 'admin', name: 'Synthetic', email: 'admin2@example.invalid' });
+  const foreign = { account: 'admin2', scope: 'new', revision: 'none' };
+  const body = { title: 'Synthetic', employee_id: f.employee.id, document_type_id: f.type.id, expiry_date: '2030-01-01', upload_id: uploadId };
+  assert.equal((await f.request('/api/files/uploads/' + uploadId + '/validate', { method: 'POST', headers: { cookie }, body: { draft: foreign } })).status, 403);
+  assert.equal((await f.request('/api/documents', { method: 'POST', headers: { cookie }, body: { ...body, draft: foreign } })).status, 403);
+  assert.equal((await f.request('/api/documents', { method: 'POST', body })).status, 403);
+  assert.equal((await f.request('/api/documents/' + f.document.id, { method: 'PATCH', headers: { cookie }, body: { upload_id: uploadId, draft: { ...foreign, scope: 'edit:' + f.document.id } } })).status, 403);
+  assert.equal((await f.request('/api/documents/' + f.document.id + '/file', { method: 'PUT', headers: { cookie }, body: { upload_id: uploadId } })).status, 403);
+  assert.equal((await f.request('/api/documents/' + f.document.id + '/file', { method: 'PUT', body: { upload_id: uploadId } })).status, 403);
+  assert.equal(f.db.prepare('SELECT count(*) n FROM documents').get().n, 1);
+  assert.notEqual(f.documents.resolveUpload(uploadId), null);
+  assert.equal((await f.request('/api/files/uploads/' + uploadId + '/validate', { method: 'POST', body: { draft: own } })).status, 200);
+  assert.equal((await f.request('/api/documents', { method: 'POST', body: { ...body, draft: own } })).status, 201);
+  assert.equal(f.documents.resolveUpload(uploadId), null);
+  for (const method of ['PATCH', 'PUT']) {
+    const scope = 'edit:' + f.document.id;
+    const revision = (await f.request('/api/document-drafts/' + encodeURIComponent(scope), { headers: { 'x-draft-account': 'admin' } })).json.data.revision;
+    const draft = { account: 'admin', scope, revision };
+    const ownUpload = await stageDraftFile(f, draft);
+    const path = '/api/documents/' + f.document.id + (method === 'PUT' ? '/file' : '');
+    assert.equal((await f.request(path, { method, body: { upload_id: ownUpload, draft } })).status, 200);
+    assert.equal(f.documents.resolveUpload(ownUpload), null);
+  }
+}));
+
 test('abandon validates draft owner/revision and removes only the selected unfinished attachment', () => reminderApi(async f => {
   const headers = { 'x-draft-account': 'admin' };
   const saved = await f.request('/api/document-drafts/new', { method: 'PUT', headers, body: { revision: 'none', values: { notes: 'first' } } });

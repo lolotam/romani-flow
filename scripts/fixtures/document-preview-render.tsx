@@ -4,6 +4,7 @@ import { useForm, FormProvider } from 'react-hook-form';
 import { LanguageProvider } from '../../src/contexts/LanguageContext';
 import { DocumentAttachment } from '../../src/components/documents/DocumentAttachment';
 import { DocumentBeneficiaryFields } from '../../src/components/documents/DocumentBeneficiaryFields';
+import { DocumentAttachmentPicker } from '../../src/components/documents/DocumentAttachmentPicker';
 
 /** Actual components/providers: SSR checks markup only, not browser-native PDF rendering. */
 export function previewMarkup(mime: string, name: string): string {
@@ -23,4 +24,10 @@ function CompanyFixture() {
 export function companyMarkup(): string { return renderToStaticMarkup(<CompanyFixture />); }
 export function emptyPreviewMarkup(): string {
   return renderToStaticMarkup(<LanguageProvider><DocumentAttachment uploadedFile={null} /></LanguageProvider>);
+}
+
+export function pickerMarkup(selected = false): string {
+  const file = selected ? new File(['synthetic'], 'synthetic.pdf', { type: 'application/pdf' }) : null;
+  return renderToStaticMarkup(<LanguageProvider><DocumentAttachmentPicker file={file} disabled={false}
+    onSelect={() => undefined} onChange={() => undefined} /></LanguageProvider>);
 }

@@ -9,6 +9,7 @@ export function useStagedDocumentUpload() {
 
   const stageFile = async (file: File, fallbackMessage: string, draft?: DraftReference): Promise<string> => {
     const context = JSON.stringify([draft?.account, draft?.scope]);
+    if (draft && pending.current && pending.current.file !== file) await abandonUpload(async () => draft);
     if (draft && pending.current?.file === file && pending.current.context === context) {
       const validated = await request<{ upload_id: string }>(`/api/files/uploads/${encodeURIComponent(pending.current.uploadId)}/validate`, { method: 'POST', body: { draft }, draftAccount: draft.account });
       if (validated.data) return validated.data.upload_id;
@@ -35,5 +36,5 @@ export function useStagedDocumentUpload() {
     if (pending.current === upload) pending.current = null;
     return result.data.cleanupPending;
   };
-  return { stageFile, clearUpload, abandonUpload };
+  return { stageFile, clearUpload, abandonUpload, hasPendingUpload: () => pending.current !== null };
 }

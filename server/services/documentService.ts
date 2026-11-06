@@ -36,6 +36,9 @@ export interface StorageFields {
   mime_type: string;
 }
 
+export interface UploadOwner { userId: string; scope: string }
+interface DocumentWriteHooks { completed?: (row: Row) => void; uploadOwner?: UploadOwner }
+
 export class DocumentService {
   private notifications: { coordinator: NotificationCoordinator; changed: () => void } | null = null;
   constructor(
@@ -81,9 +84,10 @@ export class DocumentService {
   }
 
   /** Reuse a still-pending upload only after validating the current draft. */
-  validateStagedUpload(uploadId: string, guard: () => void): Promise<StoredUpload> {
+  validateStagedUpload(uploadId: string, guard: () => void, owner?: UploadOwner): Promise<StoredUpload> {
     return this.serialize(async () => {
       guard();
+      this.assertUploadOwner(uploadId, owner);
       const upload = this.resolveUpload(uploadId);
       if (!upload || !this.storage.exists(upload.filePath)) throw new RepositoryError('Upload is no longer pending.', 'invalid_upload', 404);
       return upload;
@@ -167,7 +171,8 @@ export class DocumentService {
   }
 
   /** The storage columns for a document, derived from an upload id. */
-  storageFields(uploadId: string): StorageFields | null {
+  storageFields(uploadId: string, owner?: UploadOwner): StorageFields | null {
+    this.assertUploadOwner(uploadId, owner);
     const upload = this.resolveUpload(uploadId);
     if (!upload) return null;
 
@@ -179,6 +184,14 @@ export class DocumentService {
     };
   }
 
+  /** Bound draft uploads cannot be validated or claimed in a different account/context. */
+  private assertUploadOwner(uploadId: string, owner?: UploadOwner): void {
+    const row = this.db.prepare('SELECT draft_user_id,draft_scope FROM pending_uploads WHERE id=?').get(uploadId);
+    if (row && (row.draft_user_id !== null || row.draft_scope !== null) && (row.draft_user_id !== owner?.userId || row.draft_scope !== owner?.scope)) {
+      throw new RepositoryError('Upload does not belong to this draft.', 'invalid_upload', 403);
+    }
+  }
+
   /**
    * Creates a document and claims its staged upload in one transaction.
    *
@@ -186,12 +199,12 @@ export class DocumentService {
    * transaction rolls back and the upload stays pending, so the administrator
    * can correct the data and retry with the same upload id.
    */
-  async createDocument(payload: Row, status: (expiry: string | null) => string, onCreated?: (row: Row) => void): Promise<Row> {
+  async createDocument(payload: Row, status: (expiry: string | null) => string, hooks?: DocumentWriteHooks): Promise<Row> {
     // Same coordinator as update/delete, so a create cannot interleave with a backup erase.
-    return this.serialize(async () => this.createDocumentLocked(payload, status, onCreated));
+    return this.serialize(async () => this.createDocumentLocked(payload, status, hooks));
   }
 
-  private createDocumentLocked(payload: Row, status: (expiry: string | null) => string, onCreated?: (row: Row) => void): Row {
+  private createDocumentLocked(payload: Row, status: (expiry: string | null) => string, hooks?: DocumentWriteHooks): Row {
     const fields: Row = { ...payload };
     const uploadId = typeof fields.upload_id === 'string' ? fields.upload_id : null;
     delete fields.upload_id;
@@ -199,7 +212,7 @@ export class DocumentService {
     this.db.exec('BEGIN');
     try {
       resolveDocumentEntity(this.db, fields);
-      const storageFields: StorageFields | null = uploadId ? this.requireUpload(uploadId) : null;
+      const storageFields: StorageFields | null = uploadId ? this.requireUpload(uploadId, hooks?.uploadOwner) : null;
       const expiry = typeof fields.expiry_date === 'string' ? fields.expiry_date : null;
 
       const row = insertRow(this.db, 'documents', {
@@ -209,7 +222,7 @@ export class DocumentService {
       });
 
       if (uploadId) this.claimUpload(uploadId);
-      onCreated?.(row);
+      hooks?.completed?.(row);
       this.notifications?.changed();
       this.db.exec('COMMIT');
       return row;
@@ -229,16 +242,16 @@ export class DocumentService {
     documentId: string,
     payload: Row,
     status: (expiry: string | null) => string,
-    onUpdated?: (row: Row) => void,
+    hooks?: DocumentWriteHooks,
   ): Promise<Row | null> {
-    return this.serialize(() => this.updateDocumentLocked(documentId, payload, status, onUpdated));
+    return this.serialize(() => this.updateDocumentLocked(documentId, payload, status, hooks));
   }
 
   private async updateDocumentLocked(
     documentId: string,
     payload: Row,
     status: (expiry: string | null) => string,
-    onUpdated?: (row: Row) => void,
+    hooks?: DocumentWriteHooks,
   ): Promise<Row | null> {
     const fields: Row = { ...payload };
     const uploadId = typeof fields.upload_id === 'string' ? fields.upload_id : null;
@@ -252,7 +265,7 @@ export class DocumentService {
     this.db.exec('BEGIN');
     try {
       resolveDocumentEntity(this.db, fields);
-      const storageFields: StorageFields | null = uploadId ? this.requireUpload(uploadId) : null;
+      const storageFields: StorageFields | null = uploadId ? this.requireUpload(uploadId, hooks?.uploadOwner) : null;
       const expiry =
         'expiry_date' in fields
           ? (typeof fields.expiry_date === 'string' ? fields.expiry_date : null)
@@ -264,7 +277,7 @@ export class DocumentService {
         status: status(expiry),
       });
 
-      if (row) onUpdated?.(row);
+      if (row) hooks?.completed?.(row);
       if (uploadId) this.claimUpload(uploadId);
       this.notifications?.changed();
       this.db.exec('COMMIT');
@@ -281,8 +294,8 @@ export class DocumentService {
   }
 
   /** Resolves an upload id, or fails loudly. */
-  private requireUpload(uploadId: string): StorageFields {
-    const fields = this.storageFields(uploadId);
+  private requireUpload(uploadId: string, owner?: UploadOwner): StorageFields {
+    const fields = this.storageFields(uploadId, owner);
     if (!fields) {
       throw new RepositoryError(
         'The upload is unknown or has already been claimed.',
@@ -337,15 +350,15 @@ export class DocumentService {
   }
 
   /** Replaces the attachment of a document, keeping the old file until the swap succeeded. */
-  async replaceFile(documentId: string, uploadId: string): Promise<Row | null> {
-    return this.serialize(() => this.replaceFileLocked(documentId, uploadId));
+  async replaceFile(documentId: string, uploadId: string, owner?: UploadOwner): Promise<Row | null> {
+    return this.serialize(() => this.replaceFileLocked(documentId, uploadId, owner));
   }
 
-  private async replaceFileLocked(documentId: string, uploadId: string): Promise<Row | null> {
+  private async replaceFileLocked(documentId: string, uploadId: string, owner?: UploadOwner): Promise<Row | null> {
     const document = findRow(this.db, 'documents', documentId, []);
     if (!document) return null;
 
-    const fields = this.storageFields(uploadId);
+    const fields = this.storageFields(uploadId, owner);
     if (!fields) return null;
 
     const previousPath = document.file_path as string | undefined;

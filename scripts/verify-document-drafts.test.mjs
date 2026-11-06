@@ -29,10 +29,15 @@ test('save preparation waits for discard and persists the new values', () => rem
 test('actual form preview components render authenticated PDF/image sources and keep fixed company selection disabled', async () => {
   const vite = await createServer({ server: { middlewareMode: true, hmr: false }, appType: 'custom', logLevel: 'error' });
   try {
-    const { previewMarkup, companyMarkup, emptyPreviewMarkup } = await vite.ssrLoadModule('/scripts/fixtures/document-preview-render.tsx');
+    const { previewMarkup, companyMarkup, emptyPreviewMarkup, pickerMarkup } = await vite.ssrLoadModule('/scripts/fixtures/document-preview-render.tsx');
     const pdf = previewMarkup('application/pdf', 'synthetic.pdf');
     assert.match(pdf, /<iframe/); assert.match(pdf, /\/api\/files\/synthetic-document\/preview/);
     assert.match(pdf, /rel="noopener noreferrer"/);
+    const picker = pickerMarkup();
+    assert.match(picker, /type="file"/);
+    assert.match(picker, /application\/pdf/);
+    assert.doesNotMatch(picker, /application\/msword|wordprocessingml/);
+    assert.match(pickerMarkup(true), /<button/);
     const image = previewMarkup('image/png', 'synthetic.png');
     assert.match(image, /<img/); assert.match(image, /object-contain/);
     const unsupported = previewMarkup('text/html', 'synthetic.html');

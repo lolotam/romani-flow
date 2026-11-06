@@ -51,7 +51,8 @@ export function createFilesRouter(
   router.post('/uploads/:uploadId/validate', requireAdmin, asyncHandler(async (req, res) => {
     res.setHeader('Cache-Control', 'no-store');
     const ref = draftReference(req.body?.draft);
-    const upload = await documents.validateStagedUpload(String(req.params.uploadId), () => assertCurrentDraft(db, req.user!.id, ref));
+    const upload = await documents.validateStagedUpload(String(req.params.uploadId), () => assertCurrentDraft(db, req.user!.id, ref),
+      { userId: req.user!.id, scope: ref.scope });
     res.json({ data: { upload_id: upload.uploadId }, error: null });
   }));
 

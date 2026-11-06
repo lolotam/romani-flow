@@ -162,7 +162,7 @@ export function createApp(deps: AppDependencies): Express {
         return;
       }
 
-      const updated = await documents.replaceFile(String(req.params.id), uploadId);
+      const updated = await documents.replaceFile(String(req.params.id), uploadId, { userId: req.user!.id, scope: 'edit:' + String(req.params.id) });
       if (!updated) {
         res.status(404).json({
           data: null,

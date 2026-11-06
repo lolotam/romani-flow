@@ -11,7 +11,7 @@ import {
 } from '../repositories/base.js';
 import { getNumber } from '../repositories/settings.js';
 import { rememberSubmission } from '../repositories/formDefaults.js';
-import { finishDraft } from '../repositories/documentDrafts.js';
+import { draftReference, finishDraft } from '../repositories/documentDrafts.js';
 import type { DocumentService } from '../services/documentService.js';
 import { documentStatus, normalizeDate } from '../utils/dates.js';
 
@@ -89,11 +89,12 @@ export function createDocumentsRouter(db: Db, documents: DocumentService): Route
         prepared.expiry_date = normalizeDate(prepared.expiry_date);
       }
 
-      const row = await documents.createDocument(prepared, statusFor,
-        (created) => {
+      const row = await documents.createDocument(prepared, statusFor, {
+        uploadOwner: draft === undefined ? undefined : { userId: req.user!.id, scope: draftReference(draft).scope },
+        completed: (created) => {
           rememberSubmission(db, req.user!.id, 'documents', created);
           finishDraft(db, req.user!.id, draft, created);
-        });
+        } });
       // The envelope always carries a list, so the client's `insert()` contract
       // is the same for every resource.
       res.status(201).json({ data: [shape(row)], error: null });
@@ -129,8 +130,9 @@ export function createDocumentsRouter(db: Db, documents: DocumentService): Route
         prepared.expiry_date = normalizeDate(prepared.expiry_date);
       }
 
-      const row = await documents.updateDocument(String(req.params.id), prepared, statusFor,
-        updated => finishDraft(db, req.user!.id, draft, updated, String(req.params.id)));
+      const row = await documents.updateDocument(String(req.params.id), prepared, statusFor, {
+        uploadOwner: draft === undefined ? undefined : { userId: req.user!.id, scope: draftReference(draft).scope },
+        completed: updated => finishDraft(db, req.user!.id, draft, updated, String(req.params.id)) });
       if (!row) {
         res.status(404).json({
           data: null,

@@ -11,7 +11,7 @@ import { Save, X, Building2, User, Plus } from 'lucide-react';
 import { toast } from 'sonner';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { createDocumentSchema, type DocumentFormData, type DocumentFormProps } from './documents/documentFormSchema';
-import { DocumentAttachment } from './documents/DocumentAttachment';
+import { DocumentAttachmentPicker } from './documents/DocumentAttachmentPicker';
 import { DocumentBeneficiaryFields } from './documents/DocumentBeneficiaryFields';
 import { DocumentDateFields } from './documents/DocumentDateFields';
 import { saveDocument } from './documents/saveDocument';
@@ -21,7 +21,6 @@ import { draftValues } from '@/lib/documentDraftSession';
 import { restoreFormDate } from '@/lib/formDefaults';
 import { useAuth } from '@/hooks/useAuth';
 import { DocumentDraftStatus } from './documents/DocumentDraftStatus';
-import { UploadDropzone } from './ui/UploadDropzone';
 import { useLastSubmissionRestore } from '@/hooks/useLastSubmission';
 import { newDocumentDefaults } from '@/lib/documentFormDrafts';
 
@@ -91,7 +90,7 @@ function DocumentFormContent({
     return () => registerDraftClose?.(null);
   }, [registerDraftClose, closeForm]);
 
-  const { stageFile, clearUpload, abandonUpload } = useStagedDocumentUpload();
+  const { stageFile, clearUpload, abandonUpload, hasPendingUpload } = useStagedDocumentUpload();
   const changeFile = async () => {
     if (submitting.current) return;
     submitting.current = true; setIsSubmitting(true);
@@ -160,18 +159,13 @@ function DocumentFormContent({
   return (
     <Card className="w-full" dir={isRTL ? 'rtl' : 'ltr'}>
       <CardContent className="grid items-start gap-6 p-4 lg:grid-cols-2 lg:p-6">
-        <div className="space-y-3">
-          <DocumentAttachment uploadedFile={selectedFile} editingDocument={editingDocument} />
-          {selectedFile && !editingDocument && <Button type="button" variant="outline" disabled={isSubmitting || ['loading', 'discarding', 'failed', 'conflict'].includes(draft.status)}
-            onClick={() => void changeFile()}>{t('documents.chooseFiles')}</Button>}
-          {!selectedFile && !editingDocument && <UploadDropzone maxFiles={1} maxFileSize={20 * 1024 * 1024}
-            acceptedFileTypes={['.pdf', '.jpg', '.jpeg', '.png']} disabled={isSubmitting || draft.status === 'discarding'}
-            onFilesAccepted={files => { if (files[0]) {
-              const title = newDocumentDefaults(defaultContext, files[0].name).title;
+        <DocumentAttachmentPicker file={selectedFile} editingDocument={editingDocument}
+            disabled={isSubmitting || draft.status === 'discarding' || hasPendingUpload() && ['loading', 'failed', 'conflict'].includes(draft.status)}
+            onChange={() => void changeFile()} onSelect={file => {
+              const title = newDocumentDefaults(defaultContext, file.name).title;
               baseline.current = { ...baseline.current, title };
-              setSelectedFile(files[0]); form.setValue('title', title, { shouldDirty: true });
-            } }} />}
-        </div>
+              setSelectedFile(file); form.setValue('title', title, { shouldDirty: true });
+            }} />
         <Form {...form}>
           <form onSubmit={form.handleSubmit(data => handleSubmit(data), () => toast.error(t('documents.form.validation.reviewFields')))} className="space-y-6">
             <fieldset disabled={isSubmitting || draft.status === 'discarding'} className="space-y-6">
