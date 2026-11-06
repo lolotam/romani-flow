@@ -189,6 +189,7 @@ export default function Settings() {
     }
     if (data && data.filesPendingCleanup > 0) {
       toast({ title: t('settings.settingsToasts.error'), description: t('settings.backup.cleanupPending'), variant: 'destructive' });
+      void fetchData();
       return;
     }
     toast({ title: t('settings.settingsToasts.success'), description: t('settings.backup.eraseSuccess') });

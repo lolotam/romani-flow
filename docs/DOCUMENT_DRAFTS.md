@@ -6,13 +6,13 @@ Drafts contain fields only, not attachments or staged-upload IDs. Choose the fil
 
 ## Editing and conflicts
 
-Writes debounce for500 ms and the form shows loading/saving/saved/error state. Normal modal close awaits the current save. Requests use keepalive for bounded metadata writes; abrupt browser/process termination cannot guarantee delivery of an unfinished request. Check the saved status before leaving.
+Writes debounce for 500 ms and the form shows loading/saving/saved/error state. Normal modal close awaits the current save. Requests use keepalive for bounded metadata writes; abrupt browser/process termination cannot guarantee delivery of an unfinished request. Check the saved status before leaving.
 
 Another device changing the same draft causes a conflict instead of silently overwriting. Reopen the form to read the newer version. Late reads cannot replace typed input. Discard affects only this account/context. Tombstone revisions prevent old writes from recreating a discarded/saved draft. No automatic retry follows uncertain write errors.
 
 ## API and release
 
-Admin-only, no-store endpoints: GET/PUT/DELETE /api/document-drafts/:scope. Supported scopes: new, employee:<id>, company:<id>, edit:<id>. Account comes from the authenticated session; x-draft-account must match it to reject requests from an old browser identity. PUT accepts revision/values; DELETE accepts revision. Values are field-allowlisted, at most16 KiB, with bounded strings/date-only dates and validated references. Writes serialize with document mutations/business erase.
+Admin-only, no-store endpoints: GET/PUT/DELETE /api/document-drafts/:scope. Supported scopes: new, employee:<id>, company:<id>, edit:<id>. Account comes from the authenticated session; x-draft-account must match it to reject requests from an old browser identity. PUT accepts revision/values; DELETE accepts revision. Values are field-allowlisted, at most 16 KiB, with bounded strings/date-only dates and validated references. Writes serialize with document mutations/business erase.
 
 Migration 008_document_drafts.sql is additive and must pass the production release/migration gate before deployment. It adds account-owned metadata/revisions and invalidates related drafts on employee/company/document deletion. Business erase clears private draft values and rotates revisions. Full SQLite recovery backups contain these private drafts; business JSON exports do not. Preserve existing private backup permissions. Image rollback should retain the additive table/triggers; never replace the production DB or drop the table merely to roll back this feature.
 
@@ -26,6 +26,6 @@ Uploads from draft-enabled forms carry the account/revision reference and stage 
 
 An open form retains its staged upload after a failed document save. Reuse validates the current account/draft revision and confirms the upload is still pending; a consumed or missing upload is staged again. No file path is accepted from the browser.
 
-Migration008 also adds upload_cleanup_queue. Failed staging cleanup retains paths there even when pending-upload registration failed. A cleanup pass removes tracking only after the file is removed or confirmed absent; failed removals remain retryable. DocumentService.purgeStaleUploads is asynchronous and returns the number of files removed, including queued rollback work. The release does not claim an automatically scheduled cleanup pass.
+Migration 008 also adds upload_cleanup_queue. Failed staging cleanup retains paths there even when pending-upload registration failed. A cleanup pass removes tracking only after the file is removed or confirmed absent; failed removals remain retryable. DocumentService.purgeStaleUploads is asynchronous and returns the number of files removed, including queued rollback work. The release does not claim an automatically scheduled cleanup pass.
 
 Business erase includes queued paths as well as normal attachments. Its response exposes filesPendingCleanup: zero confirms no tracked removal is outstanding; a positive count means file cleanup needs retry, even though business rows have been erased. Tracking survives a failed unlink, including queue-only uploads.
