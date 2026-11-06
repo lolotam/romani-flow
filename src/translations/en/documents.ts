@@ -97,6 +97,11 @@ export const documents = {
 
   // Document form
   form: {
+    previewNoFile: 'No file selected',
+    closeUnsavedConfirm: 'The latest changes were not saved. Close without them? The last saved draft will be kept.',
+    previewHint: 'Select a PDF or image to preview while filling the fields.',
+    previewOpen: 'Open file in a new tab if preview is unavailable',
+    fileCleanupPending: 'The previous attachment was abandoned, but file cleanup is pending retry.',
     title: 'Document Title',
     beneficiaryType: 'Beneficiary Type',
     company: 'Company',
@@ -138,6 +143,8 @@ export const documents = {
 
     // Validation messages
     validation: {
+      entityNameTooLong: 'Entity name must not exceed 100 characters',
+      notesTooLong: 'Notes exceed 5000 characters. Shorten them before saving the draft or document.',
       reviewFields: 'Review the errors shown in the form fields before saving.',
       noDocumentTypes: 'Add a document type in Settings first, then return to save the document.',
       noEmployees: 'No employees are available. Add an employee first or select a company beneficiary.',

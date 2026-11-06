@@ -1,4 +1,5 @@
 import type { ComponentProps } from 'react';
+import { useCallback, useRef } from 'react';
 import { Upload } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
@@ -36,14 +37,16 @@ export function DocumentUploadDialog({ open, onOpenChange, onFilesAccepted, copy
 
 export function DocumentEditorDialog(props: ComponentProps<typeof DocumentForm>) {
   const { t } = useLanguage();
+  const close = useRef<(() => Promise<void>) | null>(null);
+  const registerClose = useCallback((handler: (() => Promise<void>) | null) => { close.current = handler; }, []);
   return (
-    <Dialog open onOpenChange={(open) => { if (!open) props.onClose(); }}>
-      <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+    <Dialog open onOpenChange={(open) => { if (!open) void close.current?.(); }}>
+      <DialogContent className="sm:max-w-5xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>{t(props.editingDocument ? 'documents.card.editDocument' : 'documents.uploadNew')}</DialogTitle>
           <DialogDescription>{props.fileName}</DialogDescription>
         </DialogHeader>
-        <DocumentForm {...props} />
+        <DocumentForm {...props} registerDraftClose={registerClose} />
       </DialogContent>
     </Dialog>
   );

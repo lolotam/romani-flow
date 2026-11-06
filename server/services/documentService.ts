@@ -9,6 +9,7 @@ import {
 import type { StorageService } from './storageService.js';
 import type { NotificationCoordinator } from '../notifications/coordinator.js';
 import { atomic } from '../notifications/whatsapp/repository.js';
+import { resolveDocumentEntity } from './documentEntity.js';
 
 /**
  * Document file lifecycle.
@@ -35,6 +36,9 @@ export interface StorageFields {
   mime_type: string;
 }
 
+export interface UploadOwner { userId: string; scope: string }
+interface DocumentWriteHooks { completed?: (row: Row) => void; uploadOwner?: UploadOwner }
+
 export class DocumentService {
   private notifications: { coordinator: NotificationCoordinator; changed: () => void } | null = null;
   constructor(
@@ -48,6 +52,86 @@ export class DocumentService {
 
   private serialize<T>(action: () => Promise<T>): Promise<T> {
     return this.notifications ? this.notifications.coordinator.runExclusive(action) : action();
+  }
+
+  /** Stage files under erase's coordinator and check the draft before writing any bytes. */
+  stageUploads(files: Array<{ buffer: Buffer; originalname: string; mimetype: string }>, guard?: () => void, owner?: { userId: string; scope: string }): Promise<StoredUpload[]> {
+    return this.serialize(async () => {
+      guard?.();
+      const uploads: StoredUpload[] = [];
+      const paths: string[] = [];
+      try {
+      for (const file of files) {
+        const stored = await this.storage.save(file.buffer, file.originalname, file.mimetype, path => {
+          this.db.prepare('INSERT INTO upload_cleanup_queue(file_path,created_at) VALUES(?,?)').run(path, new Date().toISOString());
+          paths.push(path);
+        });
+        const upload = this.registerUpload({ fileName: stored.fileName, filePath: stored.relativePath, fileSize: stored.size, mimeType: stored.mimeType });
+        if (owner) this.db.prepare('UPDATE pending_uploads SET draft_user_id=?,draft_scope=? WHERE id=?').run(owner.userId, owner.scope, upload.uploadId);
+        uploads.push(upload);
+        this.db.prepare('DELETE FROM upload_cleanup_queue WHERE file_path=?').run(stored.relativePath);
+      }
+      return uploads;
+      } catch (error) {
+        for (const path of paths) {
+          try { this.db.prepare('INSERT OR IGNORE INTO upload_cleanup_queue(file_path,created_at) VALUES(?,?)').run(path, new Date().toISOString()); }
+          catch { console.error('[uploads] could not record cleanup work'); }
+        }
+        await this.cleanupTrackedFiles(paths);
+        throw error;
+      }
+    });
+  }
+
+  /** Reuse a still-pending upload only after validating the current draft. */
+  validateStagedUpload(uploadId: string, guard: () => void, owner?: UploadOwner): Promise<StoredUpload> {
+    return this.serialize(async () => {
+      guard();
+      this.assertUploadOwner(uploadId, owner);
+      const upload = this.resolveUpload(uploadId);
+      if (!upload || !this.storage.exists(upload.filePath)) throw new RepositoryError('Upload is no longer pending.', 'invalid_upload', 404);
+      return upload;
+    });
+  }
+
+  /** Revoke claimability before unlink; failed cleanup remains durable and retryable. */
+  abandonStagedUpload(uploadId: string, owner: { userId: string; scope: string }, guard: () => void): Promise<{ cleanupPending: boolean }> {
+    return this.serialize(async () => {
+      guard();
+      const row = this.db.prepare('SELECT file_path,draft_user_id,draft_scope FROM pending_uploads WHERE id=?').get(uploadId)
+        ?? this.db.prepare('SELECT file_path,draft_user_id,draft_scope FROM upload_cleanup_queue WHERE upload_id=?').get(uploadId);
+      if (!row) return { cleanupPending: false };
+      if (row.draft_user_id !== owner.userId || row.draft_scope !== owner.scope) {
+        throw new RepositoryError('Upload does not belong to this draft.', 'invalid_upload', 403);
+      }
+      const path = String(row.file_path);
+      atomic(this.db, () => {
+        const queued = this.db.prepare('SELECT upload_id,draft_user_id,draft_scope FROM upload_cleanup_queue WHERE file_path=?').get(path);
+        if (queued && (queued.upload_id !== uploadId || queued.draft_user_id !== owner.userId || queued.draft_scope !== owner.scope)) {
+          throw new RepositoryError('Upload cleanup belongs to a different draft.', 'invalid_upload', 409);
+        }
+        this.db.prepare(`INSERT INTO upload_cleanup_queue(file_path,created_at,upload_id,draft_user_id,draft_scope) VALUES(?,?,?,?,?)
+          ON CONFLICT(file_path) DO NOTHING`)
+          .run(path, new Date().toISOString(), uploadId, owner.userId, owner.scope);
+        this.db.prepare('DELETE FROM pending_uploads WHERE id=?').run(uploadId);
+      });
+      await this.cleanupTrackedFiles([path]);
+      return { cleanupPending: Boolean(this.db.prepare('SELECT 1 FROM upload_cleanup_queue WHERE file_path=?').get(path)) };
+    });
+  }
+
+  /** Failed removals retain durable tracking and never hide the staging error. */
+  async cleanupTrackedFiles(paths: string[]): Promise<number> {
+    let removed = 0;
+    for (const path of paths) {
+      try {
+        const existed = await this.storage.remove(path);
+        this.db.prepare('DELETE FROM pending_uploads WHERE file_path=?').run(path);
+        this.db.prepare('DELETE FROM upload_cleanup_queue WHERE file_path=?').run(path);
+        if (existed) removed++;
+      } catch { console.error('[uploads] cleanup deferred'); }
+    }
+    return removed;
   }
 
   /** Records a freshly uploaded file so a record can claim it. */
@@ -91,7 +175,8 @@ export class DocumentService {
   }
 
   /** The storage columns for a document, derived from an upload id. */
-  storageFields(uploadId: string): StorageFields | null {
+  storageFields(uploadId: string, owner?: UploadOwner): StorageFields | null {
+    this.assertUploadOwner(uploadId, owner);
     const upload = this.resolveUpload(uploadId);
     if (!upload) return null;
 
@@ -103,6 +188,14 @@ export class DocumentService {
     };
   }
 
+  /** Bound draft uploads cannot be validated or claimed in a different account/context. */
+  private assertUploadOwner(uploadId: string, owner?: UploadOwner): void {
+    const row = this.db.prepare('SELECT draft_user_id,draft_scope FROM pending_uploads WHERE id=?').get(uploadId);
+    if (row && (row.draft_user_id !== null || row.draft_scope !== null) && (row.draft_user_id !== owner?.userId || row.draft_scope !== owner?.scope)) {
+      throw new RepositoryError('Upload does not belong to this draft.', 'invalid_upload', 403);
+    }
+  }
+
   /**
    * Creates a document and claims its staged upload in one transaction.
    *
@@ -110,19 +203,20 @@ export class DocumentService {
    * transaction rolls back and the upload stays pending, so the administrator
    * can correct the data and retry with the same upload id.
    */
-  async createDocument(payload: Row, status: (expiry: string | null) => string, onCreated?: (row: Row) => void): Promise<Row> {
+  async createDocument(payload: Row, status: (expiry: string | null) => string, hooks?: DocumentWriteHooks): Promise<Row> {
     // Same coordinator as update/delete, so a create cannot interleave with a backup erase.
-    return this.serialize(async () => this.createDocumentLocked(payload, status, onCreated));
+    return this.serialize(async () => this.createDocumentLocked(payload, status, hooks));
   }
 
-  private createDocumentLocked(payload: Row, status: (expiry: string | null) => string, onCreated?: (row: Row) => void): Row {
+  private createDocumentLocked(payload: Row, status: (expiry: string | null) => string, hooks?: DocumentWriteHooks): Row {
     const fields: Row = { ...payload };
     const uploadId = typeof fields.upload_id === 'string' ? fields.upload_id : null;
     delete fields.upload_id;
 
     this.db.exec('BEGIN');
     try {
-      const storageFields: StorageFields | null = uploadId ? this.requireUpload(uploadId) : null;
+      resolveDocumentEntity(this.db, fields);
+      const storageFields: StorageFields | null = uploadId ? this.requireUpload(uploadId, hooks?.uploadOwner) : null;
       const expiry = typeof fields.expiry_date === 'string' ? fields.expiry_date : null;
 
       const row = insertRow(this.db, 'documents', {
@@ -132,7 +226,7 @@ export class DocumentService {
       });
 
       if (uploadId) this.claimUpload(uploadId);
-      onCreated?.(row);
+      hooks?.completed?.(row);
       this.notifications?.changed();
       this.db.exec('COMMIT');
       return row;
@@ -152,14 +246,16 @@ export class DocumentService {
     documentId: string,
     payload: Row,
     status: (expiry: string | null) => string,
+    hooks?: DocumentWriteHooks,
   ): Promise<Row | null> {
-    return this.serialize(() => this.updateDocumentLocked(documentId, payload, status));
+    return this.serialize(() => this.updateDocumentLocked(documentId, payload, status, hooks));
   }
 
   private async updateDocumentLocked(
     documentId: string,
     payload: Row,
     status: (expiry: string | null) => string,
+    hooks?: DocumentWriteHooks,
   ): Promise<Row | null> {
     const fields: Row = { ...payload };
     const uploadId = typeof fields.upload_id === 'string' ? fields.upload_id : null;
@@ -172,7 +268,8 @@ export class DocumentService {
 
     this.db.exec('BEGIN');
     try {
-      const storageFields: StorageFields | null = uploadId ? this.requireUpload(uploadId) : null;
+      resolveDocumentEntity(this.db, fields);
+      const storageFields: StorageFields | null = uploadId ? this.requireUpload(uploadId, hooks?.uploadOwner) : null;
       const expiry =
         'expiry_date' in fields
           ? (typeof fields.expiry_date === 'string' ? fields.expiry_date : null)
@@ -184,6 +281,7 @@ export class DocumentService {
         status: status(expiry),
       });
 
+      if (row) hooks?.completed?.(row);
       if (uploadId) this.claimUpload(uploadId);
       this.notifications?.changed();
       this.db.exec('COMMIT');
@@ -200,8 +298,8 @@ export class DocumentService {
   }
 
   /** Resolves an upload id, or fails loudly. */
-  private requireUpload(uploadId: string): StorageFields {
-    const fields = this.storageFields(uploadId);
+  private requireUpload(uploadId: string, owner?: UploadOwner): StorageFields {
+    const fields = this.storageFields(uploadId, owner);
     if (!fields) {
       throw new RepositoryError(
         'The upload is unknown or has already been claimed.',
@@ -256,29 +354,36 @@ export class DocumentService {
   }
 
   /** Replaces the attachment of a document, keeping the old file until the swap succeeded. */
-  async replaceFile(documentId: string, uploadId: string): Promise<Row | null> {
+  async replaceFile(documentId: string, uploadId: string, owner?: UploadOwner, guard?: () => void): Promise<Row | null> {
+    return this.serialize(() => this.replaceFileLocked(documentId, uploadId, owner, guard));
+  }
+
+  private async replaceFileLocked(documentId: string, uploadId: string, owner?: UploadOwner, guard?: () => void): Promise<Row | null> {
+    guard?.();
     const document = findRow(this.db, 'documents', documentId, []);
     if (!document) return null;
 
-    const fields = this.storageFields(uploadId);
+    const fields = this.storageFields(uploadId, owner);
     if (!fields) return null;
 
     const previousPath = document.file_path as string | undefined;
 
-    this.db.prepare(
-      `UPDATE documents
+    atomic(this.db, () => {
+      this.db.prepare(
+        `UPDATE documents
           SET file_name = ?, file_path = ?, file_size = ?, mime_type = ?, updated_at = ?
         WHERE id = ?`,
-    ).run(
-      fields.file_name,
-      fields.file_path,
-      fields.file_size,
-      fields.mime_type,
-      new Date().toISOString(),
-      documentId,
-    );
+      ).run(
+        fields.file_name,
+        fields.file_path,
+        fields.file_size,
+        fields.mime_type,
+        new Date().toISOString(),
+        documentId,
+      );
 
-    this.claimUpload(uploadId);
+      this.claimUpload(uploadId);
+    });
 
     if (previousPath && previousPath !== fields.file_path) {
       await this.removeFile({ file_path: previousPath });
@@ -289,6 +394,10 @@ export class DocumentService {
 
   /** Detaches the file from a document without deleting the record. */
   async detachFile(documentId: string): Promise<Row | null> {
+    return this.serialize(() => this.detachFileLocked(documentId));
+  }
+
+  private async detachFileLocked(documentId: string): Promise<Row | null> {
     const document = findRow(this.db, 'documents', documentId, []);
     if (!document) return null;
 
@@ -303,17 +412,15 @@ export class DocumentService {
   }
 
   /** Removes staged uploads that were never claimed. */
-  purgeStaleUploads(olderThanHours = 24): number {
+  purgeStaleUploads(olderThanHours = 24): Promise<number> {
+    return this.serialize(() => {
     const cutoff = new Date(Date.now() - olderThanHours * 3600_000).toISOString();
     const rows = this.db
       .prepare('SELECT file_path FROM pending_uploads WHERE created_at < ?')
       .all(cutoff) as Row[];
 
-    for (const row of rows) {
-      void this.storage.remove(String(row.file_path));
-    }
-
-    this.db.prepare('DELETE FROM pending_uploads WHERE created_at < ?').run(cutoff);
-    return rows.length;
+    const queued = this.db.prepare('SELECT file_path FROM upload_cleanup_queue').all() as Row[];
+    return this.cleanupTrackedFiles([...new Set([...rows, ...queued].map(row => String(row.file_path)))]);
+    });
   }
 }

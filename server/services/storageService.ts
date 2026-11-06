@@ -61,7 +61,7 @@ export class StorageService {
    *
    * Files are bucketed by year and month so no single directory grows unbounded.
    */
-  async save(buffer: Buffer, originalName: string, mimeType: string): Promise<StoredFile> {
+  async save(buffer: Buffer, originalName: string, mimeType: string, beforeWrite?: (relativePath: string) => void): Promise<StoredFile> {
     this.ensureDirectories();
 
     const now = new Date();
@@ -74,11 +74,13 @@ export class StorageService {
     const sanitized = this.sanitizeFileName(originalName);
     const uniqueName = `${crypto.randomUUID()}-${sanitized}`;
     const absolutePath = path.join(directory, uniqueName);
-
+    const relativePath = path.posix.join(year, month, uniqueName);
+    // Staging records cleanup responsibility before a partial disk write can fail.
+    beforeWrite?.(relativePath);
     await fs.promises.writeFile(absolutePath, buffer);
 
     return {
-      relativePath: path.posix.join(year, month, uniqueName),
+      relativePath,
       fileName: sanitized,
       size: buffer.byteLength,
       mimeType,

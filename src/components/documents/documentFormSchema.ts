@@ -8,8 +8,8 @@ export const createDocumentSchema = (t: (key: string) => string) => z.object({
   employee_id: z.string().optional(),
   document_type_id: z.string().optional(),
   ministry_id: z.string().optional(),
-  entity_name: z.string().optional(),
-  notes: z.string().optional(),
+  entity_name: z.string().max(100, t('documents.form.validation.entityNameTooLong')).optional(),
+  notes: z.string().max(5000, t('documents.form.validation.notesTooLong')).optional(),
 }).superRefine((data, ctx) => {
   // Attach required-field errors to rendered controls, never an invisible root error.
   const required = data.beneficiary_type === 'company'
@@ -46,6 +46,7 @@ export const createDocumentSchema = (t: (key: string) => string) => z.object({
 export type DocumentFormData = z.infer<ReturnType<typeof createDocumentSchema>>;
 
 export interface DocumentFormProps {
+  registerDraftClose?: (handler: (() => Promise<void>) | null) => void;
   uploadedFile: File | null;
   fileName: string;
   onClose: () => void;
@@ -68,6 +69,7 @@ export interface DocumentFormProps {
     notes?: string;
     file_path?: string;
     file_name?: string;
+    mime_type?: string;
   } | null;
 }
 

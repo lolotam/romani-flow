@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -14,6 +14,12 @@ import { api, type Document, type DocumentType, type Ministry } from '@/lib/api'
 import { useStagedDocumentUpload } from './documents/useStagedDocumentUpload';
 import { toast } from 'sonner';
 import { useLanguage } from '@/contexts/LanguageContext';
+import { useDocumentDraft } from '@/hooks/useDocumentDraft';
+import { draftValues } from '@/lib/documentDraftSession';
+import { employeeDocumentDraft, nextDocumentFileTitle } from '@/lib/documentFormDrafts';
+import { useAuth } from '@/hooks/useAuth';
+import { DocumentDraftStatus } from './documents/DocumentDraftStatus';
+import { DocumentAttachmentPicker } from './documents/DocumentAttachmentPicker';
 import { useLastSubmissionRestore } from '@/hooks/useLastSubmission';
 
 const emptyForm = {
@@ -29,7 +35,12 @@ interface EmployeeDocumentFormProps {
   uploadedFile?: File | null;
 }
 
-export function EmployeeDocumentForm({
+export function EmployeeDocumentForm(props: EmployeeDocumentFormProps) {
+  const { user } = useAuth();
+  return <EmployeeDocumentFormContent key={String(user?.id) + ':' + props.employeeId} {...props} />;
+}
+
+function EmployeeDocumentFormContent({
   isOpen,
   onClose,
   onSave,
@@ -37,20 +48,49 @@ export function EmployeeDocumentForm({
   uploadedFile
 }: EmployeeDocumentFormProps) {
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [selectedFile, setSelectedFile] = useState<File | null>(uploadedFile ?? null);
+  useEffect(() => { setSelectedFile(isOpen ? uploadedFile ?? null : null); }, [isOpen, uploadedFile]);
   const [documentTypes, setDocumentTypes] = useState<DocumentType[]>([]);
   const [ministries, setMinistries] = useState<Ministry[]>([]);
   const { t, isRTL } = useLanguage();
-  const { stageFile, clearUpload } = useStagedDocumentUpload();
+  const { stageFile, clearUpload, abandonUpload, hasPendingUpload } = useStagedDocumentUpload();
   const submitting = useRef(false);
   
-  const [formData, setFormData] = useState(emptyForm);
+  const [formData, commitFormData] = useState(emptyForm);
+  const latestForm = useRef(emptyForm);
+  const setFormData = useCallback((update: React.SetStateAction<typeof emptyForm>) => {
+    const next = typeof update === 'function' ? update(latestForm.current) : update;
+    latestForm.current = next;
+    commitFormData(next);
+  }, []);
   const dirty = useRef(false);
-  useEffect(() => { if (isOpen) dirty.current = false; }, [isOpen, employeeId]);
-  useLastSubmissionRestore('documents', isOpen, (saved) => {
-    setFormData(current => ({ ...current, title: uploadedFile ? uploadedFile.name.replace(/\.[^/.]+$/, '') : String(saved.title ?? ''),
+  const allowLastSubmission = useRef(true);
+  const generatedTitle = useRef<string | null>(uploadedFile ? uploadedFile.name.replace(/\.[^/.]+$/, '').slice(0, 120) : null);
+  const draft = useDocumentDraft('employee:' + employeeId, saved => {
+    dirty.current = false;
+    if (saved !== null) { allowLastSubmission.current = false; generatedTitle.current = null; }
+    const restored = employeeDocumentDraft(saved, selectedFile?.name);
+    if (saved === null) generatedTitle.current = selectedFile ? restored.title : null;
+    setFormData(restored);
+  }, isOpen);
+  useEffect(() => { if (isOpen) { dirty.current = false; allowLastSubmission.current = true; } }, [isOpen, employeeId]);
+  useLastSubmissionRestore('documents', allowLastSubmission.current && isOpen && draft.status === 'saved' && !draft.hasDraft, (saved) => {
+    generatedTitle.current = selectedFile ? selectedFile.name.replace(/\.[^/.]+$/, '').slice(0, 120) : null;
+    setFormData(current => ({ ...current, title: selectedFile ? selectedFile.name.replace(/\.[^/.]+$/, '').slice(0, 120) : String(saved.title ?? ''),
       document_type_id: String(saved.document_type_id ?? ''), ministry_id: String(saved.ministry_id ?? ''),
       notes: String(saved.notes ?? '') }));
-  }, () => !dirty.current);
+  }, () => allowLastSubmission.current && !dirty.current);
+
+  useEffect(() => {
+    if (!selectedFile || draft.status !== 'saved') return;
+    const title = nextDocumentFileTitle(latestForm.current.title, generatedTitle.current, selectedFile.name, draft.hasDraft);
+    if (title === null) return;
+    dirty.current = true;
+    generatedTitle.current = title;
+    const next = { ...latestForm.current, title };
+    setFormData(next);
+    draft.session.current?.change(draftValues(next));
+  }, [selectedFile, draft.status, draft.hasDraft, draft.session, setFormData]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -68,41 +108,51 @@ export function EmployeeDocumentForm({
     };
     void loadOptions();
     return () => { cancelled = true; };
-  }, [isOpen]);
-
-  useEffect(() => {
-    if (isOpen && uploadedFile) {
-      setFormData(prev => ({
-        ...prev,
-        title: uploadedFile.name.replace(/\.[^/.]+$/, ''), // Remove file extension
-      }));
-    }
-  }, [isOpen, uploadedFile]);
+  }, [isOpen, setFormData]);
 
   const editForm = (patch: Partial<typeof emptyForm>) => {
     dirty.current = true;
-    setFormData(current => ({ ...current, ...patch }));
+    if (patch.title !== undefined) generatedTitle.current = null;
+    const next = { ...latestForm.current, ...patch };
+    setFormData(next);
+    draft.session.current?.change(draftValues(next));
+  };
+
+  const changeFile = async () => {
+    if (submitting.current) return;
+    submitting.current = true; setIsSubmitting(true);
+    try {
+      const cleanupPending = await abandonUpload(draft.reference);
+      setSelectedFile(null);
+      if (cleanupPending) toast.warning(t('documents.form.fileCleanupPending'));
+    } catch (error) { toast.error(error instanceof Error ? error.message : t('documents.employeeDocumentForm.saveError')); }
+    finally { submitting.current = false; setIsSubmitting(false); }
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (submitting.current) return;
+    if (submitting.current || ['loading', 'discarding', 'failed', 'conflict'].includes(draft.status)) return;
+    if (!selectedFile) { toast.error(t('documents.employeeDocumentForm.requiredFieldsError')); return; }
+    if (selectedFile.size > 20 * 1024 * 1024) { toast.error(t('documents.messages.fileSizeError')); return; }
+    if (!['application/pdf', 'image/jpeg', 'image/png'].includes(selectedFile.type)) { toast.error(t('documents.messages.fileTypeError')); return; }
     
     if (!formData.title || !formData.document_type_id) {
       toast.error(t('documents.employeeDocumentForm.requiredFieldsError'));
       return;
     }
 
+    if (formData.title.length > 120) { toast.error(t('documents.form.validation.titleMaxLength')); return; }
+    if (formData.notes.length > 5000) { toast.error(t('documents.form.validation.notesTooLong')); return; }
     submitting.current = true;
     setIsSubmitting(true);
     
     try {
-      const uploadId = uploadedFile
-        ? await stageFile(uploadedFile, t('documents.employeeDocumentForm.saveError'))
-        : undefined;
+      const draftRef = await draft.prepare(draftValues(formData));
+      const uploadId = await stageFile(selectedFile, t('documents.employeeDocumentForm.saveError'), draftRef);
 
       // Save metadata and claim the staged upload in one server transaction.
-      const { error: dbError } = await api.insert<Document>('documents', {
+      const payload = {
+        draft: draftRef,
         title: formData.title,
         document_type_id: formData.document_type_id,
         employee_id: employeeId,
@@ -112,17 +162,20 @@ export function EmployeeDocumentForm({
         expiry_date: formData.expiry_date ? format(formData.expiry_date, 'yyyy-MM-dd') : null,
         notes: formData.notes || null,
         ...(uploadId ? { upload_id: uploadId } : {}),
-      });
+      };
+      const { error: dbError } = await api.insert<Document>('documents', payload);
 
       if (dbError) {
-        throw new Error(`${t('documents.employeeDocumentForm.saveError')}: ${dbError.message}`);
+        throw dbError;
       }
 
+      draft.session.current?.committed();
       clearUpload();
       toast.success(t('documents.employeeDocumentForm.saveSuccess'));
       onSave();
       onClose();
     } catch (error) {
+      draft.session.current?.resume(error);
       console.error('Error saving document:', error);
       toast.error(error instanceof Error ? error.message : t('documents.employeeDocumentForm.saveError'));
     } finally {
@@ -131,15 +184,15 @@ export function EmployeeDocumentForm({
     }
   };
 
-  const handleClose = () => {
+  const handleClose = async () => {
     if (submitting.current) return;
-    setFormData(emptyForm);
-    onClose();
+    try { if (!draft.session.current || await draft.session.current.close(() => window.confirm(t('documents.form.closeUnsavedConfirm')))) onClose(); }
+    catch { toast.error(t('documents.employeeDocumentForm.saveError')); }
   };
 
   return (
     <Dialog open={isOpen} onOpenChange={handleClose}>
-      <DialogContent className="sm:max-w-2xl max-h-[90vh] overflow-y-auto" dir={isRTL ? 'rtl' : 'ltr'}>
+      <DialogContent className="sm:max-w-5xl max-h-[90vh] overflow-y-auto" dir={isRTL ? 'rtl' : 'ltr'}>
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <FileText className="h-5 w-5" />
@@ -150,12 +203,23 @@ export function EmployeeDocumentForm({
           </DialogDescription>
         </DialogHeader>
 
+        <div className="grid items-start gap-6 lg:grid-cols-2">
+        <DocumentAttachmentPicker file={selectedFile} disabled={isSubmitting || draft.status === 'discarding' || hasPendingUpload() && ['loading', 'failed', 'conflict'].includes(draft.status)}
+          onChange={() => void changeFile()} onSelect={setSelectedFile} />
         <form onSubmit={handleSubmit} className="space-y-6">
+          <fieldset disabled={isSubmitting || draft.status === 'discarding'} className="space-y-6">
+          {formData.title.length > 120 && <p role="alert" className="text-destructive">{t('documents.form.validation.titleMaxLength')}</p>}
+          {formData.notes.length > 5000 && <p role="alert" className="text-destructive">{t('documents.form.validation.notesTooLong')}</p>}
+          <DocumentDraftStatus status={draft.status} restored={draft.hasDraft} needsFile={!selectedFile} onDiscard={() => {
+            allowLastSubmission.current = false;
+            void draft.session.current?.discard().catch(() => toast.error(t('documents.employeeDocumentForm.saveError')));
+          }} />
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div className="md:col-span-2">
               <Label htmlFor="title">{t('documents.form.title')} *</Label>
               <Input
                 id="title"
+                maxLength={120}
                 value={formData.title}
                 onChange={(e) => editForm({ title: e.target.value })}
                 placeholder={t('documents.form.titlePlaceholder')}
@@ -258,7 +322,7 @@ export function EmployeeDocumentForm({
 
             <div className="md:col-span-2">
               <Label htmlFor="notes">{t('documents.form.notes')}</Label>
-              <Textarea
+              <Textarea maxLength={5000}
                 id="notes"
                 value={formData.notes}
                 onChange={(e) => editForm({ notes: e.target.value })}
@@ -267,19 +331,19 @@ export function EmployeeDocumentForm({
               />
             </div>
 
-            {uploadedFile && (
+            {selectedFile && (
               <div className="md:col-span-2 p-4 bg-muted rounded-lg">
                 <div className="flex items-center gap-2">
                   <FileText className="h-4 w-4 text-primary" />
                   <span className="text-sm font-medium">{t('documents.employeeDocumentForm.attachedFile')}</span>
-                  <span className="text-sm text-muted-foreground">{uploadedFile.name}</span>
+                  <span className="text-sm text-muted-foreground">{selectedFile.name}</span>
                 </div>
               </div>
             )}
           </div>
 
           <div className="flex gap-2 pt-4">
-            <Button type="submit" disabled={isSubmitting} className="flex-1">
+            <Button type="submit" disabled={isSubmitting || !selectedFile || ['loading', 'discarding', 'failed', 'conflict'].includes(draft.status)} className="flex-1">
               {isSubmitting ? (
                 <div className="flex items-center gap-2">
                   <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
@@ -297,7 +361,9 @@ export function EmployeeDocumentForm({
               {t('documents.employeeDocumentForm.cancel')}
             </Button>
           </div>
+          </fieldset>
         </form>
+        </div>
       </DialogContent>
     </Dialog>
   );

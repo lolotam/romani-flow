@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import { randomUUID } from 'node:crypto';
 import type { Db } from '../db/connection.js';
 import { asyncHandler } from '../middleware/errorHandler.js';
 import { requireAdmin } from '../middleware/auth.js';
@@ -80,17 +81,27 @@ export function createBackupRouter(db: Db, documents: DocumentService, reminders
       for (const row of db.prepare('SELECT file_path FROM pending_uploads').all() as Row[]) {
         if (row.file_path) filePaths.push(String(row.file_path));
       }
+      for (const row of db.prepare('SELECT file_path FROM upload_cleanup_queue').all() as Row[]) {
+        if (row.file_path) filePaths.push(String(row.file_path));
+      }
+      const uniquePaths = [...new Set(filePaths)];
 
       // The business data is wiped, but the accounts and the settings survive so
       // the operator is not locked out of the application.
       db.exec('PRAGMA foreign_keys = OFF;');
       try {
         db.exec('BEGIN');
+        setSetting(db, 'document_drafts.erase_active', true);
+        // Keep failed removals discoverable after business rows are erased.
+        for (const path of uniquePaths) db.prepare('INSERT OR IGNORE INTO upload_cleanup_queue(file_path,created_at) VALUES(?,?)').run(path, new Date().toISOString());
         for (const table of BUSINESS_TABLES) {
           db.prepare(`DELETE FROM "${table}"`).run();
         }
         db.prepare('DELETE FROM pending_uploads').run();
         db.prepare('DELETE FROM form_defaults').run();
+        // Keep revision tombstones so pre-erase autosaves cannot resurrect private draft text.
+        db.prepare("UPDATE document_drafts SET values_json=NULL,revision=lower(hex(randomblob(16))),updated_at=?").run(new Date().toISOString());
+        setSetting(db, 'document_drafts.epoch', randomUUID());
         db.prepare('DELETE FROM expiry_notifications').run();
         // Audit/recipient configuration survive business erase; sending requires deliberate re-enable.
         setSetting(db, 'whatsapp.enabled', false);
@@ -101,7 +112,7 @@ export function createBackupRouter(db: Db, documents: DocumentService, reminders
         // The seed marker is written here as well: erasing the data must never
         // let the next boot import the seed and resurrect it.
         setSetting(db, 'system.seed_version', '1');
-
+        db.prepare("DELETE FROM settings WHERE key='document_drafts.erase_active'").run();
         db.exec('COMMIT');
       } catch (error) {
         db.exec('ROLLBACK');
@@ -112,17 +123,11 @@ export function createBackupRouter(db: Db, documents: DocumentService, reminders
 
       // The files are removed only after the transaction succeeded, so a
       // failure leaves the data and the files consistent with each other.
-      let removed = 0;
-      for (const filePath of filePaths) {
-        try {
-          if (await documents.removeStoredFile(filePath)) removed += 1;
-        } catch (error) {
-          console.warn('[backup] a file could not be removed:', error);
-        }
-      }
+      const removed = await documents.cleanupTrackedFiles(uniquePaths);
+      const pending = db.prepare('SELECT count(*) count FROM upload_cleanup_queue').get() as { count: number };
 
       res.json({
-        data: { erased: BUSINESS_TABLES, filesRemoved: removed, at: new Date().toISOString() },
+        data: { erased: BUSINESS_TABLES, filesRemoved: removed, filesPendingCleanup: pending.count, at: new Date().toISOString() },
         error: null,
       });
     })),

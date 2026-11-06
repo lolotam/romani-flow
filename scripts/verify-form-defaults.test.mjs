@@ -1,5 +1,4 @@
-import {setSetting} from '../server/repositories/settings.ts';
-import {seedDatabase} from '../server/db/seed.ts';
+import {seedDatabase, writeSeedMarker} from '../server/db/seed.ts';
 import {applyOwnerCatalogs} from '../server/db/ownerCatalogs.ts';
 ﻿import assert from 'node:assert/strict';
 import { before, after, test } from 'node:test';
@@ -23,7 +22,7 @@ const config=loadConfig({NODE_ENV:'test',JWT_SECRET:randomBytes(32).toString('he
 const accounts=['actor-a','actor-b'].map((id,i)=>({id,email:`actor${i}@example.invalid`,name:'Test admin',role:'admin'}));
 let base,server;
 before(async()=>{
- runMigrations(db,path.resolve('server/db/migrations'));setSetting(db,'system.seed_version','1');applyOwnerCatalogs(db);
+ runMigrations(db,path.resolve('server/db/migrations'));writeSeedMarker(db);applyOwnerCatalogs(db);
  for(const user of accounts)db.prepare('INSERT INTO admin_users (id,email,name,role,password_hash,created_at,updated_at) VALUES (?,?,?,?,?,?,?)').run(user.id,user.email,user.name,user.role,'unused-fixture-hash','2026-01-01','2026-01-01');
  const storage=new StorageService(dir);storage.ensureDirectories();const mailer=new Mailer(config);const cron=new CronService(db,mailer);const documents=new DocumentService(db,storage);
  server=createApp({config,db,mailer,cron,storage,documents,staticDir:dir}).listen(0,'127.0.0.1');
@@ -77,7 +76,7 @@ test('document defaults omit files and dates, including legacy values, without c
 test('catalog setup preserves a previously imported owner row',()=>{
  const other=new DatabaseSync(':memory:');try{
  runMigrations(other,path.resolve('server/db/migrations'));
- setSetting(other,'system.seed_version','1');
+ writeSeedMarker(other);
  const old=insertRow(other,'companies',{name:'curemed',name_ar:'Existing owner label',description:'Keep this description'});
  applyOwnerCatalogs(other);
  assert.equal(other.prepare('SELECT count(*) n FROM companies').get().n,2);

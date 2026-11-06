@@ -1,5 +1,5 @@
 import React from 'react';
-import { useForm } from 'react-hook-form';
+import { useForm, type DefaultValues } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -11,14 +11,26 @@ import { Save, X, Building2, User, Plus } from 'lucide-react';
 import { toast } from 'sonner';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { createDocumentSchema, type DocumentFormData, type DocumentFormProps } from './documents/documentFormSchema';
-import { DocumentAttachment } from './documents/DocumentAttachment';
+import { DocumentAttachmentPicker } from './documents/DocumentAttachmentPicker';
 import { DocumentBeneficiaryFields } from './documents/DocumentBeneficiaryFields';
 import { DocumentDateFields } from './documents/DocumentDateFields';
 import { saveDocument } from './documents/saveDocument';
 import { useStagedDocumentUpload } from './documents/useStagedDocumentUpload';
+import { useDocumentDraft } from '@/hooks/useDocumentDraft';
+import { draftValues } from '@/lib/documentDraftSession';
+import { restoreFormDate } from '@/lib/formDefaults';
+import { useAuth } from '@/hooks/useAuth';
+import { DocumentDraftStatus } from './documents/DocumentDraftStatus';
 import { useLastSubmissionRestore } from '@/hooks/useLastSubmission';
+import { newDocumentDefaults, nextDocumentFileTitle } from '@/lib/documentFormDrafts';
 
-export function DocumentForm({
+export function DocumentForm(props: DocumentFormProps) {
+  const { user } = useAuth();
+  const scope = props.editingDocument ? 'edit:' + props.editingDocument.id : props.preselectedEmployeeId ? 'employee:' + props.preselectedEmployeeId : props.preselectedCompanyId ? 'company:' + props.preselectedCompanyId : 'new';
+  return <DocumentFormContent key={String(user?.id) + ':' + scope} {...props} scope={scope} />;
+}
+
+function DocumentFormContent({
   uploadedFile,
   fileName,
   onClose,
@@ -29,13 +41,16 @@ export function DocumentForm({
   ministries,
   preselectedCompanyId,
   preselectedEmployeeId,
-  editingDocument,
-}: DocumentFormProps) {
+  editingDocument, scope, registerDraftClose,
+}: DocumentFormProps & { scope: string }) {
   const { t, isRTL } = useLanguage();
   const documentSchema = createDocumentSchema(t);
 
   const submitting = React.useRef(false);
   const [isSubmitting, setIsSubmitting] = React.useState(false);
+  const [selectedFile, setSelectedFile] = React.useState(uploadedFile);
+  const defaultContext = { employeeId: preselectedEmployeeId, companyId: preselectedCompanyId, fallbackEmployeeId: employees[0]?.id };
+  const allowLastSubmission = React.useRef(true);
   const form = useForm<DocumentFormData>({
     resolver: zodResolver(documentSchema),
     defaultValues: editingDocument ? {
@@ -48,53 +63,108 @@ export function DocumentForm({
       issue_date: editingDocument.issue_date ? new Date(editingDocument.issue_date + 'T00:00:00') : undefined,
       expiry_date: new Date(editingDocument.expiry_date + 'T00:00:00'),
       notes: editingDocument.notes || '',
-    } : {
-      title: fileName ? fileName.replace(/\.[^/.]+$/, '') : '', // Remove file extension
-      beneficiary_type: preselectedEmployeeId ? 'employee' : preselectedCompanyId ? 'company' : 'employee',
-      company_id: preselectedCompanyId || '',
-      employee_id: preselectedEmployeeId || (employees.length > 0 ? employees[0].id : ''),
-      notes: '',
-    },
+    } : newDocumentDefaults(defaultContext, fileName),
   });
 
-  const { stageFile, clearUpload } = useStagedDocumentUpload();
+  const baseline = React.useRef<DefaultValues<DocumentFormData>>(form.getValues());
+  const generatedTitle = React.useRef<string | null>(!editingDocument && fileName ? baseline.current.title ?? null : null);
+  const draft = useDocumentDraft(scope, saved => {
+    if (saved !== null) { allowLastSubmission.current = false; generatedTitle.current = null; }
+    let empty = baseline.current;
+    if (saved === null && !editingDocument) {
+      const title = selectedFile?.name.replace(/\.[^/.]+$/, '').slice(0, 120) ?? '';
+      generatedTitle.current = selectedFile ? title : null;
+      empty = { ...baseline.current, title };
+    }
+    const values = saved ? { ...baseline.current, ...saved,
+      issue_date: restoreFormDate(saved.issue_date), expiry_date: restoreFormDate(saved.expiry_date),
+      ...(preselectedEmployeeId ? { beneficiary_type: 'employee' as const, employee_id: preselectedEmployeeId, company_id: '' } : {}),
+      ...(preselectedCompanyId && !preselectedEmployeeId ? { beneficiary_type: 'company' as const, company_id: preselectedCompanyId, employee_id: '' } : {}) } : empty;
+    form.reset(values as DocumentFormData);
+  });
+  React.useEffect(() => {
+    if (!selectedFile || editingDocument || draft.status !== 'saved') return;
+    const next = nextDocumentFileTitle(form.getValues('title'), generatedTitle.current, selectedFile.name, draft.hasDraft);
+    if (next === null) return;
+    generatedTitle.current = next;
+    form.setValue('title', next, { shouldDirty: true });
+  }, [selectedFile, editingDocument, draft.status, draft.hasDraft, form]);
+  React.useEffect(() => {
+    const subscription = form.watch((_values, info) => {
+      if (info.name === 'title' && form.getValues('title') !== generatedTitle.current) generatedTitle.current = null;
+      if (info.name) draft.session.current?.change(draftValues(form.getValues()));
+    });
+    return () => subscription.unsubscribe();
+  }, [form, draft.session]);
+  const closeForm = React.useCallback(async () => {
+    if (submitting.current) return;
+    try { if (!draft.session.current || await draft.session.current.close(() => window.confirm(t('documents.form.closeUnsavedConfirm')))) onClose(); }
+    catch { toast.error(t('documents.messages.saveError')); }
+  }, [draft.session, onClose, t]);
+  React.useEffect(() => {
+    registerDraftClose?.(closeForm);
+    return () => registerDraftClose?.(null);
+  }, [registerDraftClose, closeForm]);
+
+  const { stageFile, clearUpload, abandonUpload, hasPendingUpload } = useStagedDocumentUpload();
+  const changeFile = async () => {
+    if (submitting.current) return;
+    submitting.current = true; setIsSubmitting(true);
+    try {
+      const cleanupPending = await abandonUpload(draft.reference);
+      setSelectedFile(null);
+      if (cleanupPending) toast.warning(t('documents.form.fileCleanupPending'));
+    } catch (error) { toast.error(error instanceof Error ? error.message : t('documents.messages.saveError')); }
+    finally { submitting.current = false; setIsSubmitting(false); }
+  };
   const formIsDirty = form.formState.isDirty;
-  useLastSubmissionRestore('documents', !editingDocument, (saved) => {
+  useLastSubmissionRestore('documents', allowLastSubmission.current && !editingDocument && draft.status === 'saved' && !draft.hasDraft, (saved) => {
+    generatedTitle.current = selectedFile ? selectedFile.name.replace(/\.[^/.]+$/, '').slice(0, 120) : null;
     form.reset({ ...form.getValues(),
-      title: fileName ? fileName.replace(/\.[^/.]+$/, '') : String(saved.title ?? ''),
+      title: selectedFile ? selectedFile.name.replace(/\.[^/.]+$/, '').slice(0, 120) : String(saved.title ?? ''),
       beneficiary_type: preselectedEmployeeId ? 'employee' : preselectedCompanyId ? 'company' : saved.employee_id ? 'employee' : 'company',
       company_id: preselectedEmployeeId ? '' : preselectedCompanyId ?? String(saved.company_id ?? ''),
       employee_id: preselectedEmployeeId ?? String(saved.employee_id ?? ''),
       document_type_id: String(saved.document_type_id ?? ''), ministry_id: String(saved.ministry_id ?? ''),
       notes: String(saved.notes ?? ''),
     });
-  }, () => !formIsDirty);
+  }, () => allowLastSubmission.current && !formIsDirty);
 
-  const handleSubmit = async (data: DocumentFormData): Promise<boolean> => {
-    if (submitting.current) return false;
+  const handleSubmit = async (data: DocumentFormData, keepOpen = false): Promise<boolean> => {
+    if (submitting.current || ['loading', 'discarding', 'failed', 'conflict'].includes(draft.status)) return false;
     submitting.current = true;
     setIsSubmitting(true);
     try {
-      if (!uploadedFile && !editingDocument) {
+      if (!selectedFile && !editingDocument) {
         throw new Error(t('documents.messages.noFileError'));
       }
       // Handle file validation for new uploads
-      if (uploadedFile) {
+      if (selectedFile) {
         const maxSize = 20 * 1024 * 1024; // 20MB
         const allowedTypes = ['application/pdf', 'image/jpeg', 'image/png'];
-        if (uploadedFile.size > maxSize) throw new Error(t('documents.messages.fileSizeError'));
-        if (!allowedTypes.includes(uploadedFile.type)) throw new Error(t('documents.messages.fileTypeError'));
+        if (selectedFile.size > maxSize) throw new Error(t('documents.messages.fileSizeError'));
+        if (!allowedTypes.includes(selectedFile.type)) throw new Error(t('documents.messages.fileTypeError'));
       }
-      const uploadId = uploadedFile
-        ? await stageFile(uploadedFile, t('documents.messages.saveError'))
+      const draftRef = await draft.prepare(draftValues(data));
+      const uploadId = selectedFile
+        ? await stageFile(selectedFile, t('documents.messages.saveError'), draftRef)
         : undefined;
-      await saveDocument(preselectedEmployeeId ? { ...data, beneficiary_type: 'employee', employee_id: preselectedEmployeeId, company_id: '' } : data, editingDocument?.id, uploadId, t);
+      await saveDocument(preselectedEmployeeId ? { ...data, beneficiary_type: 'employee', employee_id: preselectedEmployeeId, company_id: '' } : data, editingDocument?.id, uploadId, t, draftRef);
+      draft.session.current?.committed();
       clearUpload();
       toast.success(editingDocument ? t('documents.messages.editSuccess') : t('documents.messages.addSuccess'));
       onSuccess();
-      onClose();
+      if (keepOpen) {
+        allowLastSubmission.current = false;
+        generatedTitle.current = null;
+        baseline.current = newDocumentDefaults(defaultContext);
+        setSelectedFile(null);
+        await draft.session.current?.restart();
+      }
+      else onClose();
       return true;
     } catch (error) {
+      draft.session.current?.resume(error);
       console.error(t('documents.messages.consoleError') + ':', error);
       toast.error(error instanceof Error ? error.message : t('documents.messages.error'));
       return false;
@@ -106,10 +176,19 @@ export function DocumentForm({
 
   return (
     <Card className="w-full" dir={isRTL ? 'rtl' : 'ltr'}>
-      <CardContent className="p-6">
+      <CardContent className="grid items-start gap-6 p-4 lg:grid-cols-2 lg:p-6">
+        <DocumentAttachmentPicker file={selectedFile} editingDocument={editingDocument}
+            disabled={isSubmitting || draft.status === 'discarding' || hasPendingUpload() && ['loading', 'failed', 'conflict'].includes(draft.status)}
+            onChange={() => void changeFile()} onSelect={setSelectedFile} />
         <Form {...form}>
-          <form onSubmit={form.handleSubmit(handleSubmit, () => toast.error(t('documents.form.validation.reviewFields')))} className="space-y-6">
-            <DocumentAttachment uploadedFile={uploadedFile} editingDocument={editingDocument} />
+          <form onSubmit={form.handleSubmit(data => handleSubmit(data), () => toast.error(t('documents.form.validation.reviewFields')))} className="space-y-6">
+            <fieldset disabled={isSubmitting || draft.status === 'discarding'} className="space-y-6">
+            <DocumentDraftStatus status={draft.status} restored={draft.hasDraft} needsFile={!selectedFile && !editingDocument} onDiscard={() => {
+              allowLastSubmission.current = false;
+              void draft.session.current?.discard().catch(() => toast.error(t('documents.messages.saveError')));
+            }} />
+            {(form.watch('title')?.length ?? 0) > 120 && <p role="alert" className="text-destructive">{t('documents.form.validation.titleMaxLength')}</p>}
+            {(form.watch('notes')?.length ?? 0) > 5000 && <p role="alert" className="text-destructive">{t('documents.form.validation.notesTooLong')}</p>}
             {documentTypes.length === 0 && <p role="alert" className="text-destructive">{t('documents.form.validation.noDocumentTypes')}</p>}
             {form.watch('beneficiary_type') === 'employee' && employees.length === 0 &&
               <p role="alert" className="text-destructive">{t('documents.form.validation.noEmployees')}</p>}
@@ -123,7 +202,7 @@ export function DocumentForm({
                   <FormItem>
                     <FormLabel>{t('documents.form.title')} *</FormLabel>
                     <FormControl>
-                      <Input placeholder={t('documents.form.titlePlaceholder')} {...field} />
+                      <Input maxLength={120} placeholder={t('documents.form.titlePlaceholder')} {...field} />
                     </FormControl>
                     <FormMessage />
                   </FormItem>
@@ -137,7 +216,7 @@ export function DocumentForm({
                   <FormItem>
                     <FormLabel>{t('documents.form.beneficiaryType')} *</FormLabel>
                     <Select 
-                      disabled={!!preselectedEmployeeId}
+                      disabled={!!preselectedEmployeeId || !!preselectedCompanyId}
                       onValueChange={(value: 'company' | 'employee') => {
                         field.onChange(value);
                         // Reset dependent fields
@@ -176,6 +255,7 @@ export function DocumentForm({
             </div>
 
             <DocumentBeneficiaryFields
+              preselectedCompanyId={preselectedCompanyId}
               preselectedEmployeeId={preselectedEmployeeId}
               key={form.watch('beneficiary_type')}
               companies={companies}
@@ -193,7 +273,7 @@ export function DocumentForm({
                 <FormItem>
                   <FormLabel>{t('documents.form.notes')}</FormLabel>
                   <FormControl>
-                    <Textarea 
+                    <Textarea maxLength={5000}
                       placeholder={t('documents.form.notesPlaceholder')}
                       className="min-h-[100px]"
                       {...field}
@@ -206,7 +286,7 @@ export function DocumentForm({
 
             {/* Actions */}
             <div className="flex justify-between pt-4 border-t">
-              <Button type="button" variant="outline" onClick={onClose} disabled={isSubmitting}>
+              <Button type="button" variant="outline" onClick={() => void closeForm()} disabled={isSubmitting}>
                 <X className="h-4 w-4 ml-2" />
                 {t('documents.form.buttons.cancel')}
               </Button>
@@ -214,7 +294,7 @@ export function DocumentForm({
               <div className="flex space-x-2">
                 <Button 
                   type="submit" 
-                  disabled={isSubmitting}
+                  disabled={isSubmitting || !selectedFile && !editingDocument || ['loading', 'discarding', 'failed', 'conflict'].includes(draft.status)}
                   className="shadow-elegant hover:shadow-glow transition-all"
                 >
                   <Save className="h-4 w-4 ml-2" />
@@ -228,21 +308,13 @@ export function DocumentForm({
                   <Button
                     type="button"
                     variant="secondary"
-                    disabled={isSubmitting}
+                    disabled={isSubmitting || !selectedFile || ['loading', 'discarding', 'failed', 'conflict'].includes(draft.status)}
                     onClick={async () => {
                       let saved = false;
-                      await form.handleSubmit(async (data) => { saved = await handleSubmit(data); },
+                      await form.handleSubmit(async (data) => { saved = await handleSubmit(data, true); },
                         () => toast.error(t('documents.form.validation.reviewFields')))();
                       if (!saved) return;
-                      // Reset form for new document
-                      form.reset({
-                        title: '',
-                        beneficiary_type: preselectedEmployeeId ? 'employee' : preselectedCompanyId ? 'company' : 'employee',
-                        employee_id: preselectedEmployeeId || '',
-                        company_id: preselectedCompanyId || '',
-                        issue_date: undefined, expiry_date: undefined,
-                        notes: '',
-                      });
+                      form.reset(baseline.current);
                     }}
                   >
                     <Plus className="h-4 w-4 ml-2" />
@@ -251,6 +323,7 @@ export function DocumentForm({
                 )}
               </div>
             </div>
+            </fieldset>
           </form>
         </Form>
       </CardContent>

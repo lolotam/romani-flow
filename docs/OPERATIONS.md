@@ -170,6 +170,17 @@ that the preserved old application image can still read the migrated database.
 An image-only rollback retains the additive schema and notification audit data;
 do not down-migrate, wipe or replace the production database to undo this feature.
 
+The separate document-drafts release adds migration `008_document_drafts.sql`.
+Rehearse its final SQL on an isolated copy before release. After this migration,
+the known pre-008 image can read the database but cannot commit business erase:
+the database rejects its seed-marker write with `erase_requires_draft_aware_runtime`.
+Use a draft-aware image for erase; never disable the guard to make an old image
+erase data. See [document drafts](DOCUMENT_DRAFTS.md#api-and-release) for the
+transaction guard and cleanup requirements. A successful health check on the
+old image does not establish complete feature compatibility. An old image also
+cannot initialize a missing seed marker after 008; use the current bootstrap
+path instead of disabling the guard.
+
 Capture sanitized status/error counts, exact head and merge SHA, image ID and
 timestamps. Keep customer names, file contents, account emails and secrets out of
 public receipts. Record concrete blockers/results and the exact-head release

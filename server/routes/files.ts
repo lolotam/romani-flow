@@ -5,6 +5,7 @@ import type { Db } from '../db/connection.js';
 import { requireAdmin } from '../middleware/auth.js';
 import { asyncHandler } from '../middleware/errorHandler.js';
 import { findRow } from '../repositories/base.js';
+import { assertCurrentDraft, draftReference } from '../repositories/documentDrafts.js';
 import type { DocumentService } from '../services/documentService.js';
 import { StorageError, type StorageService } from '../services/storageService.js';
 
@@ -38,6 +39,22 @@ export function createFilesRouter(
   documents: DocumentService,
 ): Router {
   const router = Router();
+
+  router.delete('/uploads/:uploadId', requireAdmin, asyncHandler(async (req, res) => {
+    res.setHeader('Cache-Control', 'no-store');
+    const ref = draftReference(req.body?.draft);
+    const result = await documents.abandonStagedUpload(String(req.params.uploadId), { userId: req.user!.id, scope: ref.scope },
+      () => assertCurrentDraft(db, req.user!.id, ref));
+    res.json({ data: result, error: null });
+  }));
+
+  router.post('/uploads/:uploadId/validate', requireAdmin, asyncHandler(async (req, res) => {
+    res.setHeader('Cache-Control', 'no-store');
+    const ref = draftReference(req.body?.draft);
+    const upload = await documents.validateStagedUpload(String(req.params.uploadId), () => assertCurrentDraft(db, req.user!.id, ref),
+      { userId: req.user!.id, scope: ref.scope });
+    res.json({ data: { upload_id: upload.uploadId }, error: null });
+  }));
 
   const upload = multer({
     storage: multer.memoryStorage(),
@@ -81,24 +98,20 @@ export function createFilesRouter(
         return;
       }
 
-      const staged = [];
-      for (const file of files) {
-        const stored = await storage.save(file.buffer, file.originalname, file.mimetype);
-        const registered = documents.registerUpload({
-          fileName: stored.fileName,
-          filePath: stored.relativePath,
-          fileSize: stored.size,
-          mimeType: stored.mimeType,
-        });
-
-        staged.push({
+      let ref;
+      if (req.body?.draft !== undefined) {
+        if (typeof req.body.draft !== 'string' || req.body.draft.length > 1024) throw new StorageError('Invalid draft reference.', 'invalid_draft', 400);
+        try { ref = draftReference(JSON.parse(req.body.draft)); }
+        catch { throw new StorageError('Invalid draft reference.', 'invalid_draft', 400); }
+      }
+      const staged = (await documents.stageUploads(files, ref ? () => assertCurrentDraft(db, req.user!.id, ref!) : undefined,
+        ref ? { userId: req.user!.id, scope: ref.scope } : undefined)).map((registered, index) => ({
           upload_id: registered.uploadId,
           file_name: registered.fileName,
           file_size: registered.fileSize,
           mime_type: registered.mimeType,
-          original_name: file.originalname,
-        });
-      }
+          original_name: files[index].originalname,
+        }));
 
       res.status(201).json({ data: staged, error: null });
     }),

@@ -23,6 +23,20 @@ const TABLES = ['companies', 'ministries', 'document_types', 'positions', 'emplo
 export const SEED_VERSION = '1';
 const SEED_MARKER_KEY = 'system.seed_version';
 
+/** Authorize only this bootstrap write, including when called inside the seed transaction. */
+export function writeSeedMarker(db: Db): void {
+  db.exec('SAVEPOINT bootstrap_seed_marker');
+  try {
+    setSetting(db, 'document_drafts.bootstrap_active', true);
+    setSetting(db, SEED_MARKER_KEY, SEED_VERSION);
+    db.prepare("DELETE FROM settings WHERE key='document_drafts.bootstrap_active'").run();
+    db.exec('RELEASE bootstrap_seed_marker');
+  } catch (error) {
+    db.exec('ROLLBACK TO bootstrap_seed_marker; RELEASE bootstrap_seed_marker');
+    throw error;
+  }
+}
+
 export interface SeedOptions {
   seedFile: string;
   adminEmails: string[];
@@ -129,7 +143,7 @@ export async function seedDatabase(db: Db, options: SeedOptions): Promise<SeedRe
     // The database already holds data that was never seeded. Record that
     // decision so the seed can never run against it later — not even after the
     // administrator erases the data.
-    setSetting(db, SEED_MARKER_KEY, SEED_VERSION);
+    writeSeedMarker(db);
     result.seedSkippedReason =
       'the database already contained data — the seed was disabled for this database';
     console.warn(`[seed] ${result.seedSkippedReason}.`);
@@ -160,7 +174,7 @@ export async function seedDatabase(db: Db, options: SeedOptions): Promise<SeedRe
 
       // The marker is written inside the same transaction as the data, so the
       // two can never disagree.
-      setSetting(db, SEED_MARKER_KEY, SEED_VERSION);
+      writeSeedMarker(db);
       db.exec('COMMIT');
       result.seedApplied = true;
     } catch (error) {
