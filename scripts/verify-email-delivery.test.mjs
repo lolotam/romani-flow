@@ -4,6 +4,7 @@ import { randomBytes } from 'node:crypto';
 import nodemailer from 'nodemailer';
 import { reminderApi } from './fixtures/whatsapp-api.mjs';
 import { setSetting, getString } from '../server/repositories/settings.ts';
+import { startEmailAttempt } from '../server/services/emailLog.ts';
 import { sendExpiryReport } from '../server/services/expiryService.ts';
 import { validEmailSettings, writeLoadedEmailSettings } from '../src/lib/emailSettingsWrite.ts';
 import { insertRow } from '../server/repositories/base.ts';
@@ -209,3 +210,24 @@ for (const code of ['EAUTH','EENVELOPE']) test('definitive SMTP rejection '+code
  const corrected=await sendExpiryReport(f.db,f.mailer,'cron');assert.equal(corrected.sent,true);assert.equal(calls.length,2);
  assert.equal((await sendExpiryReport(f.db,f.mailer,'cron')).skipped,'nothing_due');assert.equal(calls.length,2);
 },(addresses,attempt)=>{if(attempt===1)throw Object.assign(new Error('Synthetic pre-content rejection'),{code});return {accepted:addresses,rejected:[]};}));
+
+test('legacy interrupted reports block recorded recipients until operator resolution',t=>withMail(t,async(f,calls)=>{
+ f.db.prepare('UPDATE documents SET expiry_date=?').run(new Date().toISOString().slice(0,10));f.db.prepare('UPDATE employees SET residency_expiry_date=NULL').run();
+ setSetting(f.db,'email.recipients',[TO[0]]);setSetting(f.db,'email.cc',[CC]);
+ const id=startEmailAttempt(f.db,{kind:'expiry_report',recipients:[TO[0]],subject:'Legacy',triggerSource:'cron',details:{documents:1}});
+ await sendExpiryReport(f.db,f.mailer,'cron');assert.equal(calls.length,1);assert.deepEqual(calls[0].to,[]);assert.deepEqual(calls[0].cc,[CC]);
+ assert.equal(f.db.prepare('SELECT status FROM email_log WHERE id=?').get(id).status,'unknown');
+ await sendExpiryReport(f.db,f.mailer,'cron');assert.equal(calls.length,1);
+ f.db.prepare("UPDATE email_log SET status='failed' WHERE id=?").run(id);
+ await sendExpiryReport(f.db,f.mailer,'cron');assert.equal(calls.length,2);assert.deepEqual(calls[1].to,[TO[0]]);
+}));
+test('canonical Unicode equivalents share history without folding distinct local spellings',t=>withMail(t,async(f,calls)=>{
+ f.db.prepare('UPDATE documents SET expiry_date=?').run(new Date().toISOString().slice(0,10));f.db.prepare('UPDATE employees SET residency_expiry_date=NULL').run();
+ const decomposed='E\u0301xample@example.invalid';setSetting(f.db,'email.recipients',[decomposed]);
+ await sendExpiryReport(f.db,f.mailer,'cron');assert.deepEqual(calls[0].to,[decomposed]);
+ f.db.prepare('UPDATE expiry_notifications SET recipient=?').run(decomposed);
+ setSetting(f.db,'email.recipients',['\u00c9xample@example.invalid']);
+ assert.equal((await sendExpiryReport(f.db,f.mailer,'cron')).skipped,'nothing_due');assert.equal(calls.length,1);
+ setSetting(f.db,'email.recipients',['stra\u00dfe@example.invalid','strasse@example.invalid']);
+ await sendExpiryReport(f.db,f.mailer,'cron');assert.equal(calls[1].to.length,2);
+}));

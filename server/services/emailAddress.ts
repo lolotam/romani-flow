@@ -1,5 +1,5 @@
-/** Application mailbox identity is case-insensitive, including retained history. */
-export const emailIdentity = (address: string): string => address.trim().toLowerCase();
+/** NFC and simple lowercase are comparison-only; SMTP preserves configured spelling. */
+export const emailIdentity = (address: string): string => address.trim().normalize('NFC').toLowerCase().normalize('NFC');
 
 export function emailIdentities(addresses: string[]): string[] {
   const first = new Map<string, string>();

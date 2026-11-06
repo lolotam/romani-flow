@@ -19,6 +19,7 @@ import { EXPIRED_BUCKET, parseIntervals, resolveBucket, type NotificationInterva
 import { MailError, type Mailer } from './mailer.js';
 import { EmailDeadlineError, withinEmailDeadline } from './emailDeadline.js';
 import { emailIdentity, emailIdentities } from './emailAddress.js';
+import { uncertainEmailIdentities } from './emailUncertainty.js';
 import {
   expiryReportHtml,
   expiryReportSubject,
@@ -201,6 +202,7 @@ function alreadyNotified(
   recipient: string,
   uncertainIdentities: Set<string>,
 ): boolean {
+  if (uncertainIdentities.has(JSON.stringify(['*', '*'])) || uncertainIdentities.has(JSON.stringify([emailIdentity(recipient), '*']))) return true;
   if (uncertainIdentities.has(JSON.stringify([emailIdentity(recipient), JSON.stringify([itemType, itemId, expiryDate, intervalDays])]))) return true;
   const rows = db
     .prepare(
@@ -210,22 +212,6 @@ function alreadyNotified(
     )
     .all(itemType, itemId, expiryDate, intervalDays) as { recipient: string }[];
   return rows.some(row => emailIdentity(row.recipient) === emailIdentity(recipient));
-}
-
-/** Interrupted SMTP waits suppress only their exact item/destination identities. */
-function uncertainEmailIdentities(db: Db): Set<string> {
-  const identities = new Set<string>();
-  const rows = db.prepare("SELECT details FROM email_log WHERE kind='expiry_report' AND status IN ('sending','unknown') AND trigger_source='cron'").all() as { details: string | null }[];
-  for (const row of rows) {
-    try {
-      const details = JSON.parse(row.details ?? '{}');
-      if (!Array.isArray(details.recipients) || !Array.isArray(details.identities)) continue;
-      for (const recipient of details.recipients) for (const identity of details.identities) {
-        if (typeof recipient === 'string' && typeof identity === 'string') identities.add(JSON.stringify([emailIdentity(recipient), identity]));
-      }
-    } catch { /* Older or malformed audit details contain no usable identities. */ }
-  }
-  return identities;
 }
 
 function recordNotification(

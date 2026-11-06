@@ -242,6 +242,17 @@ are recorded as unknown rather than automatically retried.
 Nodemailer's `EAUTH` and `EENVELOPE` failures also prove rejection before message
 content is accepted. They remain failed/retryable after the operator corrects the
 credentials or recipient issue; they do not create an unknown suppression entry.
+Legacy interrupted reports without item identities become `unknown`; automatic
+delivery is blocked for their recorded recipients until an operator reconciles
+the old handoff. If no recipient can be recovered, automatic recipients remain
+blocked globally. Do not mark that audit failed merely to force a resend: first
+verify that the old message was not delivered. No audit row is deleted.
+
+Mailbox comparison uses NFC and simple lowercase; SMTP retains the first trimmed
+configured spelling. This is an application comparison policy, not full Unicode
+case folding: distinct local spellings such as `strasse` and `straße` remain
+distinct. [RFC 6530 section 10.1](https://www.rfc-editor.org/rfc/rfc6530#section-10.1)
+discusses normalization and permits unusual case-sensitive local parts.
 If the budget expires during SMTP, that attempt is recorded as `unknown`; the
 underlying transport may still complete, but its late result cannot update the
 ledger. Its exact item/recipient identities remain suppressed on automatic runs,
