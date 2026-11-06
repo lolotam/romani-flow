@@ -5,6 +5,7 @@ import { Button } from './button';
 import { Progress } from './progress';
 import { cn } from '@/lib/utils';
 import { useLanguage } from '@/contexts/LanguageContext';
+import { fileAccept } from '@/lib/fileAccept';
 
 interface UploadedFile {
   file: File;
@@ -95,13 +96,7 @@ export function UploadDropzone({
     onDrop,
     maxFiles,
     maxSize: maxFileSize,
-    accept: {
-      'image/jpeg': [],
-      'image/png': [],
-      'application/pdf': [],
-      'application/msword': [],
-      'application/vnd.openxmlformats-officedocument.wordprocessingml.document': []
-    },
+    accept: fileAccept(acceptedFileTypes),
     disabled
   });
 

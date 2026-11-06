@@ -4,6 +4,9 @@ import fs from 'node:fs';
 import { reminderApi } from './fixtures/whatsapp-api.mjs';
 import { DocumentDraftSession } from '../src/lib/documentDraftSession.ts';
 import { setSetting } from '../server/repositories/settings.ts';
+import { seedDatabase, writeSeedMarker } from '../server/db/seed.ts';
+import { newDocumentDefaults } from '../src/lib/documentFormDrafts.ts';
+import { fileAccept } from '../src/lib/fileAccept.ts';
 
 const file = { buffer: Buffer.from('synthetic document'), originalname: 'fixture.pdf', mimetype: 'application/pdf' };
 const deferred = () => { let resolve; const promise = new Promise(r => { resolve = r; }); return { promise, resolve }; };
@@ -13,8 +16,63 @@ const draftTransport = (f, pause) => async (url, options = {}) => {
   return response.json;
 };
 
+test('empty private state still blocks legacy erase while current bootstrap is explicitly authorized', () => reminderApi(async f => {
+  assert.equal(f.db.prepare("SELECT count(*) n FROM settings WHERE key='system.seed_version'").get().n, 0);
+  assert.equal(f.db.prepare('SELECT count(*) n FROM document_drafts').get().n, 0);
+  assert.equal(f.db.prepare('SELECT count(*) n FROM upload_cleanup_queue').get().n, 0);
+  const none = (await f.request('/api/document-drafts/new', { headers: { 'x-draft-account': 'admin' } })).json.data.revision;
+  f.db.exec('BEGIN');
+  try {
+    f.db.prepare('DELETE FROM documents').run();
+    assert.throws(() => setSetting(f.db, 'system.seed_version', '1'), /erase_requires_draft_aware_runtime/);
+  } finally { f.db.exec('ROLLBACK'); }
+  assert.equal(f.db.prepare('SELECT count(*) n FROM documents').get().n, 1);
+  await seedDatabase(f.db, { seedFile: 'nonexistent-synthetic-seed.json', adminEmails: [], adminPassword: null });
+  assert.equal(f.db.prepare("SELECT value FROM settings WHERE key='system.seed_version'").get().value, '"1"');
+  assert.equal(f.db.prepare("SELECT count(*) n FROM settings WHERE key='document_drafts.bootstrap_active'").get().n, 0);
+  assert.equal((await f.request('/api/backup/erase', { method: 'POST', body: {} })).status, 200);
+  const fresh = (await f.request('/api/document-drafts/new', { headers: { 'x-draft-account': 'admin' } })).json.data.revision;
+  assert.notEqual(fresh, none);
+}));
+
+test('a next-document baseline and its new file title contain no previous document metadata', () => {
+  const context = { employeeId: 'employee-fixture' };
+  const previous = { ...newDocumentDefaults(context, 'first.pdf'), notes: 'old notes', document_type_id: 'old-type', expiry_date: new Date(2030, 1, 1) };
+  const next = newDocumentDefaults(context);
+  const selected = { ...next, title: newDocumentDefaults(context, 'second.pdf').title };
+  assert.equal(previous.title, 'first');
+  assert.equal(next.title, ''); assert.equal(selected.title, 'second');
+  assert.equal(selected.employee_id, 'employee-fixture');
+  assert.equal(selected.notes, ''); assert.equal(selected.document_type_id, ''); assert.equal(selected.expiry_date, undefined);
+});
+
+test('document picker MIME filters match its advertised PDF and image extensions', () => {
+  assert.deepEqual(fileAccept(['.pdf', '.jpg', '.jpeg', '.png']), {
+    'application/pdf': ['.pdf'], 'image/jpeg': ['.jpg', '.jpeg'], 'image/png': ['.png'],
+  });
+  assert.deepEqual(fileAccept(['.doc', '.docx']), {
+    'application/msword': ['.doc'], 'application/vnd.openxmlformats-officedocument.wordprocessingml.document': ['.docx'],
+  });
+});
+
+test('a second edit during the post-discard PUT is flushed before discard and close finish', () => reminderApi(async f => {
+  const deleteEntered = deferred(), deleteRelease = deferred(), putEntered = deferred(), putRelease = deferred();
+  let afterDelete = false, pausePut = true;
+  const session = new DocumentDraftSession('new', () => {}, () => {}, draftTransport(f, async method => {
+    if (method === 'DELETE') { afterDelete = true; deleteEntered.resolve(); await deleteRelease.promise; }
+    else if (method === 'PUT' && afterDelete && pausePut) { pausePut = false; putEntered.resolve(); await putRelease.promise; }
+  }));
+  await session.flush(); session.change({ notes: 'old' }); await session.flush();
+  const discard = session.discard(); await deleteEntered.promise;
+  session.change({ notes: 'first new edit' }); deleteRelease.resolve(); await putEntered.promise;
+  session.change({ notes: 'second new edit' }); putRelease.resolve(); await discard;
+  assert.equal(await session.close(() => false), true);
+  assert.equal((await f.request('/api/document-drafts/new', { headers: { 'x-draft-account': 'admin' } })).json.data.values.notes, 'second new edit');
+  session.dispose();
+}));
+
 test('legacy erase cannot commit over private drafts or queued bytes after migration 008', () => reminderApi(async f => {
-  setSetting(f.db, 'system.seed_version', '1');
+  writeSeedMarker(f.db);
   const draft = await f.request('/api/document-drafts/new', { method: 'PUT', headers: { 'x-draft-account': 'admin' }, body: { revision: 'none', values: { notes: 'private synthetic note' } } });
   assert.equal(draft.status, 200);
   const stored = await f.storage.save(file.buffer, file.originalname, file.mimetype);

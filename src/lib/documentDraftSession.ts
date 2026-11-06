@@ -27,6 +27,7 @@ export class DocumentDraftSession {
   private prepared: DraftValues | null = null;
   private discarding: Promise<void> | null = null;
   private discardEdits: DraftValues | null = null;
+  private deletingDraft = false;
   private ready = false;
   hasDraft = false;
 
@@ -58,7 +59,7 @@ export class DocumentDraftSession {
 
   change(values: DraftValues): void {
     if (this.disposed || this.restoring) return;
-    if (this.discarding) { this.edited = true; this.discardEdits = values; return; }
+    if (this.deletingDraft) { this.edited = true; this.discardEdits = values; return; }
     if (this.paused) return;
     this.edited = true; this.pending = values;
     // A rejected field value is a proven non-write; corrected input may be saved again.
@@ -138,6 +139,7 @@ export class DocumentDraftSession {
   }
 
   private async discardOnce(): Promise<void> {
+    this.deletingDraft = true;
     this.paused = true; clearTimeout(this.timer); this.pending = null;
     this.status('discarding');
     try {
@@ -154,6 +156,7 @@ export class DocumentDraftSession {
       }
     } catch (error) { this.fail(error as Error); throw error; }
     finally {
+      this.deletingDraft = false;
       this.paused = false;
       if (this.discardEdits) { this.pending = this.discardEdits; this.discardEdits = null; }
     }

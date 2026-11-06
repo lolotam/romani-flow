@@ -1,5 +1,5 @@
 import React from 'react';
-import { useForm } from 'react-hook-form';
+import { useForm, type DefaultValues } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -23,6 +23,7 @@ import { useAuth } from '@/hooks/useAuth';
 import { DocumentDraftStatus } from './documents/DocumentDraftStatus';
 import { UploadDropzone } from './ui/UploadDropzone';
 import { useLastSubmissionRestore } from '@/hooks/useLastSubmission';
+import { newDocumentDefaults } from '@/lib/documentFormDrafts';
 
 export function DocumentForm(props: DocumentFormProps) {
   const { user } = useAuth();
@@ -49,6 +50,8 @@ function DocumentFormContent({
   const submitting = React.useRef(false);
   const [isSubmitting, setIsSubmitting] = React.useState(false);
   const [selectedFile, setSelectedFile] = React.useState(uploadedFile);
+  const defaultContext = { employeeId: preselectedEmployeeId, companyId: preselectedCompanyId, fallbackEmployeeId: employees[0]?.id };
+  const allowLastSubmission = React.useRef(true);
   const form = useForm<DocumentFormData>({
     resolver: zodResolver(documentSchema),
     defaultValues: editingDocument ? {
@@ -61,16 +64,10 @@ function DocumentFormContent({
       issue_date: editingDocument.issue_date ? new Date(editingDocument.issue_date + 'T00:00:00') : undefined,
       expiry_date: new Date(editingDocument.expiry_date + 'T00:00:00'),
       notes: editingDocument.notes || '',
-    } : {
-      title: fileName ? fileName.replace(/\.[^/.]+$/, '').slice(0, 120) : '', // Remove file extension
-      beneficiary_type: preselectedEmployeeId ? 'employee' : preselectedCompanyId ? 'company' : 'employee',
-      company_id: preselectedCompanyId || '',
-      employee_id: preselectedEmployeeId || (employees.length > 0 ? employees[0].id : ''),
-      notes: '',
-    },
+    } : newDocumentDefaults(defaultContext, fileName),
   });
 
-  const baseline = React.useRef(form.getValues());
+  const baseline = React.useRef<DefaultValues<DocumentFormData>>(form.getValues());
   const draft = useDocumentDraft(scope, saved => {
     const values = saved ? { ...baseline.current, ...saved,
       issue_date: restoreFormDate(saved.issue_date), expiry_date: restoreFormDate(saved.expiry_date),
@@ -96,7 +93,7 @@ function DocumentFormContent({
 
   const { stageFile, clearUpload } = useStagedDocumentUpload();
   const formIsDirty = form.formState.isDirty;
-  useLastSubmissionRestore('documents', !editingDocument && draft.status === 'saved' && !draft.hasDraft, (saved) => {
+  useLastSubmissionRestore('documents', allowLastSubmission.current && !editingDocument && draft.status === 'saved' && !draft.hasDraft, (saved) => {
     form.reset({ ...form.getValues(),
       title: selectedFile ? selectedFile.name.replace(/\.[^/.]+$/, '').slice(0, 120) : String(saved.title ?? ''),
       beneficiary_type: preselectedEmployeeId ? 'employee' : preselectedCompanyId ? 'company' : saved.employee_id ? 'employee' : 'company',
@@ -131,7 +128,12 @@ function DocumentFormContent({
       clearUpload();
       toast.success(editingDocument ? t('documents.messages.editSuccess') : t('documents.messages.addSuccess'));
       onSuccess();
-      if (keepOpen) { setSelectedFile(null); await draft.session.current?.restart(); }
+      if (keepOpen) {
+        allowLastSubmission.current = false;
+        baseline.current = newDocumentDefaults(defaultContext);
+        setSelectedFile(null);
+        await draft.session.current?.restart();
+      }
       else onClose();
       return true;
     } catch (error) {
@@ -150,14 +152,23 @@ function DocumentFormContent({
       <CardContent className="grid items-start gap-6 p-4 lg:grid-cols-2 lg:p-6">
         <div className="space-y-3">
           <DocumentAttachment uploadedFile={selectedFile} editingDocument={editingDocument} />
+          {selectedFile && !editingDocument && <Button type="button" variant="outline" disabled={isSubmitting || draft.status === 'discarding'}
+            onClick={() => { setSelectedFile(null); clearUpload(); }}>{t('documents.chooseFiles')}</Button>}
           {!selectedFile && !editingDocument && <UploadDropzone maxFiles={1} maxFileSize={20 * 1024 * 1024}
             acceptedFileTypes={['.pdf', '.jpg', '.jpeg', '.png']} disabled={isSubmitting || draft.status === 'discarding'}
-            onFilesAccepted={files => { if (files[0]) { setSelectedFile(files[0]); form.setValue('title', files[0].name.replace(/\.[^/.]+$/, '').slice(0, 120), { shouldDirty: true }); } }} />}
+            onFilesAccepted={files => { if (files[0]) {
+              const title = newDocumentDefaults(defaultContext, files[0].name).title;
+              baseline.current = { ...baseline.current, title };
+              setSelectedFile(files[0]); form.setValue('title', title, { shouldDirty: true });
+            } }} />}
         </div>
         <Form {...form}>
           <form onSubmit={form.handleSubmit(data => handleSubmit(data), () => toast.error(t('documents.form.validation.reviewFields')))} className="space-y-6">
             <fieldset disabled={isSubmitting || draft.status === 'discarding'} className="space-y-6">
-            <DocumentDraftStatus status={draft.status} restored={draft.hasDraft} needsFile={!selectedFile && !editingDocument} onDiscard={() => void draft.session.current?.discard().catch(() => toast.error(t('documents.messages.saveError')))} />
+            <DocumentDraftStatus status={draft.status} restored={draft.hasDraft} needsFile={!selectedFile && !editingDocument} onDiscard={() => {
+              allowLastSubmission.current = false;
+              void draft.session.current?.discard().catch(() => toast.error(t('documents.messages.saveError')));
+            }} />
             {(form.watch('title')?.length ?? 0) > 120 && <p role="alert" className="text-destructive">{t('documents.form.validation.titleMaxLength')}</p>}
             {(form.watch('notes')?.length ?? 0) > 5000 && <p role="alert" className="text-destructive">{t('documents.form.validation.notesTooLong')}</p>}
             {documentTypes.length === 0 && <p role="alert" className="text-destructive">{t('documents.form.validation.noDocumentTypes')}</p>}
@@ -285,15 +296,7 @@ function DocumentFormContent({
                       await form.handleSubmit(async (data) => { saved = await handleSubmit(data, true); },
                         () => toast.error(t('documents.form.validation.reviewFields')))();
                       if (!saved) return;
-                      // Reset form for new document
-                      form.reset({
-                        title: '',
-                        beneficiary_type: preselectedEmployeeId ? 'employee' : preselectedCompanyId ? 'company' : 'employee',
-                        employee_id: preselectedEmployeeId || '',
-                        company_id: preselectedCompanyId || '',
-                        issue_date: undefined, expiry_date: undefined,
-                        notes: '',
-                      });
+                      form.reset(baseline.current);
                     }}
                   >
                     <Plus className="h-4 w-4 ml-2" />

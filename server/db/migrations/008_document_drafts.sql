@@ -24,15 +24,13 @@ CREATE TABLE upload_cleanup_queue (
 -- The current handler's authorization exists only inside its erase transaction.
 CREATE TRIGGER require_draft_aware_erase_update BEFORE UPDATE OF value ON settings
 WHEN NEW.key='system.seed_version'
-  AND NOT EXISTS (SELECT 1 FROM settings WHERE key='document_drafts.erase_active' AND value='true')
+  AND NOT EXISTS (SELECT 1 FROM settings WHERE key IN ('document_drafts.erase_active','document_drafts.bootstrap_active') AND value='true')
 BEGIN
   SELECT RAISE(ABORT, 'erase_requires_draft_aware_runtime');
 END;
 CREATE TRIGGER require_draft_aware_erase_insert BEFORE INSERT ON settings
 WHEN NEW.key='system.seed_version'
-  AND (EXISTS (SELECT 1 FROM settings WHERE key='system.seed_version')
-       OR EXISTS (SELECT 1 FROM document_drafts) OR EXISTS (SELECT 1 FROM upload_cleanup_queue))
-  AND NOT EXISTS (SELECT 1 FROM settings WHERE key='document_drafts.erase_active' AND value='true')
+  AND NOT EXISTS (SELECT 1 FROM settings WHERE key IN ('document_drafts.erase_active','document_drafts.bootstrap_active') AND value='true')
 BEGIN
   SELECT RAISE(ABORT, 'erase_requires_draft_aware_runtime');
 END;

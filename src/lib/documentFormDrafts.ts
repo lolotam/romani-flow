@@ -1,6 +1,17 @@
 import { restoreFormDate } from './formDefaults';
 import type { DraftValues } from './documentDraftSession';
 
+/** A new document never inherits metadata or dates from the previous record. */
+export function newDocumentDefaults(context: { employeeId?: string; companyId?: string; fallbackEmployeeId?: string }, fileName = '') {
+  return {
+    title: fileName.replace(/\.[^/.]+$/, '').slice(0, 120),
+    beneficiary_type: (context.employeeId ? 'employee' : context.companyId ? 'company' : 'employee') as 'employee' | 'company',
+    employee_id: context.employeeId || (context.companyId ? '' : context.fallbackEmployeeId || ''),
+    company_id: context.companyId || '', document_type_id: '', ministry_id: '', entity_name: '',
+    issue_date: undefined, expiry_date: undefined, notes: '',
+  };
+}
+
 /** An empty draft restores the selected filename rather than erasing its title. */
 export function employeeDocumentDraft(saved: DraftValues | null, fileName?: string) {
   return {
