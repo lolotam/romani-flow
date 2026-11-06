@@ -189,6 +189,15 @@ export default function Settings() {
     }
     if (data && data.filesPendingCleanup > 0) {
       toast({ title: t('settings.settingsToasts.error'), description: t('settings.backup.cleanupPending'), variant: 'destructive' });
+      setNewCompany({ name: '', name_ar: '', description: '' });
+      setNewDocType({ name: '', name_ar: '' });
+      setNewMinistry({ name: '', name_ar: '' });
+      setNewPosition({ name: '', name_ar: '', value: '' });
+      setEditingCompany(null);
+      setEditingDocType(null);
+      setEditingMinistry(null);
+      setEditingPosition(null);
+      refreshWhatsAppSettings();
       void fetchData();
       return;
     }
