@@ -101,6 +101,7 @@ export const documents = {
     closeUnsavedConfirm: 'The latest changes were not saved. Close without them? The last saved draft will be kept.',
     previewHint: 'Select a PDF or image to preview while filling the fields.',
     previewOpen: 'Open file in a new tab if preview is unavailable',
+    fileCleanupPending: 'The previous attachment was abandoned, but file cleanup is pending retry.',
     title: 'Document Title',
     beneficiaryType: 'Beneficiary Type',
     company: 'Company',

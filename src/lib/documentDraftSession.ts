@@ -101,6 +101,14 @@ export class DocumentDraftSession {
     return { scope: this.scope, revision: this.revision };
   }
 
+  /** Flush metadata before a draft-owned file operation without pausing future edits. */
+  async reference(): Promise<DraftReference> {
+    if (this.discarding) await this.discarding;
+    if (!this.ready) throw new Error('Wait for the draft to load before continuing.');
+    await this.flush();
+    return { scope: this.scope, revision: this.revision };
+  }
+
   resume(error?: unknown): void {
     this.paused = false;
     if (this.prepared) {

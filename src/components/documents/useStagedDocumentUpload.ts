@@ -24,5 +24,16 @@ export function useStagedDocumentUpload() {
   };
 
   const clearUpload = () => { pending.current = null; };
-  return { stageFile, clearUpload };
+  const abandonUpload = async (reference: () => Promise<DraftReference>): Promise<boolean> => {
+    const upload = pending.current;
+    if (!upload) return false;
+    const draft = await reference();
+    const result = await request<{ cleanupPending: boolean }>(`/api/files/uploads/${encodeURIComponent(upload.uploadId)}`, {
+      method: 'DELETE', body: { draft }, draftAccount: draft.account,
+    });
+    if (result.error || !result.data) throw result.error ?? new Error('Upload could not be abandoned.');
+    if (pending.current === upload) pending.current = null;
+    return result.data.cleanupPending;
+  };
+  return { stageFile, clearUpload, abandonUpload };
 }

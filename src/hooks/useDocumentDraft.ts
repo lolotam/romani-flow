@@ -33,7 +33,10 @@ export function useDocumentDraft(scope: string, restore: (values: DraftValues | 
       current.dispose(identity.current === userId);
     };
   }, [scope, userId, enabled]);
-  return { session, status, hasDraft, prepare: async (values: DraftValues) => {
+  return { session, status, hasDraft, reference: async () => {
+    if (!session.current || identity.current !== userId) throw new Error('Draft unavailable');
+    return { ...await session.current.reference(), account: userId! };
+  }, prepare: async (values: DraftValues) => {
     if (!session.current || identity.current !== userId) throw new Error('Draft unavailable');
     return { ...await session.current.prepare(values), account: userId! };
   } };

@@ -91,7 +91,17 @@ function DocumentFormContent({
     return () => registerDraftClose?.(null);
   }, [registerDraftClose, closeForm]);
 
-  const { stageFile, clearUpload } = useStagedDocumentUpload();
+  const { stageFile, clearUpload, abandonUpload } = useStagedDocumentUpload();
+  const changeFile = async () => {
+    if (submitting.current) return;
+    submitting.current = true; setIsSubmitting(true);
+    try {
+      const cleanupPending = await abandonUpload(draft.reference);
+      setSelectedFile(null);
+      if (cleanupPending) toast.warning(t('documents.form.fileCleanupPending'));
+    } catch (error) { toast.error(error instanceof Error ? error.message : t('documents.messages.saveError')); }
+    finally { submitting.current = false; setIsSubmitting(false); }
+  };
   const formIsDirty = form.formState.isDirty;
   useLastSubmissionRestore('documents', allowLastSubmission.current && !editingDocument && draft.status === 'saved' && !draft.hasDraft, (saved) => {
     form.reset({ ...form.getValues(),
@@ -152,8 +162,8 @@ function DocumentFormContent({
       <CardContent className="grid items-start gap-6 p-4 lg:grid-cols-2 lg:p-6">
         <div className="space-y-3">
           <DocumentAttachment uploadedFile={selectedFile} editingDocument={editingDocument} />
-          {selectedFile && !editingDocument && <Button type="button" variant="outline" disabled={isSubmitting || draft.status === 'discarding'}
-            onClick={() => { setSelectedFile(null); clearUpload(); }}>{t('documents.chooseFiles')}</Button>}
+          {selectedFile && !editingDocument && <Button type="button" variant="outline" disabled={isSubmitting || ['loading', 'discarding', 'failed', 'conflict'].includes(draft.status)}
+            onClick={() => void changeFile()}>{t('documents.chooseFiles')}</Button>}
           {!selectedFile && !editingDocument && <UploadDropzone maxFiles={1} maxFileSize={20 * 1024 * 1024}
             acceptedFileTypes={['.pdf', '.jpg', '.jpeg', '.png']} disabled={isSubmitting || draft.status === 'discarding'}
             onFilesAccepted={files => { if (files[0]) {

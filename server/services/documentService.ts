@@ -52,7 +52,7 @@ export class DocumentService {
   }
 
   /** Stage files under erase's coordinator and check the draft before writing any bytes. */
-  stageUploads(files: Array<{ buffer: Buffer; originalname: string; mimetype: string }>, guard?: () => void): Promise<StoredUpload[]> {
+  stageUploads(files: Array<{ buffer: Buffer; originalname: string; mimetype: string }>, guard?: () => void, owner?: { userId: string; scope: string }): Promise<StoredUpload[]> {
     return this.serialize(async () => {
       guard?.();
       const uploads: StoredUpload[] = [];
@@ -63,7 +63,9 @@ export class DocumentService {
           this.db.prepare('INSERT INTO upload_cleanup_queue(file_path,created_at) VALUES(?,?)').run(path, new Date().toISOString());
           paths.push(path);
         });
-        uploads.push(this.registerUpload({ fileName: stored.fileName, filePath: stored.relativePath, fileSize: stored.size, mimeType: stored.mimeType }));
+        const upload = this.registerUpload({ fileName: stored.fileName, filePath: stored.relativePath, fileSize: stored.size, mimeType: stored.mimeType });
+        if (owner) this.db.prepare('UPDATE pending_uploads SET draft_user_id=?,draft_scope=? WHERE id=?').run(owner.userId, owner.scope, upload.uploadId);
+        uploads.push(upload);
         this.db.prepare('DELETE FROM upload_cleanup_queue WHERE file_path=?').run(stored.relativePath);
       }
       return uploads;
@@ -85,6 +87,28 @@ export class DocumentService {
       const upload = this.resolveUpload(uploadId);
       if (!upload || !this.storage.exists(upload.filePath)) throw new RepositoryError('Upload is no longer pending.', 'invalid_upload', 404);
       return upload;
+    });
+  }
+
+  /** Revoke claimability before unlink; failed cleanup remains durable and retryable. */
+  abandonStagedUpload(uploadId: string, owner: { userId: string; scope: string }, guard: () => void): Promise<{ cleanupPending: boolean }> {
+    return this.serialize(async () => {
+      guard();
+      const row = this.db.prepare('SELECT file_path,draft_user_id,draft_scope FROM pending_uploads WHERE id=?').get(uploadId)
+        ?? this.db.prepare('SELECT file_path,draft_user_id,draft_scope FROM upload_cleanup_queue WHERE upload_id=?').get(uploadId);
+      if (!row) return { cleanupPending: false };
+      if (row.draft_user_id !== owner.userId || row.draft_scope !== owner.scope) {
+        throw new RepositoryError('Upload does not belong to this draft.', 'invalid_upload', 403);
+      }
+      const path = String(row.file_path);
+      atomic(this.db, () => {
+        this.db.prepare(`INSERT INTO upload_cleanup_queue(file_path,created_at,upload_id,draft_user_id,draft_scope) VALUES(?,?,?,?,?)
+          ON CONFLICT(file_path) DO UPDATE SET upload_id=excluded.upload_id,draft_user_id=excluded.draft_user_id,draft_scope=excluded.draft_scope`)
+          .run(path, new Date().toISOString(), uploadId, owner.userId, owner.scope);
+        this.db.prepare('DELETE FROM pending_uploads WHERE id=?').run(uploadId);
+      });
+      await this.cleanupTrackedFiles([path]);
+      return { cleanupPending: Boolean(this.db.prepare('SELECT 1 FROM upload_cleanup_queue WHERE file_path=?').get(path)) };
     });
   }
 

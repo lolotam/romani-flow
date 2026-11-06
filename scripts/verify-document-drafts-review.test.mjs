@@ -7,6 +7,7 @@ import { setSetting } from '../server/repositories/settings.ts';
 import { seedDatabase, writeSeedMarker } from '../server/db/seed.ts';
 import { newDocumentDefaults } from '../src/lib/documentFormDrafts.ts';
 import { fileAccept } from '../src/lib/fileAccept.ts';
+import { signSession } from '../server/middleware/auth.ts';
 
 const file = { buffer: Buffer.from('synthetic document'), originalname: 'fixture.pdf', mimetype: 'application/pdf' };
 const deferred = () => { let resolve; const promise = new Promise(r => { resolve = r; }); return { promise, resolve }; };
@@ -15,6 +16,58 @@ const draftTransport = (f, pause) => async (url, options = {}) => {
   await pause?.(options.method ?? 'GET');
   return response.json;
 };
+
+async function stageDraftFile(f, draft) {
+  const body = new FormData();
+  body.append('files', new Blob([file.buffer], { type: file.mimetype }), file.originalname);
+  body.append('draft', JSON.stringify(draft));
+  const cookie = f.config.cookieName + '=' + signSession(f.config, { id: 'admin', role: 'admin', name: 'Synthetic', email: 'admin@example.invalid' });
+  const response = await fetch(f.base + '/api/files/upload', { method: 'POST', headers: { cookie }, body });
+  assert.equal(response.status, 201);
+  return (await response.json()).data[0].upload_id;
+}
+
+test('abandon validates draft owner/revision and removes only the selected unfinished attachment', () => reminderApi(async f => {
+  const headers = { 'x-draft-account': 'admin' };
+  const saved = await f.request('/api/document-drafts/new', { method: 'PUT', headers, body: { revision: 'none', values: { notes: 'first' } } });
+  const old = { account: 'admin', scope: 'new', revision: saved.json.data.revision };
+  const uploadId = await stageDraftFile(f, old), path = f.documents.resolveUpload(uploadId).filePath;
+  const current = await f.request('/api/document-drafts/new', { method: 'PUT', headers, body: { revision: old.revision, values: { notes: 'current' } } });
+  const draft = { ...old, revision: current.json.data.revision };
+  const endpoint = '/api/files/uploads/' + uploadId;
+  assert.equal((await f.request(endpoint, { method: 'DELETE', body: { draft: old } })).status, 409);
+  assert.equal((await f.request(endpoint, { method: 'DELETE', role: 'viewer', body: { draft } })).status, 403);
+  f.db.prepare("INSERT INTO admin_users(id,email,name,role,password_hash,created_at,updated_at) VALUES('admin2','admin2@example.invalid','Synthetic','admin','unused','x','x')").run();
+  const cookie = f.config.cookieName + '=' + signSession(f.config, { id: 'admin2', role: 'admin', name: 'Synthetic', email: 'admin2@example.invalid' });
+  const foreign = await fetch(f.base + endpoint, { method: 'DELETE', headers: { cookie, 'content-type': 'application/json' }, body: JSON.stringify({ draft: { account: 'admin2', scope: 'new', revision: 'none' } }) });
+  assert.equal(foreign.status, 403);
+  assert.equal(f.storage.exists(path), true);
+  assert.notEqual(f.documents.resolveUpload(uploadId), null);
+  const abandoned = await f.request(endpoint, { method: 'DELETE', body: { draft } });
+  assert.equal(abandoned.status, 200); assert.equal(abandoned.json.data.cleanupPending, false);
+  assert.equal(f.documents.resolveUpload(uploadId), null); assert.equal(f.storage.exists(path), false);
+  assert.equal((await f.request(endpoint, { method: 'DELETE', body: { draft } })).status, 200);
+  assert.equal(f.db.prepare('SELECT count(*) n FROM documents').get().n, 1);
+}));
+
+test('abandon revokes a pending upload before failed unlink and can retry its tracked cleanup', t => reminderApi(async f => {
+  const draft = { account: 'admin', scope: 'new', revision: 'none' };
+  const uploadId = await stageDraftFile(f, draft), path = f.documents.resolveUpload(uploadId).filePath;
+  const remove = t.mock.method(f.storage, 'remove', async () => { throw Error('Synthetic unlink failure'); });
+  const endpoint = '/api/files/uploads/' + uploadId;
+  const first = await f.request(endpoint, { method: 'DELETE', body: { draft } });
+  assert.equal(first.status, 200); assert.equal(first.json.data.cleanupPending, true);
+  assert.equal(f.documents.resolveUpload(uploadId), null);
+  assert.equal(f.storage.exists(path), true);
+  assert.equal(f.db.prepare('SELECT upload_id FROM upload_cleanup_queue WHERE file_path=?').get(path).upload_id, uploadId);
+  const claim = await f.request('/api/documents/' + f.document.id + '/file', { method: 'PUT', body: { upload_id: uploadId } });
+  assert.equal(claim.status, 404);
+  remove.mock.restore();
+  const retry = await f.request(endpoint, { method: 'DELETE', body: { draft } });
+  assert.equal(retry.status, 200); assert.equal(retry.json.data.cleanupPending, false);
+  assert.equal(f.storage.exists(path), false);
+  assert.equal(f.db.prepare('SELECT count(*) n FROM upload_cleanup_queue').get().n, 0);
+}));
 
 test('empty private state still blocks legacy erase while current bootstrap is explicitly authorized', () => reminderApi(async f => {
   assert.equal(f.db.prepare("SELECT count(*) n FROM settings WHERE key='system.seed_version'").get().n, 0);
@@ -76,7 +129,7 @@ test('legacy erase cannot commit over private drafts or queued bytes after migra
   const draft = await f.request('/api/document-drafts/new', { method: 'PUT', headers: { 'x-draft-account': 'admin' }, body: { revision: 'none', values: { notes: 'private synthetic note' } } });
   assert.equal(draft.status, 200);
   const stored = await f.storage.save(file.buffer, file.originalname, file.mimetype);
-  f.db.prepare('INSERT INTO upload_cleanup_queue VALUES(?,?)').run(stored.relativePath, new Date().toISOString());
+  f.db.prepare('INSERT INTO upload_cleanup_queue(file_path,created_at) VALUES(?,?)').run(stored.relativePath, new Date().toISOString());
   // Pre-008 erase commits only after writing this existing seed marker. Its
   // transaction must roll back before its post-commit unlink loop can run.
   f.db.exec('BEGIN');

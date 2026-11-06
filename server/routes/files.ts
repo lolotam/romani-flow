@@ -40,6 +40,14 @@ export function createFilesRouter(
 ): Router {
   const router = Router();
 
+  router.delete('/uploads/:uploadId', requireAdmin, asyncHandler(async (req, res) => {
+    res.setHeader('Cache-Control', 'no-store');
+    const ref = draftReference(req.body?.draft);
+    const result = await documents.abandonStagedUpload(String(req.params.uploadId), { userId: req.user!.id, scope: ref.scope },
+      () => assertCurrentDraft(db, req.user!.id, ref));
+    res.json({ data: result, error: null });
+  }));
+
   router.post('/uploads/:uploadId/validate', requireAdmin, asyncHandler(async (req, res) => {
     res.setHeader('Cache-Control', 'no-store');
     const ref = draftReference(req.body?.draft);
@@ -95,7 +103,8 @@ export function createFilesRouter(
         try { ref = draftReference(JSON.parse(req.body.draft)); }
         catch { throw new StorageError('Invalid draft reference.', 'invalid_draft', 400); }
       }
-      const staged = (await documents.stageUploads(files, ref ? () => assertCurrentDraft(db, req.user!.id, ref!) : undefined)).map((registered, index) => ({
+      const staged = (await documents.stageUploads(files, ref ? () => assertCurrentDraft(db, req.user!.id, ref!) : undefined,
+        ref ? { userId: req.user!.id, scope: ref.scope } : undefined)).map((registered, index) => ({
           upload_id: registered.uploadId,
           file_name: registered.fileName,
           file_size: registered.fileSize,

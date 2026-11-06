@@ -16,8 +16,15 @@ CREATE INDEX document_drafts_company ON document_drafts(json_extract(values_json
 -- Tracks failed removal even if the original pending-upload insertion failed.
 CREATE TABLE upload_cleanup_queue (
   file_path TEXT PRIMARY KEY,
-  created_at TEXT NOT NULL
+  created_at TEXT NOT NULL,
+  upload_id TEXT UNIQUE,
+  draft_user_id TEXT,
+  draft_scope TEXT
 );
+
+-- Abandoning an unfinished attachment is restricted to its draft owner/context.
+ALTER TABLE pending_uploads ADD COLUMN draft_user_id TEXT REFERENCES admin_users(id) ON DELETE SET NULL;
+ALTER TABLE pending_uploads ADD COLUMN draft_scope TEXT;
 
 -- Known pre-008 erase handlers write the seed marker before committing but do
 -- not invalidate drafts or collect queue-only files. Abort that transaction.
