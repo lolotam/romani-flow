@@ -235,8 +235,23 @@ test('canonical Unicode equivalents share history without folding distinct local
 for(const mode of ['structured','empty','non-string','invalid-identity']) test('interrupted report '+mode+' is recovered without duplicate delivery',t=>withMail(t,async(f,calls)=>{
  const expiry=new Date().toISOString().slice(0,10);f.db.prepare('UPDATE documents SET expiry_date=?').run(expiry);f.db.prepare('UPDATE employees SET residency_expiry_date=NULL').run();
  const document=f.db.prepare('SELECT id FROM documents LIMIT 1').get();
- const details=mode==='structured'?{recipients:[TO[0]],identities:[JSON.stringify(['document',document.id,expiry,1])]}:mode==='empty'?{recipients:[],identities:[]}:mode==='non-string'?{recipients:[7],identities:[null]}:{recipients:[TO[0]],identities:['not-a-tuple']};
+ const details=mode==='structured'?{recipients:[TO[0]],identities:[JSON.stringify(['document',document.id,expiry,1])],employees:0,documents:1}:mode==='empty'?{recipients:[],identities:[]}:mode==='non-string'?{recipients:[7],identities:[null]}:{recipients:[TO[0]],identities:['not-a-tuple']};
  const id=startEmailAttempt(f.db,{kind:'expiry_report',recipients:[TO[0]],subject:'Interrupted',triggerSource:'cron',details});setSetting(f.db,'email.recipients',[TO[0]]);
  const result=await sendExpiryReport(f.db,f.mailer,'cron');assert.equal(result.sent,false);assert.equal(calls.length,0);assert.equal(f.db.prepare('SELECT status FROM email_log WHERE id=?').get(id).status,'unknown');
  assert.equal((await sendExpiryReport(f.db,f.mailer,'cron')).sent,false);assert.equal(calls.length,0);
+}));
+
+for(const variant of ['invalid-date','partial-identities','partial-recipients','comma-mailbox']) test('damaged audit '+variant+' falls back conservatively',t=>withMail(t,async(f,calls)=>{
+ const expiry=new Date().toISOString().slice(0,10);f.db.prepare('UPDATE documents SET expiry_date=?').run(expiry);f.db.prepare('UPDATE employees SET residency_expiry_date=NULL').run();
+ const doc=f.db.prepare('SELECT id FROM documents LIMIT 1').get();const recipients=variant==='comma-mailbox'?['"first,last"@example.invalid']:[TO[0]];
+ const details=variant==='comma-mailbox'?{}:{recipients:variant==='partial-recipients'?[CC]:recipients,identities:[JSON.stringify(['document',doc.id,variant==='invalid-date'?'2026-02-30':expiry,1])],employees:0,documents:variant==='partial-identities'?2:1};
+ startEmailAttempt(f.db,{kind:'expiry_report',recipients,subject:'Damaged legacy audit',triggerSource:'cron',details});setSetting(f.db,'email.recipients',recipients);
+ await sendExpiryReport(f.db,f.mailer,'cron');assert.equal(calls.length,0);
+}));
+test('formatted structured identities suppress only the matching item',t=>withMail(t,async(f,calls)=>{
+ const expiry=new Date().toISOString().slice(0,10);f.db.prepare('UPDATE documents SET title=?,expiry_date=?').run('Already attempted',expiry);f.db.prepare('UPDATE employees SET residency_expiry_date=NULL').run();
+ const doc=f.db.prepare('SELECT id FROM documents LIMIT 1').get();
+ startEmailAttempt(f.db,{kind:'expiry_report',recipients:[TO[0]],subject:'Uncertain structured audit',triggerSource:'cron',details:{recipients:[TO[0]],identities:[JSON.stringify(['document',doc.id,expiry,1],null,2)],employees:0,documents:1}});
+ insertRow(f.db,'documents',{title:'New eligible document',employee_id:f.employee.id,document_type_id:f.type.id,expiry_date:expiry});setSetting(f.db,'email.recipients',[TO[0]]);
+ await sendExpiryReport(f.db,f.mailer,'cron');assert.equal(calls.length,1);assert.ok(calls[0].text.includes('New eligible document'));assert.equal(calls[0].text.includes('Already attempted'),false);
 }));

@@ -250,6 +250,9 @@ verify that the old message was not delivered. No audit row is deleted.
 Recovery marks current-format interrupted rows `unknown` too. Empty or malformed
 recipient/identity arrays use the conservative legacy fallback instead of
 bypassing suppression.
+Structured details must match the recorded recipient list and item counts, with
+valid calendar dates and unique canonical identity tuples. Ambiguous quoted
+mailboxes in old comma-joined logs block globally rather than being guessed.
 
 Mailbox comparison uses NFC and simple lowercase; SMTP retains the first trimmed
 configured spelling. This is an application comparison policy, not full Unicode
