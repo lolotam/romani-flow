@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
 import ts from 'typescript';
-import { employeeDocumentDraft, newDocumentDefaults } from '../src/lib/documentFormDrafts.ts';
+import { employeeDocumentDraft, newDocumentDefaults, nextDocumentFileTitle } from '../src/lib/documentFormDrafts.ts';
 import { restoreFormDate } from '../src/lib/formDefaults.ts';
 import { draftValues } from '../src/lib/documentDraftSession.ts';
 
@@ -28,7 +28,7 @@ function formCallbacks(kind = 'employee', status = 'saved') {
     '@/lib/utils': { cn: (...classes) => classes.filter(Boolean).join(' ') },
     '@/hooks/useAuth': { useAuth: () => ({ user: { id: 'synthetic-admin' } }) },
     '@/contexts/LanguageContext': { useLanguage: () => ({ t: key => key, isRTL: false }) },
-    '@/lib/documentFormDrafts': { employeeDocumentDraft },
+    '@/lib/documentFormDrafts': { employeeDocumentDraft, nextDocumentFileTitle },
     '@/lib/formDefaults': { restoreFormDate },
     '@/lib/documentDraftSession': { draftValues },
     './documents/documentFormSchema': { createDocumentSchema: () => ({}) },

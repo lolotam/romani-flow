@@ -5,12 +5,21 @@ import { reminderApi } from './fixtures/whatsapp-api.mjs';
 import { DocumentDraftSession } from '../src/lib/documentDraftSession.ts';
 import { setSetting } from '../server/repositories/settings.ts';
 import { seedDatabase, writeSeedMarker } from '../server/db/seed.ts';
-import { newDocumentDefaults } from '../src/lib/documentFormDrafts.ts';
+import { newDocumentDefaults, nextDocumentFileTitle } from '../src/lib/documentFormDrafts.ts';
 import { fileAccept } from '../src/lib/fileAccept.ts';
 import { signSession } from '../server/middleware/auth.ts';
 import { writeDraft } from '../server/repositories/documentDrafts.ts';
 
 const file = { buffer: Buffer.from('synthetic document'), originalname: 'fixture.pdf', mimetype: 'application/pdf' };
+
+test('only filename-generated titles follow replacement files, including after autosave', () => {
+  const first = nextDocumentFileTitle('', null, 'first.pdf', false);
+  assert.equal(first, 'first');
+  assert.equal(nextDocumentFileTitle(first, first, 'second.pdf', true), 'second');
+  assert.equal(nextDocumentFileTitle('Custom title', first, 'second.pdf', true), null);
+  assert.equal(nextDocumentFileTitle('first', null, 'second.pdf', true), null); // Restored or manually edited.
+  assert.equal(nextDocumentFileTitle('', null, 'second.pdf', true), null); // Explicitly cleared persisted title.
+});
 const deferred = () => { let resolve; const promise = new Promise(r => { resolve = r; }); return { promise, resolve }; };
 const draftTransport = (f, pause) => async (url, options = {}) => {
   const response = await f.request(url, { ...options, headers: { 'x-draft-account': 'admin' } });

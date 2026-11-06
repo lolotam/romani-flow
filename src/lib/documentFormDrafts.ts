@@ -1,6 +1,13 @@
 import { restoreFormDate } from './formDefaults';
 import type { DraftValues } from './documentDraftSession';
 
+/** Only a blank new title or an unchanged filename-derived title follows a new file. */
+export function nextDocumentFileTitle(title: string, generatedTitle: string | null, fileName: string, hasDraft: boolean): string | null {
+  if (title && title !== generatedTitle || hasDraft && generatedTitle === null) return null;
+  const next = fileName.replace(/\.[^/.]+$/, '').slice(0, 120);
+  return next === title ? null : next;
+}
+
 /** A new document never inherits metadata or dates from the previous record. */
 export function newDocumentDefaults(context: { employeeId?: string; companyId?: string; fallbackEmployeeId?: string }, fileName = '') {
   return {

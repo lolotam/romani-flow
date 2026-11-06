@@ -22,7 +22,7 @@ import { restoreFormDate } from '@/lib/formDefaults';
 import { useAuth } from '@/hooks/useAuth';
 import { DocumentDraftStatus } from './documents/DocumentDraftStatus';
 import { useLastSubmissionRestore } from '@/hooks/useLastSubmission';
-import { newDocumentDefaults } from '@/lib/documentFormDrafts';
+import { newDocumentDefaults, nextDocumentFileTitle } from '@/lib/documentFormDrafts';
 
 export function DocumentForm(props: DocumentFormProps) {
   const { user } = useAuth();
@@ -67,8 +67,9 @@ function DocumentFormContent({
   });
 
   const baseline = React.useRef<DefaultValues<DocumentFormData>>(form.getValues());
+  const generatedTitle = React.useRef<string | null>(!editingDocument && fileName ? baseline.current.title ?? null : null);
   const draft = useDocumentDraft(scope, saved => {
-    if (saved !== null) allowLastSubmission.current = false;
+    if (saved !== null) { allowLastSubmission.current = false; generatedTitle.current = null; }
     const values = saved ? { ...baseline.current, ...saved,
       issue_date: restoreFormDate(saved.issue_date), expiry_date: restoreFormDate(saved.expiry_date),
       ...(preselectedEmployeeId ? { beneficiary_type: 'employee' as const, employee_id: preselectedEmployeeId, company_id: '' } : {}),
@@ -76,11 +77,15 @@ function DocumentFormContent({
     form.reset(values as DocumentFormData);
   });
   React.useEffect(() => {
-    if (!selectedFile || editingDocument || draft.status !== 'saved' || draft.hasDraft || form.getValues('title')) return;
-    form.setValue('title', selectedFile.name.replace(/\.[^/.]+$/, '').slice(0, 120), { shouldDirty: true });
+    if (!selectedFile || editingDocument || draft.status !== 'saved') return;
+    const next = nextDocumentFileTitle(form.getValues('title'), generatedTitle.current, selectedFile.name, draft.hasDraft);
+    if (next === null) return;
+    generatedTitle.current = next;
+    form.setValue('title', next, { shouldDirty: true });
   }, [selectedFile, editingDocument, draft.status, draft.hasDraft, form]);
   React.useEffect(() => {
     const subscription = form.watch((_values, info) => {
+      if (info.name === 'title' && form.getValues('title') !== generatedTitle.current) generatedTitle.current = null;
       if (info.name) draft.session.current?.change(draftValues(form.getValues()));
     });
     return () => subscription.unsubscribe();
@@ -108,6 +113,7 @@ function DocumentFormContent({
   };
   const formIsDirty = form.formState.isDirty;
   useLastSubmissionRestore('documents', allowLastSubmission.current && !editingDocument && draft.status === 'saved' && !draft.hasDraft, (saved) => {
+    generatedTitle.current = selectedFile ? selectedFile.name.replace(/\.[^/.]+$/, '').slice(0, 120) : null;
     form.reset({ ...form.getValues(),
       title: selectedFile ? selectedFile.name.replace(/\.[^/.]+$/, '').slice(0, 120) : String(saved.title ?? ''),
       beneficiary_type: preselectedEmployeeId ? 'employee' : preselectedCompanyId ? 'company' : saved.employee_id ? 'employee' : 'company',
@@ -144,6 +150,7 @@ function DocumentFormContent({
       onSuccess();
       if (keepOpen) {
         allowLastSubmission.current = false;
+        generatedTitle.current = null;
         baseline.current = newDocumentDefaults(defaultContext);
         setSelectedFile(null);
         await draft.session.current?.restart();

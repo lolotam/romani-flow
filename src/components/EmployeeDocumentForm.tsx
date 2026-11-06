@@ -16,7 +16,7 @@ import { toast } from 'sonner';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { useDocumentDraft } from '@/hooks/useDocumentDraft';
 import { draftValues } from '@/lib/documentDraftSession';
-import { employeeDocumentDraft } from '@/lib/documentFormDrafts';
+import { employeeDocumentDraft, nextDocumentFileTitle } from '@/lib/documentFormDrafts';
 import { useAuth } from '@/hooks/useAuth';
 import { DocumentDraftStatus } from './documents/DocumentDraftStatus';
 import { DocumentAttachmentPicker } from './documents/DocumentAttachmentPicker';
@@ -65,22 +65,29 @@ function EmployeeDocumentFormContent({
   }, []);
   const dirty = useRef(false);
   const allowLastSubmission = useRef(true);
+  const generatedTitle = useRef<string | null>(uploadedFile ? uploadedFile.name.replace(/\.[^/.]+$/, '').slice(0, 120) : null);
   const draft = useDocumentDraft('employee:' + employeeId, saved => {
     dirty.current = false;
-    if (saved !== null) allowLastSubmission.current = false;
-    setFormData(employeeDocumentDraft(saved, selectedFile?.name));
+    if (saved !== null) { allowLastSubmission.current = false; generatedTitle.current = null; }
+    const restored = employeeDocumentDraft(saved, selectedFile?.name);
+    if (saved === null) generatedTitle.current = selectedFile ? restored.title : null;
+    setFormData(restored);
   }, isOpen);
   useEffect(() => { if (isOpen) { dirty.current = false; allowLastSubmission.current = true; } }, [isOpen, employeeId]);
   useLastSubmissionRestore('documents', allowLastSubmission.current && isOpen && draft.status === 'saved' && !draft.hasDraft, (saved) => {
+    generatedTitle.current = selectedFile ? selectedFile.name.replace(/\.[^/.]+$/, '').slice(0, 120) : null;
     setFormData(current => ({ ...current, title: selectedFile ? selectedFile.name.replace(/\.[^/.]+$/, '').slice(0, 120) : String(saved.title ?? ''),
       document_type_id: String(saved.document_type_id ?? ''), ministry_id: String(saved.ministry_id ?? ''),
       notes: String(saved.notes ?? '') }));
   }, () => allowLastSubmission.current && !dirty.current);
 
   useEffect(() => {
-    if (!selectedFile || draft.status !== 'saved' || draft.hasDraft || latestForm.current.title) return;
+    if (!selectedFile || draft.status !== 'saved') return;
+    const title = nextDocumentFileTitle(latestForm.current.title, generatedTitle.current, selectedFile.name, draft.hasDraft);
+    if (title === null) return;
     dirty.current = true;
-    const next = { ...latestForm.current, title: selectedFile.name.replace(/\.[^/.]+$/, '').slice(0, 120) };
+    generatedTitle.current = title;
+    const next = { ...latestForm.current, title };
     setFormData(next);
     draft.session.current?.change(draftValues(next));
   }, [selectedFile, draft.status, draft.hasDraft, draft.session, setFormData]);
@@ -103,17 +110,9 @@ function EmployeeDocumentFormContent({
     return () => { cancelled = true; };
   }, [isOpen, setFormData]);
 
-  useEffect(() => {
-    if (isOpen && uploadedFile) {
-      setFormData(prev => ({
-        ...prev,
-        title: uploadedFile.name.replace(/\.[^/.]+$/, '').slice(0, 120), // Remove file extension
-      }));
-    }
-  }, [isOpen, uploadedFile, setFormData]);
-
   const editForm = (patch: Partial<typeof emptyForm>) => {
     dirty.current = true;
+    if (patch.title !== undefined) generatedTitle.current = null;
     const next = { ...latestForm.current, ...patch };
     setFormData(next);
     draft.session.current?.change(draftValues(next));
