@@ -247,6 +247,9 @@ delivery is blocked for their recorded recipients until an operator reconciles
 the old handoff. If no recipient can be recovered, automatic recipients remain
 blocked globally. Do not mark that audit failed merely to force a resend: first
 verify that the old message was not delivered. No audit row is deleted.
+Recovery marks current-format interrupted rows `unknown` too. Empty or malformed
+recipient/identity arrays use the conservative legacy fallback instead of
+bypassing suppression.
 
 Mailbox comparison uses NFC and simple lowercase; SMTP retains the first trimmed
 configured spelling. This is an application comparison policy, not full Unicode

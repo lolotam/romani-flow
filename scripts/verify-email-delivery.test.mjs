@@ -231,3 +231,12 @@ test('canonical Unicode equivalents share history without folding distinct local
  setSetting(f.db,'email.recipients',['stra\u00dfe@example.invalid','strasse@example.invalid']);
  await sendExpiryReport(f.db,f.mailer,'cron');assert.equal(calls[1].to.length,2);
 }));
+
+for(const mode of ['structured','empty','non-string','invalid-identity']) test('interrupted report '+mode+' is recovered without duplicate delivery',t=>withMail(t,async(f,calls)=>{
+ const expiry=new Date().toISOString().slice(0,10);f.db.prepare('UPDATE documents SET expiry_date=?').run(expiry);f.db.prepare('UPDATE employees SET residency_expiry_date=NULL').run();
+ const document=f.db.prepare('SELECT id FROM documents LIMIT 1').get();
+ const details=mode==='structured'?{recipients:[TO[0]],identities:[JSON.stringify(['document',document.id,expiry,1])]}:mode==='empty'?{recipients:[],identities:[]}:mode==='non-string'?{recipients:[7],identities:[null]}:{recipients:[TO[0]],identities:['not-a-tuple']};
+ const id=startEmailAttempt(f.db,{kind:'expiry_report',recipients:[TO[0]],subject:'Interrupted',triggerSource:'cron',details});setSetting(f.db,'email.recipients',[TO[0]]);
+ const result=await sendExpiryReport(f.db,f.mailer,'cron');assert.equal(result.sent,false);assert.equal(calls.length,0);assert.equal(f.db.prepare('SELECT status FROM email_log WHERE id=?').get(id).status,'unknown');
+ assert.equal((await sendExpiryReport(f.db,f.mailer,'cron')).sent,false);assert.equal(calls.length,0);
+}));
