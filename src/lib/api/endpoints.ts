@@ -145,7 +145,7 @@ const settings = {
 const backup = {
   export: () => request<unknown>('/api/backup/export'),
   erase: () =>
-    request<{ erased: string[]; at: string }>('/api/backup/erase', {
+    request<{ erased: string[]; at: string; filesPendingCleanup: number }>('/api/backup/erase', {
       method: 'POST',
       body: { confirmation: 'DELETE ALL' },
     }),

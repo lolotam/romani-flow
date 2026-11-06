@@ -229,6 +229,7 @@ export const settings = {
     eraseCancel: 'Cancel',
     eraseConfirmButton: 'Yes, Erase Business Data',
     eraseSuccess: 'Business data erased. WhatsApp audit retained and reminders disabled.',
+    cleanupPending: 'Business records were erased, but some files could not be removed. Retry the erase operation to complete file cleanup.',
     eraseError: 'Failed to erase data'
   },
 

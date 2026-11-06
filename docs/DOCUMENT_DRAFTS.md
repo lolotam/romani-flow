@@ -26,4 +26,6 @@ Uploads from draft-enabled forms carry the account/revision reference and stage 
 
 An open form retains its staged upload after a failed document save. Reuse validates the current account/draft revision and confirms the upload is still pending; a consumed or missing upload is staged again. No file path is accepted from the browser.
 
-Migration008 also adds upload_cleanup_queue. Failed staging cleanup retains paths there even when pending-upload registration failed. A cleanup pass removes tracking only after the file is removed or confirmed absent; failed removals remain retryable. DocumentService.purgeStaleUploads is asynchronous and returns the number of paths cleaned, including queued rollback work. The release does not claim an automatically scheduled cleanup pass.
+Migration008 also adds upload_cleanup_queue. Failed staging cleanup retains paths there even when pending-upload registration failed. A cleanup pass removes tracking only after the file is removed or confirmed absent; failed removals remain retryable. DocumentService.purgeStaleUploads is asynchronous and returns the number of files removed, including queued rollback work. The release does not claim an automatically scheduled cleanup pass.
+
+Business erase includes queued paths as well as normal attachments. Its response exposes filesPendingCleanup: zero confirms no tracked removal is outstanding; a positive count means file cleanup needs retry, even though business rows have been erased. Tracking survives a failed unlink, including queue-only uploads.

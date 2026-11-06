@@ -89,7 +89,7 @@ function EmployeeDocumentFormContent({
     };
     void loadOptions();
     return () => { cancelled = true; };
-  }, [isOpen]);
+  }, [isOpen, setFormData]);
 
   useEffect(() => {
     if (isOpen && uploadedFile) {
@@ -98,7 +98,7 @@ function EmployeeDocumentFormContent({
         title: uploadedFile.name.replace(/\.[^/.]+$/, '').slice(0, 120), // Remove file extension
       }));
     }
-  }, [isOpen, uploadedFile]);
+  }, [isOpen, uploadedFile, setFormData]);
 
   const editForm = (patch: Partial<typeof emptyForm>) => {
     dirty.current = true;

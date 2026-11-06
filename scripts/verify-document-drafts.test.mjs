@@ -374,3 +374,14 @@ test('pending upload validation follows the current draft without reuploading an
  f.db.prepare('DELETE FROM pending_uploads WHERE id=?').run(upload.uploadId);
  assert.equal((await f.request(endpoint,{method:'POST',body:{draft:ref('new',saved.data.revision)}})).status,404);
 }));
+
+test('business erase retries queue-only files and retains failures until bytes are removed',t=>reminderApi(async f=>{
+ const stored=await f.storage.save(Buffer.from('private synthetic'),'fixture.pdf','application/pdf');
+ f.db.prepare('INSERT INTO upload_cleanup_queue(file_path,created_at) VALUES(?,?)').run(stored.relativePath,new Date().toISOString());
+ const remove=t.mock.method(f.storage,'remove',async()=>{throw Error('Synthetic unlink failure');});
+ const failed=await f.request('/api/backup/erase',{method:'POST',body:{}});
+ assert.equal(failed.status,200);assert.equal(failed.json.data.filesPendingCleanup,1);assert.equal(f.storage.exists(stored.relativePath),true);
+ remove.mock.restore();
+ const retried=await f.request('/api/backup/erase',{method:'POST',body:{}});
+ assert.equal(retried.status,200);assert.equal(retried.json.data.filesPendingCleanup,0);assert.equal(retried.json.data.filesRemoved,1);assert.equal(f.storage.exists(stored.relativePath),false);
+}));

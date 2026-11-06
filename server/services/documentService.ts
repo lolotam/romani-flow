@@ -69,7 +69,7 @@ export class DocumentService {
           try { this.db.prepare('INSERT OR IGNORE INTO upload_cleanup_queue(file_path,created_at) VALUES(?,?)').run(path, new Date().toISOString()); }
           catch { console.error('[uploads] could not record cleanup work'); }
         }
-        await this.cleanupPaths(paths);
+        await this.cleanupTrackedFiles(paths);
         throw error;
       }
     });
@@ -86,14 +86,14 @@ export class DocumentService {
   }
 
   /** Failed removals retain durable tracking and never hide the staging error. */
-  private async cleanupPaths(paths: string[]): Promise<number> {
+  async cleanupTrackedFiles(paths: string[]): Promise<number> {
     let removed = 0;
     for (const path of paths) {
       try {
-        await this.storage.remove(path);
+        const existed = await this.storage.remove(path);
         this.db.prepare('DELETE FROM pending_uploads WHERE file_path=?').run(path);
         this.db.prepare('DELETE FROM upload_cleanup_queue WHERE file_path=?').run(path);
-        removed++;
+        if (existed) removed++;
       } catch { console.error('[uploads] cleanup deferred'); }
     }
     return removed;
@@ -365,7 +365,7 @@ export class DocumentService {
       .all(cutoff) as Row[];
 
     const queued = this.db.prepare('SELECT file_path FROM upload_cleanup_queue').all() as Row[];
-    return this.cleanupPaths([...new Set([...rows, ...queued].map(row => String(row.file_path)))]);
+    return this.cleanupTrackedFiles([...new Set([...rows, ...queued].map(row => String(row.file_path)))]);
     });
   }
 }
