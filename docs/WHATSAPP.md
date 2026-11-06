@@ -239,6 +239,9 @@ Admission requires at least 15 seconds remaining; a smaller remainder defers
 the group without creating an SMTP attempt. DNS failure or connection refusal
 is a proven non-send; socket timeouts, resets and other unclassified SMTP errors
 are recorded as unknown rather than automatically retried.
+Nodemailer's `EAUTH` and `EENVELOPE` failures also prove rejection before message
+content is accepted. They remain failed/retryable after the operator corrects the
+credentials or recipient issue; they do not create an unknown suppression entry.
 If the budget expires during SMTP, that attempt is recorded as `unknown`; the
 underlying transport may still complete, but its late result cannot update the
 ledger. Its exact item/recipient identities remain suppressed on automatic runs,

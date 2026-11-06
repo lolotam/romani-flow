@@ -130,7 +130,10 @@ export class Mailer {
       const detail = error instanceof Error ? error.message : String(error);
       const code = error && typeof error === 'object' && 'code' in error ? String(error.code) : '';
       const provenUnsent = ['ENOTFOUND', 'EAI_AGAIN', 'ECONNREFUSED', 'EDNS'].includes(code);
-      throw new MailError(`The message could not be sent: ${detail}`, provenUnsent ? 'connection_failed' : 'send_failed', 502);
+      // Nodemailer emits these rejections before accepting message content.
+      const rejectedBeforeData = code === 'EAUTH' || code === 'EENVELOPE';
+      const failureCode = provenUnsent ? 'connection_failed' : rejectedBeforeData ? 'smtp_rejected' : 'send_failed';
+      throw new MailError(`The message could not be sent: ${detail}`, failureCode, 502);
     }
   }
 

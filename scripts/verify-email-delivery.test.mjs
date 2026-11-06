@@ -199,3 +199,13 @@ test('Unicode retained history uses the same mailbox comparison as current recip
  setSetting(f.db,'email.recipients',[address.toLowerCase()]);
  assert.equal((await sendExpiryReport(f.db,f.mailer,'cron')).skipped,'nothing_due');assert.equal(calls.length,1);
 }));
+
+for (const code of ['EAUTH','EENVELOPE']) test('definitive SMTP rejection '+code+' stays pending after configuration is corrected',t=>withMail(t,async(f,calls)=>{
+ f.db.prepare('UPDATE documents SET expiry_date=?').run(new Date().toISOString().slice(0,10));f.db.prepare('UPDATE employees SET residency_expiry_date=NULL').run();
+ setSetting(f.db,'email.recipients',[TO[0]]);
+ const first=await sendExpiryReport(f.db,f.mailer,'cron');assert.equal(first.sent,false);
+ assert.equal(f.db.prepare("SELECT status FROM email_log WHERE kind='expiry_report' ORDER BY rowid DESC LIMIT 1").get().status,'failed');
+ assert.equal(f.db.prepare('SELECT count(*) n FROM expiry_notifications').get().n,0);
+ const corrected=await sendExpiryReport(f.db,f.mailer,'cron');assert.equal(corrected.sent,true);assert.equal(calls.length,2);
+ assert.equal((await sendExpiryReport(f.db,f.mailer,'cron')).skipped,'nothing_due');assert.equal(calls.length,2);
+},(addresses,attempt)=>{if(attempt===1)throw Object.assign(new Error('Synthetic pre-content rejection'),{code});return {accepted:addresses,rejected:[]};}));
