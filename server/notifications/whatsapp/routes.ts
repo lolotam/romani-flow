@@ -6,6 +6,7 @@ import { RepositoryError } from '../../repositories/base.js';
 import { normalizeWhatsAppPhone } from './phone.js';
 import type { WhatsAppReminders } from './service.js';
 import { isManualRetryFailure, isValidReminderText } from './contracts.js';
+import { templatePreview } from './templatePreview.js';
 
 function body(req: Request): Record<string, unknown> {
   if (!req.body || typeof req.body !== 'object' || Array.isArray(req.body)) throw new RepositoryError('An object is required.', 'invalid_body', 400);
@@ -33,6 +34,7 @@ export function createReminderRouter(reminders: WhatsAppReminders, env: NodeEnv)
     }
     next();
   });
+  router.get('/template-preview', templatePreview);
   router.get('/recipients', (req, res, next) => {
     try {
       const { limit, offset } = page(req);

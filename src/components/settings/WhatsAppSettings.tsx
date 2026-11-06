@@ -7,6 +7,7 @@ import { useLanguage } from '@/contexts/LanguageContext';
 import { useWhatsAppSettings } from '@/hooks/useWhatsAppSettings';
 import { WhatsAppRecipientsCard } from './WhatsAppRecipientsCard';
 import { WhatsAppLogCard } from './WhatsAppLogCard';
+import { NotificationTemplate } from './NotificationTemplate';
 
 export default function WhatsAppSettings({ refreshKey = 0 }: { refreshKey?: number }) {
   const { user } = useAuth();
@@ -22,6 +23,7 @@ export default function WhatsAppSettings({ refreshKey = 0 }: { refreshKey?: numb
       <Button type="button" variant="outline" disabled={state.busy || state.loading} onClick={state.reload}>{t('settings.whatsappReminders.refresh')}</Button>
       {state.busy && <p role="status">{t('settings.whatsappReminders.saving')}</p>}
       {state.error && <p role="alert" className="text-destructive">{t(`settings.whatsappReminders.${state.error}`)}</p>}
+      <NotificationTemplate channel="whatsapp" language={state.language} disabled={state.busy || state.loading} onChange={value => void state.setLanguage(value)} />
     </CardContent></Card>
     <div hidden={state.loading} className="space-y-5">
       <WhatsAppRecipientsCard state={state} />

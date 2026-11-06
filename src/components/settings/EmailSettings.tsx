@@ -4,6 +4,7 @@ import { useEmailSettings, type ActionResult } from '@/hooks/useEmailSettings';
 import { EmailConfigCard } from './EmailConfigCard';
 import { EmailLogCard } from './EmailLogCard';
 import { ExpiryPreviewCard } from './ExpiryPreviewCard';
+import { Button } from '@/components/ui/button';
 
 /**
  * The e-mail tab. All state is on the server; this component only wires the
@@ -25,6 +26,12 @@ export default function EmailSettings() {
 
   if (state.isLoading) {
     return <p className="p-6 text-sm text-muted-foreground">{L('جارٍ التحميل...', 'Loading...')}</p>;
+  }
+  if (!state.settingsReady) {
+    return <div role="alert" className="space-y-3 p-6">
+      <p>{L('تعذّر تحميل إعدادات البريد. أعد المحاولة قبل التعديل أو الإرسال.', 'Email settings could not be loaded. Retry before editing or sending.')}</p>
+      <Button type="button" onClick={() => void state.reloadSettings()}>{L('إعادة المحاولة', 'Retry')}</Button>
+    </div>;
   }
 
   return (
