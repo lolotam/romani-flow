@@ -233,6 +233,38 @@ including an overlapping selection, before database close. SMTP phase/idle timer
 are 15/15/30 seconds; these are not a whole-operation bound. The application hard
 ceiling is 90 seconds, not a delivery guarantee. A forced process/host termination
 can still leave an email outcome uncertain; no exactly-once email claim is added.
+Grouped expiry emails share a 60-second whole-run budget and stop admitting
+further groups after a transport error. Groups not started remain pending.
+Admission requires at least 15 seconds remaining; a smaller remainder defers
+the group without creating an SMTP attempt. DNS failure or connection refusal
+is a proven non-send; socket timeouts, resets and other unclassified SMTP errors
+are recorded as unknown rather than automatically retried.
+Nodemailer's `EAUTH` and `EENVELOPE` failures also prove rejection before message
+content is accepted. They remain failed/retryable after the operator corrects the
+credentials or recipient issue; they do not create an unknown suppression entry.
+Legacy interrupted reports without item identities become `unknown`; automatic
+delivery is blocked for their recorded recipients until an operator reconciles
+the old handoff. If no recipient can be recovered, automatic recipients remain
+blocked globally. Do not mark that audit failed merely to force a resend: first
+verify that the old message was not delivered. No audit row is deleted.
+Recovery marks current-format interrupted rows `unknown` too. Empty or malformed
+recipient/identity arrays use the conservative legacy fallback instead of
+bypassing suppression.
+Structured details must match the recorded recipient list and item counts, with
+valid calendar dates and unique canonical identity tuples. Ambiguous quoted
+mailboxes in old comma-joined logs block globally rather than being guessed.
+
+Mailbox comparison uses NFC and simple lowercase; SMTP retains the first trimmed
+configured spelling. This is an application comparison policy, not full Unicode
+case folding: distinct local spellings such as `strasse` and `straße` remain
+distinct. [RFC 6530 section 10.1](https://www.rfc-editor.org/rfc/rfc6530#section-10.1)
+discusses normalization and permits unusual case-sensitive local parts.
+If the budget expires during SMTP, that attempt is recorded as `unknown`; the
+underlying transport may still complete, but its late result cannot update the
+ledger. Its exact item/recipient identities remain suppressed on automatic runs,
+including after restart, pending operator investigation. A manual report is an
+explicit fresh send and does not clear that audit. No transport cancellation or
+recipient-delivery guarantee is implied by the deadline.
 Verify actual managed stop grace exceeds this ceiling with margin before release;
 no production grace change or proof is implied by local lifecycle tests.
 
@@ -244,3 +276,15 @@ of opted-in mobile numbers to detect legacy canonical collisions; management-onl
 claims do not require that projection. Daily selection and full mutation refresh remain.
 Business erase cancels unsent jobs in the fixed audit namespace inside its transaction,
 even when sending configuration is invalid; accepted/unknown and other namespaces survive.
+
+## Message language and template preview
+
+Settings selects WhatsApp and Email languages independently (Arabic or English). WhatsApp uses the validated `whatsapp.language` key, defaulting to Arabic; Email keeps `email.language`. No schema migration is required. The channel language is independent of the administrator's UI language. Document/person names stay as stored, and the English residency label is localized.
+
+Each channel shows a fixed synthetic text preview from the same server renderer used for delivery. The admin-only, no-store `GET /api/whatsapp/template-preview?channel=whatsapp|email&language=ar|en` endpoint reads no customer records and sends nothing. These are fixed templates, not a free-form message editor. Email remains the existing grouped management report.
+
+Changing language reconciles eligible pending snapshots under the notification coordinator. Accepted/unknown outcomes and prior attempt text remain unchanged; language is not a new deduplication identity and cannot cause a resend. Selecting a language never enables sending or changes the schedule.
+
+### Email recipient correctness
+
+The Email test includes configured CC when no explicit CC override is supplied; the settings UI submits both current To and CC lists. Automated report selection considers every configured To/CC address, retries only addresses the relay did not accept, and supports a CC-only retry without re-sending to previously accepted To addresses. Logs retain both accepted/rejected addresses and report counts. Relay acceptance still does not prove inbox delivery. Failed settings loads show a retry state and cannot save placeholder defaults or trigger sending.

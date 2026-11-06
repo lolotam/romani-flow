@@ -5,7 +5,7 @@ import {loadWhatsAppReminderSettings} from '../src/lib/api/whatsappSettings.ts';
 import {request} from '../src/lib/api/http.ts';
 
 test('settings loader preserves sending truth across independent HTTP failures and a successful toggle',async t=>{
- const state={enabled:false,peopleFail:false,jobsFail:false,settingsFail:false,malformed:false};
+ const state={enabled:false,language:'en',peopleFail:false,jobsFail:false,settingsFail:false,malformed:false};
  const server=http.createServer(async(req,res)=>{
   const settings=req.url==='/api/settings';
   if(settings&&req.method==='PUT'){
@@ -15,7 +15,7 @@ test('settings loader preserves sending truth across independent HTTP failures a
   const failed=settings?state.settingsFail:req.url.startsWith('/api/whatsapp/recipients')?state.peopleFail:state.jobsFail;
   res.writeHead(failed?503:200,{'content-type':'application/json'});
   res.end(JSON.stringify(failed?{data:null,error:{message:'Synthetic read failure',code:'unavailable'}}:
-   {data:settings?{settings:{'whatsapp.enabled':state.malformed?'true':state.enabled}}:{items:[],total:0},error:null}));
+   {data:settings?{settings:{'whatsapp.enabled':state.malformed?'true':state.enabled,'whatsapp.language':state.language}}:{items:[],total:0},error:null}));
  });
  await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
  const nativeFetch=globalThis.fetch,base='http://127.0.0.1:'+server.address().port;
@@ -28,6 +28,7 @@ test('settings loader preserves sending truth across independent HTTP failures a
    state.peopleFail=peopleFail;state.jobsFail=jobsFail;
    const result=await loadWhatsAppReminderSettings(0,{});
    assert.equal(result.enabled,true);assert.equal(result.failed,true);
+   assert.equal(result.language,'en');
    assert.equal(result.people===null,peopleFail);assert.equal(result.jobs===null,jobsFail);
   }
   state.peopleFail=false;state.jobsFail=false;
@@ -37,5 +38,7 @@ test('settings loader preserves sending truth across independent HTTP failures a
    assert.deepEqual(result.people,{items:[],total:0});assert.deepEqual(result.jobs,{items:[],total:0});state[failure]=false;
   }
   assert.equal((await loadWhatsAppReminderSettings(0,{})).enabled,true);
+  state.language='unsupported';assert.equal((await loadWhatsAppReminderSettings(0,{})).language,null);
+  assert.equal((await loadWhatsAppReminderSettings(0,{})).failed,true);
  }finally{t.mock.restoreAll();server.closeAllConnections();await new Promise(resolve=>server.close(resolve));}
 });

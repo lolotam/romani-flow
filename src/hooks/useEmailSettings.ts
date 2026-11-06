@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { endpoints, rejectedSettings } from '@/lib/api';
 import type { CronStatus, EmailLogEntry, ExpiryPreview, SmtpStatus } from '@/lib/api';
+import { validEmailSettings, writeLoadedEmailSettings } from '@/lib/emailSettingsWrite';
 
 /**
  * State and actions of the e-mail settings screen.
@@ -94,6 +95,8 @@ export function useEmailSettings() {
   const [log, setLog] = useState<EmailLogEntry[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [busy, setBusy] = useState<'save' | 'test' | 'report' | null>(null);
+  const [settingsReady, setSettingsReady] = useState(false);
+  const ready = useRef(false);
 
   const loadStatus = useCallback(async () => {
     const [cronResult, previewResult, logResult] = await Promise.all([
@@ -108,10 +111,12 @@ export function useEmailSettings() {
 
   const load = useCallback(async () => {
     setIsLoading(true);
-    const { data } = await endpoints.settings.read();
-    if (data) {
+    ready.current = false; setSettingsReady(false);
+    const { data, error } = await endpoints.settings.read();
+    if (!error && validEmailSettings(data?.settings)) {
       setForm(toForm(data.settings));
       setSmtp(data.smtp);
+      ready.current = true; setSettingsReady(true);
     }
     await loadStatus();
     setIsLoading(false);
@@ -132,7 +137,7 @@ export function useEmailSettings() {
 
   const save = async (): Promise<ActionResult> => {
     setBusy('save');
-    const { error } = await endpoints.settings.update({
+    const { error } = await writeLoadedEmailSettings({
       'email.enabled': form.enabled,
       'email.recipients': splitAddresses(form.recipients),
       'email.cc': splitAddresses(form.cc),
@@ -144,7 +149,7 @@ export function useEmailSettings() {
       'cron.days': form.cronDays,
       'cron.include_employees': form.includeEmployees,
       'cron.include_documents': form.includeDocuments,
-    });
+    }, ready.current);
     setBusy(null);
 
     if (error) {
@@ -158,8 +163,9 @@ export function useEmailSettings() {
   };
 
   const sendTest = async (): Promise<ActionResult> => {
+    if (!ready.current) return { ok: false, message: 'Load email settings successfully before sending.' };
     setBusy('test');
-    const { data, error } = await endpoints.email.sendTest(splitAddresses(form.recipients));
+    const { data, error } = await endpoints.email.sendTest(splitAddresses(form.recipients), splitAddresses(form.cc));
     setBusy(null);
     await loadStatus();
     if (error || !data?.sent) return { ok: false, message: error?.message ?? 'not_sent' };
@@ -167,6 +173,7 @@ export function useEmailSettings() {
   };
 
   const sendReport = async (): Promise<ActionResult> => {
+    if (!ready.current) return { ok: false, message: 'Load email settings successfully before sending.' };
     setBusy('report');
     const { data, error } = await endpoints.email.expiryReport();
     setBusy(null);
@@ -184,6 +191,8 @@ export function useEmailSettings() {
     preview,
     log,
     isLoading,
+    settingsReady,
+    reloadSettings: load,
     busy,
     toggleInterval,
     save,

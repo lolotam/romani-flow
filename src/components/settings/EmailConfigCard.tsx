@@ -9,6 +9,7 @@ import { Switch } from '@/components/ui/switch';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { REMINDER_INTERVALS, type EmailForm } from '@/hooks/useEmailSettings';
 import type { CronStatus, SmtpStatus } from '@/lib/api';
+import { NotificationTemplate } from './NotificationTemplate';
 
 interface EmailConfigCardProps {
   form: EmailForm;
@@ -92,14 +93,7 @@ export function EmailConfigCard({
               onChange={(event) => patch({ fromName: event.target.value })}
             />
           </div>
-          <div className="flex items-end justify-between rounded-md border p-3">
-            <Label htmlFor="email_language">{L('التقرير بالإنجليزية', 'Report in English')}</Label>
-            <Switch
-              id="email_language"
-              checked={form.language === 'en'}
-              onCheckedChange={(english) => patch({ language: english ? 'en' : 'ar' })}
-            />
-          </div>
+          <NotificationTemplate channel="email" language={form.language} disabled={busy !== null} onChange={language => patch({ language })} />
         </div>
 
         <div className="space-y-3 border-t pt-4">

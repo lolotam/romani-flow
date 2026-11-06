@@ -110,7 +110,7 @@ const files = {
 
 const email = {
   status: () => request<{ smtpConfigured: boolean }>('/api/email/status'),
-  sendTest: (to: string[]) => request<{ sent: boolean }>('/api/email/test', { method: 'POST', body: { to } }),
+  sendTest: (to: string[], cc?: string[]) => request<{ sent: boolean }>('/api/email/test', { method: 'POST', body: { to, ...(cc === undefined ? {} : { cc }) } }),
   expiryReport: () =>
     request<{ sent: boolean; skipped: string | null; error: string | null }>('/api/email/expiry-report', {
       method: 'POST',

@@ -1,6 +1,7 @@
 import nodemailer, { type Transporter } from 'nodemailer';
 import type { AppConfig } from '../config.js';
 import { isSmtpConfigured } from '../config.js';
+import { emailIdentity, emailIdentities } from './emailAddress.js';
 
 /**
  * SMTP transport.
@@ -84,8 +85,10 @@ export class Mailer {
 
   /** Sends one message. Rejects empty recipient lists before touching the network. */
   async send(message: MailMessage): Promise<MailResult> {
-    const to = message.to.filter((address) => address.trim().length > 0);
-    if (to.length === 0) {
+    const to = emailIdentities(message.to);
+    const cc = message.cc ? emailIdentities(message.cc).filter(address => !to.some(primary => emailIdentity(primary) === emailIdentity(address))) : undefined;
+    const bcc = message.bcc ? emailIdentities(message.bcc).filter(address => ![...to, ...(cc ?? [])].some(primary => emailIdentity(primary) === emailIdentity(address))) : undefined;
+    if (to.length === 0 && !cc?.length && !bcc?.length) {
       throw new MailError('At least one recipient is required.', 'no_recipients', 400);
     }
 
@@ -95,8 +98,8 @@ export class Mailer {
       const info = await transport.sendMail({
         from: this.config.smtp.from,
         to,
-        cc: message.cc?.filter((address) => address.trim().length > 0),
-        bcc: message.bcc?.filter((address) => address.trim().length > 0),
+        cc,
+        bcc,
         subject: message.subject,
         text: message.text,
         html: message.html,
@@ -109,12 +112,12 @@ export class Mailer {
 
       // The relay can accept some recipients and reject others. That has to be
       // visible, otherwise the rejected recipients would never be retried.
-      const accepted = (info.accepted ?? []).map((address: unknown) => String(address));
-      const rejected = (info.rejected ?? []).map((address: unknown) => String(address));
+      const accepted = emailIdentities((info.accepted ?? []).map((address: unknown) => String(address))).map(emailIdentity);
+      const rejected = emailIdentities((info.rejected ?? []).map((address: unknown) => String(address))).map(emailIdentity);
 
-      const allRecipients = [...to, ...(message.cc ?? []), ...(message.bcc ?? [])];
+      const allRecipients = [...to, ...(cc ?? []), ...(bcc ?? [])];
       const missing = allRecipients.filter(
-        (address) => !accepted.includes(address) && !rejected.includes(address),
+        (address) => !accepted.includes(emailIdentity(address)) && !rejected.includes(emailIdentity(address)),
       );
 
       return {
@@ -125,7 +128,12 @@ export class Mailer {
       };
     } catch (error) {
       const detail = error instanceof Error ? error.message : String(error);
-      throw new MailError(`The message could not be sent: ${detail}`, 'send_failed', 502);
+      const code = error && typeof error === 'object' && 'code' in error ? String(error.code) : '';
+      const provenUnsent = ['ENOTFOUND', 'EAI_AGAIN', 'ECONNREFUSED', 'EDNS'].includes(code);
+      // Nodemailer emits these rejections before accepting message content.
+      const rejectedBeforeData = code === 'EAUTH' || code === 'EENVELOPE';
+      const failureCode = provenUnsent ? 'connection_failed' : rejectedBeforeData ? 'smtp_rejected' : 'send_failed';
+      throw new MailError(`The message could not be sent: ${detail}`, failureCode, 502);
     }
   }
 
