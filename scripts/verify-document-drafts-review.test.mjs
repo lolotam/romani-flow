@@ -28,7 +28,7 @@ async function stageDraftFile(f, draft) {
   return (await response.json()).data[0].upload_id;
 }
 
-test('a replacement waiting for the coordinator rechecks its draft revision before touching either file', () => reminderApi(async f => {
+test('a replacement waiting for the coordinator rechecks its draft revision before touching either file', t => reminderApi(async f => {
   const [original] = await f.documents.stageUploads([file]);
   await f.documents.replaceFile(f.document.id, original.uploadId);
   const draft = { account: 'admin', scope: 'edit:' + f.document.id, revision: 'none' };
@@ -36,18 +36,25 @@ test('a replacement waiting for the coordinator rechecks its draft revision befo
   const endpoint = '/api/documents/' + f.document.id + '/file';
   assert.equal((await f.request(endpoint, { method: 'PUT', body: { upload_id: uploadId } })).status, 403);
   assert.equal((await f.request(endpoint, { method: 'PUT', body: { upload_id: uploadId, draft: { ...draft, scope: 'new' } } })).status, 400);
-  const entered = deferred(), release = deferred(), received = deferred();
+  const entered = deferred(), release = deferred(), queued = deferred();
   let currentRevision;
   const otherDevice = f.reminders.coordinator.runExclusive(async () => {
     entered.resolve(); await release.promise;
     currentRevision = writeDraft(f.db, 'admin', draft, { notes: 'newer device draft' });
   });
   await entered.promise;
-  const onRequest = req => { if (req.url === endpoint) received.resolve(); };
-  f.server.on('request', onRequest);
+  const runExclusive = f.reminders.coordinator.runExclusive.bind(f.reminders.coordinator);
+  t.mock.method(f.reminders.coordinator, 'runExclusive', action => {
+    const result = runExclusive(action);
+    queued.resolve();
+    return result;
+  });
   const stale = f.request(endpoint, { method: 'PUT', body: { upload_id: uploadId, draft } });
-  await received.promise; release.resolve(); await otherDevice;
-  const result = await stale; f.server.off('request', onRequest);
+  try {
+    await Promise.race([queued.promise, stale.then(() => { throw new Error('Replacement did not enter coordinator'); })]);
+  } finally { release.resolve(); }
+  await otherDevice;
+  const result = await stale;
   assert.equal(result.status, 409);
   assert.equal(f.db.prepare('SELECT file_path FROM documents WHERE id=?').get(f.document.id).file_path, original.filePath);
   assert.equal(f.storage.exists(original.filePath), true); assert.equal(f.storage.exists(replacementPath), true);
@@ -55,6 +62,37 @@ test('a replacement waiting for the coordinator rechecks its draft revision befo
   const current = await f.request(endpoint, { method: 'PUT', body: { upload_id: uploadId, draft: { ...draft, revision: currentRevision } } });
   assert.equal(current.status, 200); assert.equal(f.storage.exists(original.filePath), false);
   assert.equal(f.db.prepare('SELECT file_path FROM documents WHERE id=?').get(f.document.id).file_path, replacementPath);
+}));
+
+test('a failed upload claim rolls back attachment replacement and keeps the original file readable', () => reminderApi(async f => {
+  const [original, replacement] = await f.documents.stageUploads([file, { ...file, buffer: Buffer.from('replacement bytes') }]);
+  await f.documents.replaceFile(f.document.id, original.uploadId);
+  const before = f.db.prepare('SELECT * FROM documents WHERE id=?').get(f.document.id);
+  f.db.exec("CREATE TRIGGER reject_upload_claim BEFORE DELETE ON pending_uploads BEGIN SELECT RAISE(ABORT,'synthetic claim failure'); END");
+  try {
+    await assert.rejects(f.documents.replaceFile(f.document.id, replacement.uploadId), /synthetic claim failure/);
+    assert.deepEqual(f.db.prepare('SELECT * FROM documents WHERE id=?').get(f.document.id), before);
+    assert.notEqual(f.documents.resolveUpload(replacement.uploadId), null);
+    assert.deepEqual(await f.storage.read(original.filePath), file.buffer);
+    assert.deepEqual(await f.storage.read(replacement.filePath), Buffer.from('replacement bytes'));
+  } finally { f.db.exec('DROP TRIGGER reject_upload_claim'); }
+  await f.documents.replaceFile(f.document.id, replacement.uploadId);
+  assert.equal(f.documents.resolveUpload(replacement.uploadId), null);
+  assert.equal(f.storage.exists(original.filePath), false);
+}));
+
+for (const conflict of ['upload_id', 'draft_user_id', 'draft_scope']) test(`abandon preserves cleanup ownership on conflicting ${conflict}`, () => reminderApi(async f => {
+  const draft = { account: 'admin', scope: 'new', revision: 'none' };
+  const uploadId = await stageDraftFile(f, draft), path = f.documents.resolveUpload(uploadId).filePath;
+  const queued = { upload_id: uploadId, draft_user_id: 'admin', draft_scope: 'new', [conflict]: 'other' };
+  f.db.prepare('INSERT INTO upload_cleanup_queue(file_path,created_at,upload_id,draft_user_id,draft_scope) VALUES(?,?,?,?,?)')
+    .run(path, '2026-01-01', queued.upload_id, queued.draft_user_id, queued.draft_scope);
+  const before = f.db.prepare('SELECT * FROM upload_cleanup_queue WHERE file_path=?').get(path);
+  const result = await f.request('/api/files/uploads/' + uploadId, { method: 'DELETE', body: { draft } });
+  assert.equal(result.status, 409);
+  assert.deepEqual(f.db.prepare('SELECT * FROM upload_cleanup_queue WHERE file_path=?').get(path), before);
+  assert.notEqual(f.documents.resolveUpload(uploadId), null);
+  assert.deepEqual(await f.storage.read(path), file.buffer);
 }));
 
 test('draft-owned uploads reject foreign validation and every foreign or missing-context claim', () => reminderApi(async f => {

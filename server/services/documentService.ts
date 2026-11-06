@@ -106,8 +106,12 @@ export class DocumentService {
       }
       const path = String(row.file_path);
       atomic(this.db, () => {
+        const queued = this.db.prepare('SELECT upload_id,draft_user_id,draft_scope FROM upload_cleanup_queue WHERE file_path=?').get(path);
+        if (queued && (queued.upload_id !== uploadId || queued.draft_user_id !== owner.userId || queued.draft_scope !== owner.scope)) {
+          throw new RepositoryError('Upload cleanup belongs to a different draft.', 'invalid_upload', 409);
+        }
         this.db.prepare(`INSERT INTO upload_cleanup_queue(file_path,created_at,upload_id,draft_user_id,draft_scope) VALUES(?,?,?,?,?)
-          ON CONFLICT(file_path) DO UPDATE SET upload_id=excluded.upload_id,draft_user_id=excluded.draft_user_id,draft_scope=excluded.draft_scope`)
+          ON CONFLICT(file_path) DO NOTHING`)
           .run(path, new Date().toISOString(), uploadId, owner.userId, owner.scope);
         this.db.prepare('DELETE FROM pending_uploads WHERE id=?').run(uploadId);
       });
@@ -364,20 +368,22 @@ export class DocumentService {
 
     const previousPath = document.file_path as string | undefined;
 
-    this.db.prepare(
-      `UPDATE documents
+    atomic(this.db, () => {
+      this.db.prepare(
+        `UPDATE documents
           SET file_name = ?, file_path = ?, file_size = ?, mime_type = ?, updated_at = ?
         WHERE id = ?`,
-    ).run(
-      fields.file_name,
-      fields.file_path,
-      fields.file_size,
-      fields.mime_type,
-      new Date().toISOString(),
-      documentId,
-    );
+      ).run(
+        fields.file_name,
+        fields.file_path,
+        fields.file_size,
+        fields.mime_type,
+        new Date().toISOString(),
+        documentId,
+      );
 
-    this.claimUpload(uploadId);
+      this.claimUpload(uploadId);
+    });
 
     if (previousPath && previousPath !== fields.file_path) {
       await this.removeFile({ file_path: previousPath });

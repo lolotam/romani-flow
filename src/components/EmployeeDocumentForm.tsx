@@ -67,6 +67,7 @@ function EmployeeDocumentFormContent({
   const allowLastSubmission = useRef(true);
   const draft = useDocumentDraft('employee:' + employeeId, saved => {
     dirty.current = false;
+    if (saved !== null) allowLastSubmission.current = false;
     setFormData(employeeDocumentDraft(saved, selectedFile?.name));
   }, isOpen);
   useEffect(() => { if (isOpen) { dirty.current = false; allowLastSubmission.current = true; } }, [isOpen, employeeId]);
