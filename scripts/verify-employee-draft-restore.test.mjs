@@ -3,14 +3,19 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
 import ts from 'typescript';
-import { employeeDocumentDraft } from '../src/lib/documentFormDrafts.ts';
+import { employeeDocumentDraft, newDocumentDefaults } from '../src/lib/documentFormDrafts.ts';
+import { restoreFormDate } from '../src/lib/formDefaults.ts';
+import { draftValues } from '../src/lib/documentDraftSession.ts';
 
 // Exercise the real component callbacks at the hook boundary, without a browser.
 // Defaults are already pending when a newly created cross-device draft arrives.
-function formCallbacks() {
-  const state = { form: null, draftRestore: null, defaults: null };
+function formCallbacks(kind = 'employee', status = 'saved') {
+  const state = { form: null, draftRestore: null, defaults: null, picker: null, changes: [] };
   const react = {
-    createElement: (type, props) => ({ type, props }),
+    createElement: (type, props) => {
+      if (type === 'picker') state.picker = props;
+      return { type, props };
+    },
     useRef: current => ({ current }),
     useCallback: callback => callback,
     useEffect: () => {},
@@ -24,29 +29,60 @@ function formCallbacks() {
     '@/hooks/useAuth': { useAuth: () => ({ user: { id: 'synthetic-admin' } }) },
     '@/contexts/LanguageContext': { useLanguage: () => ({ t: key => key, isRTL: false }) },
     '@/lib/documentFormDrafts': { employeeDocumentDraft },
+    '@/lib/formDefaults': { restoreFormDate },
+    '@/lib/documentDraftSession': { draftValues },
+    './documents/documentFormSchema': { createDocumentSchema: () => ({}) },
+    './documents/DocumentAttachmentPicker': { DocumentAttachmentPicker: 'picker' },
+    '@hookform/resolvers/zod': { zodResolver: () => ({}) },
+    'react-hook-form': { useForm: ({ defaultValues }) => {
+      state.form = defaultValues;
+      return { getValues: key => key ? state.form[key] : state.form, reset: value => { state.form = value; },
+        setValue: (key, value) => { state.form = { ...state.form, [key]: value }; state.changes.push(state.form); },
+        watch: key => state.form[key], formState: { isDirty: false }, handleSubmit: () => () => {} };
+    } },
     './documents/useStagedDocumentUpload': { useStagedDocumentUpload: () => ({ hasPendingUpload: () => false }) },
     '@/hooks/useDocumentDraft': { useDocumentDraft: (_scope, restore) => {
       state.draftRestore = restore;
-      return { status: 'saved', hasDraft: false, session: { current: null } };
+      return { status, hasDraft: false, session: { current: { change: value => state.changes.push(value) } } };
     } },
     '@/hooks/useLastSubmission': { useLastSubmissionRestore: (_form, enabled, restore, pristine) => {
       state.defaults = { enabled, restore, pristine };
     } },
   };
-  const source = fs.readFileSync(new URL('../src/components/EmployeeDocumentForm.tsx', import.meta.url), 'utf8');
+  modules['@/lib/documentFormDrafts'].newDocumentDefaults = newDocumentDefaults;
+  const component = kind === 'employee' ? 'EmployeeDocumentForm' : 'DocumentForm';
+  const source = fs.readFileSync(new URL('../src/components/' + component + '.tsx', import.meta.url), 'utf8');
   const compiled = ts.transpileModule(source, { compilerOptions: {
     module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.React, esModuleInterop: true,
   } }).outputText;
   const exports = {};
   vm.runInNewContext(compiled, { exports, require: name => modules[name] ?? {} });
-  const props = { isOpen: true, employeeId: 'synthetic-employee', onClose() {}, onSave() {} };
-  exports.EmployeeDocumentForm(props).type(props);
+  const props = { isOpen: true, employeeId: 'synthetic-employee', onClose() {}, onSave() {},
+    employees: [], documentTypes: [], companies: [], ministries: [] };
+  const root = exports[component](props);
+  root.type({ ...props, ...root.props });
   return state;
 }
 
-for (const restored of [null, { title: 'Cross-device draft', notes: 'Unsubmitted work' }]) {
-  test(`a pending defaults response ${restored ? 'cannot replace a restored draft' : 'can fill an empty form'}`, () => {
-    const state = formCallbacks();
+for (const kind of ['employee', 'general']) for (const phase of ['before load', 'after restore']) {
+  test(`${kind} file selection ${phase} preserves cross-device metadata without queuing an empty draft`, () => {
+    const state = formCallbacks(kind, phase === 'before load' ? 'loading' : 'saved');
+    const saved = { title: 'Custom draft title', notes: 'Important unsaved notes', expiry_date: '2030-01-01' };
+    if (phase === 'after restore') state.draftRestore(saved);
+    const before = JSON.stringify(state.form);
+    state.picker.onSelect({ name: 'different-name.pdf' });
+    assert.equal(JSON.stringify(state.form), before);
+    assert.equal(state.changes.length, 0);
+    if (phase === 'before load') state.draftRestore(saved);
+    assert.equal(state.form.title, saved.title);
+    assert.equal(state.form.notes, saved.notes);
+    assert.equal(state.form.expiry_date.getFullYear(), 2030);
+  });
+}
+
+for (const kind of ['employee', 'general']) for (const restored of [null, { title: 'Cross-device draft', notes: 'Unsubmitted work' }]) {
+  test(`${kind}: a pending defaults response ${restored ? 'cannot replace a restored draft' : 'can fill an empty form'}`, () => {
+    const state = formCallbacks(kind);
     assert.equal(state.defaults.enabled, true); // The old request was eligible when started.
     state.draftRestore(restored);
     if (state.defaults.pristine()) state.defaults.restore({ title: 'Previous submission', notes: 'Old notes' });

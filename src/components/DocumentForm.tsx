@@ -68,12 +68,17 @@ function DocumentFormContent({
 
   const baseline = React.useRef<DefaultValues<DocumentFormData>>(form.getValues());
   const draft = useDocumentDraft(scope, saved => {
+    if (saved !== null) allowLastSubmission.current = false;
     const values = saved ? { ...baseline.current, ...saved,
       issue_date: restoreFormDate(saved.issue_date), expiry_date: restoreFormDate(saved.expiry_date),
       ...(preselectedEmployeeId ? { beneficiary_type: 'employee' as const, employee_id: preselectedEmployeeId, company_id: '' } : {}),
       ...(preselectedCompanyId && !preselectedEmployeeId ? { beneficiary_type: 'company' as const, company_id: preselectedCompanyId, employee_id: '' } : {}) } : baseline.current;
     form.reset(values as DocumentFormData);
   });
+  React.useEffect(() => {
+    if (!selectedFile || editingDocument || draft.status !== 'saved' || draft.hasDraft || form.getValues('title')) return;
+    form.setValue('title', selectedFile.name.replace(/\.[^/.]+$/, '').slice(0, 120), { shouldDirty: true });
+  }, [selectedFile, editingDocument, draft.status, draft.hasDraft, form]);
   React.useEffect(() => {
     const subscription = form.watch((_values, info) => {
       if (info.name) draft.session.current?.change(draftValues(form.getValues()));
@@ -161,11 +166,7 @@ function DocumentFormContent({
       <CardContent className="grid items-start gap-6 p-4 lg:grid-cols-2 lg:p-6">
         <DocumentAttachmentPicker file={selectedFile} editingDocument={editingDocument}
             disabled={isSubmitting || draft.status === 'discarding' || hasPendingUpload() && ['loading', 'failed', 'conflict'].includes(draft.status)}
-            onChange={() => void changeFile()} onSelect={file => {
-              const title = newDocumentDefaults(defaultContext, file.name).title;
-              baseline.current = { ...baseline.current, title };
-              setSelectedFile(file); form.setValue('title', title, { shouldDirty: true });
-            }} />
+            onChange={() => void changeFile()} onSelect={setSelectedFile} />
         <Form {...form}>
           <form onSubmit={form.handleSubmit(data => handleSubmit(data), () => toast.error(t('documents.form.validation.reviewFields')))} className="space-y-6">
             <fieldset disabled={isSubmitting || draft.status === 'discarding'} className="space-y-6">

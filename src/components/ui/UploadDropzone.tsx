@@ -22,6 +22,7 @@ interface UploadDropzoneProps {
   acceptedFileTypes?: string[];
   className?: string;
   disabled?: boolean;
+  selectionOnly?: boolean;
 }
 
 export function UploadDropzone({
@@ -30,7 +31,8 @@ export function UploadDropzone({
   maxFileSize = 10 * 1024 * 1024, // 10MB
   acceptedFileTypes = ['.pdf', '.doc', '.docx', '.jpg', '.jpeg', '.png'],
   className,
-  disabled = false
+  disabled = false,
+  selectionOnly = false
 }: UploadDropzoneProps) {
   const { t } = useLanguage();
   const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([]);
@@ -42,6 +44,9 @@ export function UploadDropzone({
     if (rejectedFiles.length > 0) {
       console.warn('Some files were rejected:', rejectedFiles);
     }
+
+    // In-form selection is local; its parent owns preview and actual upload state.
+    if (selectionOnly) { onFilesAccepted(acceptedFiles); return; }
 
     // Add accepted files to the list
     const newFiles: UploadedFile[] = acceptedFiles.map(file => ({
@@ -58,7 +63,7 @@ export function UploadDropzone({
     newFiles.forEach(uploadedFile => {
       simulateUpload(uploadedFile.id);
     });
-  }, [onFilesAccepted, disabled]);
+  }, [onFilesAccepted, disabled, selectionOnly]);
 
   const simulateUpload = (fileId: string) => {
     const interval = setInterval(() => {

@@ -78,6 +78,14 @@ function EmployeeDocumentFormContent({
   }, () => allowLastSubmission.current && !dirty.current);
 
   useEffect(() => {
+    if (!selectedFile || draft.status !== 'saved' || draft.hasDraft || latestForm.current.title) return;
+    dirty.current = true;
+    const next = { ...latestForm.current, title: selectedFile.name.replace(/\.[^/.]+$/, '').slice(0, 120) };
+    setFormData(next);
+    draft.session.current?.change(draftValues(next));
+  }, [selectedFile, draft.status, draft.hasDraft, draft.session, setFormData]);
+
+  useEffect(() => {
     if (!isOpen) return;
     let cancelled = false;
     setFormData(emptyForm);
@@ -198,9 +206,7 @@ function EmployeeDocumentFormContent({
 
         <div className="grid items-start gap-6 lg:grid-cols-2">
         <DocumentAttachmentPicker file={selectedFile} disabled={isSubmitting || draft.status === 'discarding' || hasPendingUpload() && ['loading', 'failed', 'conflict'].includes(draft.status)}
-          onChange={() => void changeFile()} onSelect={file => {
-            setSelectedFile(file); editForm({ title: file.name.replace(/\.[^/.]+$/, '').slice(0, 120) });
-          }} />
+          onChange={() => void changeFile()} onSelect={setSelectedFile} />
         <form onSubmit={handleSubmit} className="space-y-6">
           <fieldset disabled={isSubmitting || draft.status === 'discarding'} className="space-y-6">
           {formData.title.length > 120 && <p role="alert" className="text-destructive">{t('documents.form.validation.titleMaxLength')}</p>}
