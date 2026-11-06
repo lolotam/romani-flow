@@ -70,10 +70,16 @@ function DocumentFormContent({
   const generatedTitle = React.useRef<string | null>(!editingDocument && fileName ? baseline.current.title ?? null : null);
   const draft = useDocumentDraft(scope, saved => {
     if (saved !== null) { allowLastSubmission.current = false; generatedTitle.current = null; }
+    let empty = baseline.current;
+    if (saved === null && !editingDocument) {
+      const title = selectedFile?.name.replace(/\.[^/.]+$/, '').slice(0, 120) ?? '';
+      generatedTitle.current = selectedFile ? title : null;
+      empty = { ...baseline.current, title };
+    }
     const values = saved ? { ...baseline.current, ...saved,
       issue_date: restoreFormDate(saved.issue_date), expiry_date: restoreFormDate(saved.expiry_date),
       ...(preselectedEmployeeId ? { beneficiary_type: 'employee' as const, employee_id: preselectedEmployeeId, company_id: '' } : {}),
-      ...(preselectedCompanyId && !preselectedEmployeeId ? { beneficiary_type: 'company' as const, company_id: preselectedCompanyId, employee_id: '' } : {}) } : baseline.current;
+      ...(preselectedCompanyId && !preselectedEmployeeId ? { beneficiary_type: 'company' as const, company_id: preselectedCompanyId, employee_id: '' } : {}) } : empty;
     form.reset(values as DocumentFormData);
   });
   React.useEffect(() => {

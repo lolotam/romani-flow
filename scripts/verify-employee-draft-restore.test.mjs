@@ -9,7 +9,7 @@ import { draftValues } from '../src/lib/documentDraftSession.ts';
 
 // Exercise the real component callbacks at the hook boundary, without a browser.
 // Defaults are already pending when a newly created cross-device draft arrives.
-function formCallbacks(kind = 'employee', status = 'saved') {
+function formCallbacks(kind = 'employee', status = 'saved', overrides = {}) {
   const state = { form: null, draftRestore: null, defaults: null, picker: null, changes: [] };
   const react = {
     createElement: (type, props) => {
@@ -58,11 +58,30 @@ function formCallbacks(kind = 'employee', status = 'saved') {
   const exports = {};
   vm.runInNewContext(compiled, { exports, require: name => modules[name] ?? {} });
   const props = { isOpen: true, employeeId: 'synthetic-employee', onClose() {}, onSave() {},
-    employees: [], documentTypes: [], companies: [], ministries: [] };
+    employees: [], documentTypes: [], companies: [], ministries: [], ...overrides };
   const root = exports[component](props);
   root.type({ ...props, ...root.props });
   return state;
 }
+
+for (const selected of [{ name: 'second.pdf' }, null]) {
+  test(`discard uses ${selected ? 'the current file title' : 'an empty title without a file'}, never the initial file title`, () => {
+    const state = formCallbacks('general', 'saved', { fileName: 'first.pdf', uploadedFile: selected });
+    state.draftRestore({ title: 'Saved draft title', notes: 'Discard me' });
+    state.draftRestore(null);
+    assert.equal(state.form.title, selected ? 'second' : '');
+    assert.equal(state.form.notes, '');
+  });
+}
+
+test('discard while editing preserves the stored document title rather than the replacement filename', () => {
+  const state = formCallbacks('general', 'saved', { fileName: 'first.pdf', uploadedFile: { name: 'second.pdf' },
+    editingDocument: { id: 'synthetic', title: 'Stored title', expiry_date: '2030-01-01', notes: 'Stored notes' } });
+  state.draftRestore({ title: 'Unsaved edit', notes: 'Discard me' });
+  state.draftRestore(null);
+  assert.equal(state.form.title, 'Stored title');
+  assert.equal(state.form.notes, 'Stored notes');
+});
 
 for (const kind of ['employee', 'general']) for (const phase of ['before load', 'after restore']) {
   test(`${kind} file selection ${phase} preserves cross-device metadata without queuing an empty draft`, () => {
