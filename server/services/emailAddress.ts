@@ -2,5 +2,10 @@
 export const emailIdentity = (address: string): string => address.trim().toLowerCase();
 
 export function emailIdentities(addresses: string[]): string[] {
-  return [...new Set(addresses.map(emailIdentity).filter(Boolean))];
+  const first = new Map<string, string>();
+  for (const address of addresses) {
+    const key = emailIdentity(address);
+    if (key && !first.has(key)) first.set(key, address.trim());
+  }
+  return [...first.values()];
 }

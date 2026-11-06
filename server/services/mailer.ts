@@ -1,7 +1,7 @@
 import nodemailer, { type Transporter } from 'nodemailer';
 import type { AppConfig } from '../config.js';
 import { isSmtpConfigured } from '../config.js';
-import { emailIdentities } from './emailAddress.js';
+import { emailIdentity, emailIdentities } from './emailAddress.js';
 
 /**
  * SMTP transport.
@@ -86,8 +86,8 @@ export class Mailer {
   /** Sends one message. Rejects empty recipient lists before touching the network. */
   async send(message: MailMessage): Promise<MailResult> {
     const to = emailIdentities(message.to);
-    const cc = message.cc ? emailIdentities(message.cc).filter(address => !to.includes(address)) : undefined;
-    const bcc = message.bcc ? emailIdentities(message.bcc).filter(address => !to.includes(address) && !cc?.includes(address)) : undefined;
+    const cc = message.cc ? emailIdentities(message.cc).filter(address => !to.some(primary => emailIdentity(primary) === emailIdentity(address))) : undefined;
+    const bcc = message.bcc ? emailIdentities(message.bcc).filter(address => ![...to, ...(cc ?? [])].some(primary => emailIdentity(primary) === emailIdentity(address))) : undefined;
     if (to.length === 0 && !cc?.length && !bcc?.length) {
       throw new MailError('At least one recipient is required.', 'no_recipients', 400);
     }
@@ -112,12 +112,12 @@ export class Mailer {
 
       // The relay can accept some recipients and reject others. That has to be
       // visible, otherwise the rejected recipients would never be retried.
-      const accepted = emailIdentities((info.accepted ?? []).map((address: unknown) => String(address)));
-      const rejected = emailIdentities((info.rejected ?? []).map((address: unknown) => String(address)));
+      const accepted = emailIdentities((info.accepted ?? []).map((address: unknown) => String(address))).map(emailIdentity);
+      const rejected = emailIdentities((info.rejected ?? []).map((address: unknown) => String(address))).map(emailIdentity);
 
       const allRecipients = [...to, ...(cc ?? []), ...(bcc ?? [])];
       const missing = allRecipients.filter(
-        (address) => !accepted.includes(address) && !rejected.includes(address),
+        (address) => !accepted.includes(emailIdentity(address)) && !rejected.includes(emailIdentity(address)),
       );
 
       return {

@@ -9,6 +9,7 @@ import type { Mailer } from '../services/mailer.js';
 import type { CronService } from '../services/cronService.js';
 import { collectExpiring, startEmailAttempt, finishEmailAttempt } from '../services/expiryService.js';
 import { parseIntervals } from '../services/intervals.js';
+import { emailIdentity, emailIdentities } from '../services/emailAddress.js';
 import { documentEmailHtml, documentEmailText } from '../services/templates/index.js';
 import type { StorageService } from '../services/storageService.js';
 
@@ -83,9 +84,9 @@ export function createEmailRouter(
     requireAdmin,
     asyncHandler(async (req, res) => {
       const { valid, invalid: invalidTo } = parseAddressList(req.body?.to);
-      const recipients = Object.hasOwn(req.body ?? {}, 'to') ? valid : getStringList(db, 'email.recipients');
+      const recipients = emailIdentities(Object.hasOwn(req.body ?? {}, 'to') ? valid : getStringList(db, 'email.recipients'));
       const copies = parseAddressList(Object.hasOwn(req.body ?? {}, 'cc') ? req.body.cc : getStringList(db, 'email.cc'));
-      const cc = [...new Set(copies.valid)].filter(address => !recipients.includes(address));
+      const cc = emailIdentities(copies.valid).filter(address => !recipients.some(primary => emailIdentity(primary) === emailIdentity(address)));
       const invalid = [...invalidTo, ...copies.invalid];
       const allRecipients = [...recipients, ...cc];
 

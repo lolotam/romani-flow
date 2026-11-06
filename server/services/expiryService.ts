@@ -201,15 +201,15 @@ function alreadyNotified(
   recipient: string,
   uncertainIdentities: Set<string>,
 ): boolean {
-  if (uncertainIdentities.has(JSON.stringify([recipient, JSON.stringify([itemType, itemId, expiryDate, intervalDays])]))) return true;
-  const row = db
+  if (uncertainIdentities.has(JSON.stringify([emailIdentity(recipient), JSON.stringify([itemType, itemId, expiryDate, intervalDays])]))) return true;
+  const rows = db
     .prepare(
-      `SELECT id FROM expiry_notifications
+      `SELECT recipient FROM expiry_notifications
         WHERE item_type = ? AND item_id = ? AND expiry_date = ?
-          AND interval_days = ? AND lower(trim(recipient)) = ?`,
+          AND interval_days = ?`,
     )
-    .get(itemType, itemId, expiryDate, intervalDays, recipient);
-  return Boolean(row);
+    .all(itemType, itemId, expiryDate, intervalDays) as { recipient: string }[];
+  return rows.some(row => emailIdentity(row.recipient) === emailIdentity(recipient));
 }
 
 /** Interrupted SMTP waits suppress only their exact item/destination identities. */
@@ -271,7 +271,7 @@ export async function sendExpiryReport(
   const enabled = getBoolean(db, 'email.enabled');
   const recipients = emailIdentities(getStringList(db, 'email.recipients'));
   const cc = emailIdentities(getStringList(db, 'email.cc'));
-  const allRecipients = [...new Set([...recipients, ...cc])];
+  const allRecipients = emailIdentities([...recipients, ...cc]);
   const windowDays = getNumber(db, 'cron.days', 30);
   const includeEmployees = getBoolean(db, 'cron.include_employees');
   const includeDocuments = getBoolean(db, 'cron.include_documents');
