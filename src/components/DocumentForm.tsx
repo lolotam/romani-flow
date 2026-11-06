@@ -175,14 +175,14 @@ function DocumentFormContent({
   };
 
   return (
-    <Card className="w-full" dir={isRTL ? 'rtl' : 'ltr'}>
-      <CardContent className="grid items-start gap-6 p-4 lg:grid-cols-2 lg:p-6">
+    <Card className="min-w-0 w-full" dir={isRTL ? 'rtl' : 'ltr'}>
+      <CardContent className="grid min-w-0 grid-cols-1 items-start gap-6 p-4 lg:grid-cols-2 lg:p-6">
         <DocumentAttachmentPicker file={selectedFile} editingDocument={editingDocument}
             disabled={isSubmitting || draft.status === 'discarding' || hasPendingUpload() && ['loading', 'failed', 'conflict'].includes(draft.status)}
             onChange={() => void changeFile()} onSelect={setSelectedFile} />
         <Form {...form}>
-          <form onSubmit={form.handleSubmit(data => handleSubmit(data), () => toast.error(t('documents.form.validation.reviewFields')))} className="space-y-6">
-            <fieldset disabled={isSubmitting || draft.status === 'discarding'} className="space-y-6">
+          <form onSubmit={form.handleSubmit(data => handleSubmit(data), () => toast.error(t('documents.form.validation.reviewFields')))} className="min-w-0 space-y-6">
+            <fieldset disabled={isSubmitting || draft.status === 'discarding'} className="min-w-0 space-y-6">
             <DocumentDraftStatus status={draft.status} restored={draft.hasDraft} needsFile={!selectedFile && !editingDocument} onDiscard={() => {
               allowLastSubmission.current = false;
               void draft.session.current?.discard().catch(() => toast.error(t('documents.messages.saveError')));
@@ -285,13 +285,13 @@ function DocumentFormContent({
             />
 
             {/* Actions */}
-            <div className="flex justify-between pt-4 border-t">
+            <div className="flex flex-col gap-2 pt-4 border-t sm:flex-row sm:flex-wrap sm:justify-between">
               <Button type="button" variant="outline" onClick={() => void closeForm()} disabled={isSubmitting}>
                 <X className="h-4 w-4 ml-2" />
                 {t('documents.form.buttons.cancel')}
               </Button>
               
-              <div className="flex space-x-2">
+              <div className="flex flex-col gap-2 sm:flex-row">
                 <Button 
                   type="submit" 
                   disabled={isSubmitting || !selectedFile && !editingDocument || ['loading', 'discarding', 'failed', 'conflict'].includes(draft.status)}

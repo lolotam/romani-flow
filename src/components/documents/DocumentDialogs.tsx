@@ -24,7 +24,7 @@ export function DocumentUploadDialog({ open, onOpenChange, onFilesAccepted, copy
           {copy?.trigger ?? t('documents.uploadDocuments')}
         </Button>
       </DialogTrigger>
-      <DialogContent className="sm:max-w-2xl">
+      <DialogContent className="w-[calc(100%-2rem)] sm:max-w-2xl">
         <DialogHeader>
           <DialogTitle>{copy?.title ?? t('documents.uploadNew')}</DialogTitle>
           <DialogDescription>{copy?.description ?? t('documents.chooseFiles')}</DialogDescription>
@@ -41,10 +41,10 @@ export function DocumentEditorDialog(props: ComponentProps<typeof DocumentForm>)
   const registerClose = useCallback((handler: (() => Promise<void>) | null) => { close.current = handler; }, []);
   return (
     <Dialog open onOpenChange={(open) => { if (!open) void close.current?.(); }}>
-      <DialogContent className="sm:max-w-5xl max-h-[90vh] overflow-y-auto">
-        <DialogHeader>
+      <DialogContent className="w-[calc(100%-2rem)] sm:max-w-5xl max-h-[90vh] overflow-y-auto">
+        <DialogHeader className="min-w-0">
           <DialogTitle>{t(props.editingDocument ? 'documents.card.editDocument' : 'documents.uploadNew')}</DialogTitle>
-          <DialogDescription>{props.fileName}</DialogDescription>
+          <DialogDescription className="break-all">{props.fileName}</DialogDescription>
         </DialogHeader>
         <DocumentForm {...props} registerDraftClose={registerClose} />
       </DialogContent>
