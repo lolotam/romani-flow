@@ -994,14 +994,15 @@ async function runFormsTests(page, api) {
       assert.equal(resetTitle, '', 'title must be reset to empty string after Save & Add Next');
 
       // Assert attachment reset: change button is gone, file dropzone is restored, preview indicates no file
-      const changeBtn = form.locator('button:has-text("اختر الملفات"), button:has-text("Choose files")');
+      const changeBtn = page.locator('button:has-text("اختر الملفات"), button:has-text("Choose files")');
       assert.equal(await changeBtn.count(), 0, 'Attachment change button must be absent after file reset');
 
-      const fileInput = form.locator('input[type="file"]');
+      const fileInput = page.locator('input[type="file"]');
       assert.ok((await fileInput.count()) > 0, 'File upload dropzone must be restored after Save & Add Next');
       assert.equal(await fileInput.inputValue(), '', 'Reset file input must be empty');
-      assert.equal(await form.locator('section img, section iframe').count(), 0, 'Reset attachment has no preview');
-      assert.equal(await form.locator('button[type="submit"]').isEnabled(), true, 'Save transaction settled');
+      assert.equal(await page.locator('section img, section iframe').count(), 0, 'Reset attachment has no preview');
+      assert.equal(await fileInput.isEnabled(), true, 'Save transaction settled and next file can be selected');
+      assert.equal(await form.locator('button[type="submit"]').isEnabled(), false, 'New empty form cannot save until a file is selected');
     }
   );
 
@@ -1097,7 +1098,7 @@ async function runFormsTests(page, api) {
       const generalNotes = await form.locator('textarea[name="notes"]').inputValue();
       assert.equal(generalNotes, 'User protected note during in-flight', 'Manually edited notes must be protected');
       assert.equal(await form.locator('input[name="document_number"]').inputValue(), 'MANUAL-GENERAL', 'Manual extraction field remains protected');
-      assert.ok(!(await form.locator('label:has-text("الوزارة")').locator('..').innerText()).includes('وزارة الداخلية'), 'Restored null ministry must resist the proposal');
+      assert.ok(!(await form.locator('label:has-text("الوزارة")').locator('..').locator('button[role="combobox"]').innerText()).includes('وزارة الداخلية'), 'Restored null ministry must resist the proposal');
       assert.ok((await form.locator('label:has-text("تاريخ الانتهاء")').locator('..').innerText()).includes('اختر التاريخ'), 'Restored null expiry must resist the proposal');
 
       // Assert untouched eligible field applied as a positive control
@@ -1159,7 +1160,7 @@ async function runFormsTests(page, api) {
       const empNotes = await form.locator('#notes').inputValue();
       assert.equal(empNotes, 'Employee protected note during in-flight', 'Manually edited notes in Employee form must be protected');
       assert.equal(await form.locator('#document_number').inputValue(), 'MANUAL-EMPLOYEE', 'Manual employee number remains protected');
-      assert.ok(!(await form.locator('label:has-text("الوزارة")').locator('..').innerText()).includes('وزارة الداخلية'), 'Employee restored null ministry must resist the proposal');
+      assert.ok(!(await form.locator('label:has-text("الوزارة")').locator('..').locator('button[role="combobox"]').innerText()).includes('وزارة الداخلية'), 'Employee restored null ministry must resist the proposal');
       assert.ok((await form.locator('label:has-text("تاريخ الانتهاء")').locator('..').innerText()).includes('اختر التاريخ'), 'Employee restored null expiry must resist the proposal');
 
       // Assert untouched eligible field applied as a positive control
@@ -1197,14 +1198,14 @@ async function runFormsTests(page, api) {
       );
 
       // Require the actual replacement control (no conditional checks)
-      const changeBtn = form.locator('button:has-text("اختر الملفات"), button:has-text("Choose files")');
+      const changeBtn = page.locator('button:has-text("اختر الملفات"), button:has-text("Choose files")');
       assert.ok(
         (await changeBtn.count()) > 0,
         'Attachment replacement button must be present when file is selected'
       );
       await changeBtn.first().click();
 
-      const fileInput = form.locator('input[type="file"]');
+      const fileInput = page.locator('input[type="file"]');
       assert.ok(
         (await fileInput.count()) > 0,
         'File input must be accessible for replacement'
@@ -1260,11 +1261,11 @@ async function runFormsTests(page, api) {
 
       // Third file: unchanged machine values clear, explicit number edit survives.
       await numInput.fill('MANUAL-AFTER-B');
-      await form.getByRole('button', { name: 'اختر الملفات التي تريد رفعها', exact: true }).click();
-      await form.locator('input[type="file"]').waitFor({ state: 'attached' });
-      assert.ok(!(await form.locator('label:has-text("نوع الوثيقة")').locator('..').innerText()).includes('جواز السفر'), 'Replacing B clears unchanged machine type before C resolves');
+      await page.getByRole('button', { name: 'اختر الملفات التي تريد رفعها', exact: true }).click();
+      await page.locator('input[type="file"]').waitFor({ state: 'attached' });
+      assert.ok(!(await form.locator('label:has-text("نوع الوثيقة")').locator('..').locator('button[role="combobox"]').innerText()).includes('جواز السفر'), 'Replacing B clears unchanged machine type before C resolves');
       assert.equal(await numInput.inputValue(), 'MANUAL-AFTER-B', 'Replacing B preserves manually edited number');
-      await form.locator('input[type="file"]').setInputFiles({ name: 'fileC.png', mimeType: 'image/png', buffer: Buffer.from(validPng) });
+      await page.locator('input[type="file"]').setInputFiles({ name: 'fileC.png', mimeType: 'image/png', buffer: Buffer.from(validPng) });
       const reqC = await api.waitForRequest(2, 5000);
       await reqC.fulfillSuccess({
         document_number: { value: 'C-MACHINE', state: 'clear', alternatives: [], reason: 'none' },
@@ -1481,6 +1482,32 @@ async function runFormsTests(page, api) {
       assert.equal(api.uploadCalls, 1, 'File staged successfully for valid dates');
     }
   );
+
+  await testCase('Case 18: Context changes clear machine values and preserve manual values', false, async () => {
+    for (const variant of ['company', 'beneficiary', 'employee', 'filter']) {
+      await api.reset();
+      const epoch = await page.evaluate(() => window.__formsControls.mountGeneral());
+      await waitForFormReady(page, epoch);
+      const employeeMode = variant === 'employee' || variant === 'filter';
+      await selectComboboxOption(page, 'نوع المستفيد', employeeMode ? 'الموظف' : 'الشركة');
+      if (employeeMode) await selectComboboxOption(page, 'الموظف *', 'Ahmed Al-Sabah');
+      else await selectComboboxOption(page, 'الشركة', 'شركة روماني للتجارة');
+      await page.locator('input[type="file"]').setInputFiles({ name: 'context.png', mimeType: 'image/png', buffer: Buffer.from(validPng) });
+      const request = await api.waitForRequest(0, 5000);
+      await request.fulfillSuccess();
+      await page.waitForFunction(() => document.querySelector('input[name="document_number"]')?.value === '290010112345', null, { timeout: 5000 });
+      const form = page.locator('form');
+      await form.locator('input[name="document_number"]').fill('MANUAL-CONTEXT');
+      if (variant === 'company') await selectComboboxOption(page, 'الشركة', 'شركة الخليج للخدمات');
+      if (variant === 'beneficiary') await selectComboboxOption(page, 'نوع المستفيد', 'الموظف');
+      if (variant === 'employee') await selectComboboxOption(page, 'الموظف *', 'Fatima Al-Mansoor');
+      if (variant === 'filter') await selectComboboxOption(page, 'تصفية حسب الشركة (اختياري)', 'Romani Trading Co');
+      assert.equal(await form.locator('input[name="document_number"]').inputValue(), 'MANUAL-CONTEXT', `${variant}: manual number survives`);
+      assert.equal(await form.locator('button[role="combobox"]').filter({ hasText: 'البطاقة المدنية' }).count(), 0, `${variant}: machine type cleared`);
+      assert.equal(api.uploadCalls, 0, `${variant}: context changes do not stage files`);
+      await api.settleAllHeld();
+    }
+  });
 
   return {
     totalCount,

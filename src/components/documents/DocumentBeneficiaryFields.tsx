@@ -8,9 +8,21 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { useLanguage } from '@/contexts/LanguageContext';
 import type { DocumentFormData, DocumentFormProps } from './documentFormSchema';
 
-type Props = Pick<DocumentFormProps, 'companies' | 'employees' | 'documentTypes' | 'ministries' | 'preselectedEmployeeId' | 'preselectedCompanyId'>;
+type Props = Pick<DocumentFormProps, 'companies' | 'employees' | 'documentTypes' | 'ministries' | 'preselectedEmployeeId' | 'preselectedCompanyId'> & {
+  /** Reports an administrator edit so extraction can protect that field. */
+  onManualChange?: (field: 'document_type_id' | 'ministry_id') => void;
+  /** Reports a beneficiary/filter change so extraction can drop its provenance. */
+  onContextChange?: () => void;
+};
 
-export function DocumentBeneficiaryFields({ companies, employees, documentTypes, ministries, preselectedEmployeeId, preselectedCompanyId }: Props) {
+/**
+ * The beneficiary fields of a document form.
+ *
+ * An empty value is never a choice of the administrator: the hidden native
+ * select of the control resets itself and reports that reset as an empty
+ * selection, so such a reset must not erase a stored or restored value.
+ */
+export function DocumentBeneficiaryFields({ companies, employees, documentTypes, ministries, preselectedEmployeeId, preselectedCompanyId, onManualChange, onContextChange }: Props) {
   const form = useFormContext<DocumentFormData>();
   const { t, language } = useLanguage();
   const [selectedCompany, setSelectedCompany] = useState('');
@@ -45,7 +57,7 @@ export function DocumentBeneficiaryFields({ companies, employees, documentTypes,
               render={({ field }) => (
                 <FormItem>
                   <FormLabel>{t('documents.form.company')} *</FormLabel>
-                  <Select disabled={!!preselectedCompanyId} onValueChange={field.onChange} value={field.value}>
+                  <Select disabled={!!preselectedCompanyId} onValueChange={value => { onContextChange?.(); field.onChange(value); }} value={field.value}>
                     <FormControl>
                       <SelectTrigger>
                         <SelectValue placeholder={t('documents.form.selectCompany')} />
@@ -74,7 +86,7 @@ export function DocumentBeneficiaryFields({ companies, employees, documentTypes,
               render={({ field }) => (
                 <FormItem>
                   <FormLabel>{t('documents.form.documentType')} *</FormLabel>
-                  <Select onValueChange={field.onChange} value={field.value}>
+                  <Select onValueChange={value => { if (!value) return; onManualChange?.('document_type_id'); field.onChange(value); }} value={field.value}>
                     <FormControl>
                       <SelectTrigger>
                         <SelectValue placeholder={t('documents.form.selectDocumentType')} />
@@ -100,7 +112,7 @@ export function DocumentBeneficiaryFields({ companies, employees, documentTypes,
             render={({ field }) => (
               <FormItem>
                 <FormLabel>{t('documents.form.ministry')} *</FormLabel>
-                <Select onValueChange={field.onChange} value={field.value}>
+                <Select onValueChange={value => { if (!value) return; onManualChange?.('ministry_id'); field.onChange(value); }} value={field.value}>
                   <FormControl>
                     <SelectTrigger>
                       <SelectValue placeholder={t('documents.form.selectMinistry')} />
@@ -160,6 +172,7 @@ export function DocumentBeneficiaryFields({ companies, employees, documentTypes,
                   <FormLabel>{t('documents.form.filterByCompanyLabel')}</FormLabel>
                   <Select 
                     onValueChange={(value) => {
+                      onContextChange?.();
                       setSelectedCompany(value === 'all_companies' ? '' : value);
                       form.setValue('employee_id', ''); // Reset employee when company filter changes
                     }} 
@@ -190,7 +203,7 @@ export function DocumentBeneficiaryFields({ companies, employees, documentTypes,
               render={({ field }) => (
                 <FormItem>
                   <FormLabel>{t('documents.form.employeeLabel')}</FormLabel>
-                  <Select onValueChange={field.onChange} value={field.value}>
+                  <Select onValueChange={value => { onContextChange?.(); field.onChange(value); }} value={field.value}>
                     <FormControl>
                       <SelectTrigger>
                         <SelectValue placeholder={t('documents.form.selectEmployeeLabel')} />
@@ -216,7 +229,7 @@ export function DocumentBeneficiaryFields({ companies, employees, documentTypes,
             render={({ field }) => (
               <FormItem>
                 <FormLabel>{t('documents.form.documentTypeLabel')}</FormLabel>
-                <Select onValueChange={field.onChange} value={field.value}>
+                <Select onValueChange={value => { if (!value) return; onManualChange?.('document_type_id'); field.onChange(value); }} value={field.value}>
                   <FormControl>
                     <SelectTrigger>
                       <SelectValue placeholder={t('documents.form.selectDocumentTypeLabel')} />

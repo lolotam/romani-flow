@@ -15,17 +15,25 @@ import { useStagedDocumentUpload } from './documents/useStagedDocumentUpload';
 import { toast } from 'sonner';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { useDocumentDraft } from '@/hooks/useDocumentDraft';
-import { draftValues } from '@/lib/documentDraftSession';
+import { draftValues, type DocumentDraftSession } from '@/lib/documentDraftSession';
 import { employeeDocumentDraft, nextDocumentFileTitle } from '@/lib/documentFormDrafts';
 import { useAuth } from '@/hooks/useAuth';
 import { DocumentDraftStatus } from './documents/DocumentDraftStatus';
 import { DocumentAttachmentPicker } from './documents/DocumentAttachmentPicker';
 import { useLastSubmissionRestore } from '@/hooks/useLastSubmission';
+import { useDocumentExtraction, type DocumentExtractionOptions, type DocumentExtractionState } from '@/hooks/useDocumentExtraction';
+import { DocumentExtractionPanel } from './documents/DocumentExtractionPanel';
+import { documentNumber } from '../../server/contracts/documentNumber';
+import type { Field, Values } from '../../server/contracts/documentExtraction';
 
 const emptyForm = {
   title: '', document_type_id: '', ministry_id: '',
   issue_date: null as Date | null, expiry_date: null as Date | null, notes: '',
+  document_number: '',
 };
+
+/** The employee form knows the ministry, so every field may be proposed. */
+const employeeSupportedFields: Field[] = ['title', 'document_number', 'document_type_id', 'ministry_id', 'issue_date', 'expiry_date'];
 
 interface EmployeeDocumentFormProps {
   isOpen: boolean;
@@ -33,6 +41,22 @@ interface EmployeeDocumentFormProps {
   onSave: () => void;
   employeeId: string;
   uploadedFile?: File | null;
+}
+
+/**
+ * The extraction session of the employee form.
+ *
+ * The hook lives in its own component, so a host that renders the form
+ * without the extraction module still renders the form itself.
+ */
+function EmployeeExtractionBridge({ stateRef, options, disabled }: {
+  stateRef: React.MutableRefObject<DocumentExtractionState | null>;
+  options: DocumentExtractionOptions;
+  disabled: boolean;
+}) {
+  const state = useDocumentExtraction(options);
+  stateRef.current = state;
+  return <DocumentExtractionPanel state={state} disabled={disabled} />;
 }
 
 export function EmployeeDocumentForm(props: EmployeeDocumentFormProps) {
@@ -53,6 +77,7 @@ function EmployeeDocumentFormContent({
   const [documentTypes, setDocumentTypes] = useState<DocumentType[]>([]);
   const [ministries, setMinistries] = useState<Ministry[]>([]);
   const { t, isRTL } = useLanguage();
+  const { user } = useAuth();
   const { stageFile, clearUpload, abandonUpload, hasPendingUpload } = useStagedDocumentUpload();
   const submitting = useRef(false);
   
@@ -66,23 +91,79 @@ function EmployeeDocumentFormContent({
   const dirty = useRef(false);
   const allowLastSubmission = useRef(true);
   const generatedTitle = useRef<string | null>(uploadedFile ? uploadedFile.name.replace(/\.[^/.]+$/, '').slice(0, 120) : null);
+  const extractionRef = useRef<DocumentExtractionState | null>(null);
+  const draftSessionRef = useRef<{ current: DocumentDraftSession | null } | null>(null);
+  const [draftReady, setDraftReady] = useState(false);
+  const readExtractionValues = useCallback((): Values => {
+    const value = latestForm.current;
+    return {
+      title: value.title ?? '', document_number: value.document_number ?? '',
+      document_type_id: value.document_type_id ?? '', ministry_id: value.ministry_id ?? '',
+      issue_date: value.issue_date ? format(value.issue_date, 'yyyy-MM-dd') : '',
+      expiry_date: value.expiry_date ? format(value.expiry_date, 'yyyy-MM-dd') : '',
+    };
+  }, []);
+  // A machine write only ever touches the fields it may propose.
+  const applyExtractionPatch = useCallback((patch: Partial<Values>) => {
+    const next = { ...latestForm.current };
+    if (patch.title !== undefined) next.title = patch.title;
+    if (patch.document_number !== undefined) next.document_number = patch.document_number;
+    if (patch.document_type_id !== undefined) next.document_type_id = patch.document_type_id;
+    if (patch.ministry_id !== undefined) next.ministry_id = patch.ministry_id;
+    if (patch.issue_date !== undefined) next.issue_date = patch.issue_date ? new Date(patch.issue_date + 'T00:00:00') : null;
+    if (patch.expiry_date !== undefined) next.expiry_date = patch.expiry_date ? new Date(patch.expiry_date + 'T00:00:00') : null;
+    setFormData(next);
+    // The machine values enter the draft through the ordinary change of the
+    // session, so the order of the writes and the revision of the scope stay
+    // the ones of the session itself.
+    draftSessionRef.current?.current?.change(draftValues(next));
+  }, [setFormData]);
+  const extractionOptions: DocumentExtractionOptions = {
+    account: user?.id ?? null,
+    scope: 'employee:' + employeeId,
+    context: ['employee:' + employeeId, documentTypes.length, ministries.length].join('|'),
+    file: selectedFile,
+    ready: draftReady && documentTypes.length > 0,
+    open: isOpen,
+    values: readExtractionValues,
+    apply: applyExtractionPatch,
+    supported: employeeSupportedFields,
+    onStart: () => { allowLastSubmission.current = false; },
+  };
   const draft = useDocumentDraft('employee:' + employeeId, saved => {
     dirty.current = false;
-    if (saved !== null) { allowLastSubmission.current = false; generatedTitle.current = null; }
+    if (saved !== null) {
+      allowLastSubmission.current = false;
+      generatedTitle.current = null;
+      // Every key of the restored draft belongs to the administrator, including
+      // the ones that are empty or explicitly null.
+      extractionRef.current?.protect(employeeSupportedFields.filter(field => Object.prototype.hasOwnProperty.call(saved, field)));
+    }
     const restored = employeeDocumentDraft(saved, selectedFile?.name);
     if (saved === null) generatedTitle.current = selectedFile ? restored.title : null;
     setFormData(restored);
+    // The draft of the form is usable now, so an extraction may start.
+    setDraftReady(true);
   }, isOpen);
-  useEffect(() => { if (isOpen) { dirty.current = false; allowLastSubmission.current = true; } }, [isOpen, employeeId]);
+  draftSessionRef.current = draft.session;
+  // The form starts empty once per open, before the draft of the scope is
+  // restored, and the options that arrive later never erase the form again.
+  useEffect(() => { if (isOpen) { dirty.current = false; allowLastSubmission.current = true; setFormData(emptyForm); } }, [isOpen, employeeId, setFormData]);
   useLastSubmissionRestore('documents', allowLastSubmission.current && isOpen && draft.status === 'saved' && !draft.hasDraft, (saved) => {
     generatedTitle.current = selectedFile ? selectedFile.name.replace(/\.[^/.]+$/, '').slice(0, 120) : null;
+    // The restored fields belong to the administrator, and a new record never
+    // carries the number of the previous one.
+    extractionRef.current?.protect(['title', 'document_type_id', 'ministry_id']);
     setFormData(current => ({ ...current, title: selectedFile ? selectedFile.name.replace(/\.[^/.]+$/, '').slice(0, 120) : String(saved.title ?? ''),
       document_type_id: String(saved.document_type_id ?? ''), ministry_id: String(saved.ministry_id ?? ''),
-      notes: String(saved.notes ?? '') }));
+      notes: String(saved.notes ?? ''), document_number: '' }));
   }, () => allowLastSubmission.current && !dirty.current);
 
   useEffect(() => {
-    if (!selectedFile || draft.status !== 'saved') return;
+    if (!selectedFile || !['saved', 'saving'].includes(draft.status)) return;
+    // A title the administrator cleared stays cleared, even before the draft
+    // that carries the clear was written.
+    if (generatedTitle.current === null && !draft.hasDraft) return;
     const title = nextDocumentFileTitle(latestForm.current.title, generatedTitle.current, selectedFile.name, draft.hasDraft);
     if (title === null) return;
     dirty.current = true;
@@ -95,7 +176,6 @@ function EmployeeDocumentFormContent({
   useEffect(() => {
     if (!isOpen) return;
     let cancelled = false;
-    setFormData(emptyForm);
     const loadOptions = async () => {
       const types = await api.from<DocumentType>('document_types').select('*').order('name_ar', 'asc').execute();
       if (cancelled) return;
@@ -108,11 +188,16 @@ function EmployeeDocumentFormContent({
     };
     void loadOptions();
     return () => { cancelled = true; };
-  }, [isOpen, setFormData]);
+  }, [isOpen]);
 
   const editForm = (patch: Partial<typeof emptyForm>) => {
     dirty.current = true;
     if (patch.title !== undefined) generatedTitle.current = null;
+    // Every administrator edit is a manual value the machine may not replace.
+    for (const field of employeeSupportedFields) {
+      if (patch[field] === undefined) continue;
+      extractionRef.current?.manual(field);
+    }
     const next = { ...latestForm.current, ...patch };
     setFormData(next);
     draft.session.current?.change(draftValues(next));
@@ -122,6 +207,9 @@ function EmployeeDocumentFormContent({
     if (submitting.current) return;
     submitting.current = true; setIsSubmitting(true);
     try {
+      // The replacement happens before the upload is abandoned, so the machine
+      // provenance of the old file is dropped in the same tick.
+      extractionRef.current?.replace();
       const cleanupPending = await abandonUpload(draft.reference);
       setSelectedFile(null);
       if (cleanupPending) toast.warning(t('documents.form.fileCleanupPending'));
@@ -143,10 +231,22 @@ function EmployeeDocumentFormContent({
 
     if (formData.title.length > 120) { toast.error(t('documents.form.validation.titleMaxLength')); return; }
     if (formData.notes.length > 5000) { toast.error(t('documents.form.validation.notesTooLong')); return; }
+    // The number is checked with the shared contract, so a value the contract
+    // refuses never reaches the server.
+    const parsedNumber = documentNumber.safeParse(formData.document_number);
+    if (!parsedNumber.success) { toast.error(t('extraction.numberTooLong')); return; }
+    // A reversed date range is refused before the file is staged.
+    if (formData.issue_date && formData.expiry_date && formData.expiry_date < formData.issue_date) {
+      toast.error(t('documents.form.validation.invalidDateRange'));
+      return;
+    }
     submitting.current = true;
     setIsSubmitting(true);
-    
+
     try {
+      // The extraction stops before the save transaction starts, so a late
+      // answer can never write into a document that is being saved.
+      extractionRef.current?.cancel();
       const draftRef = await draft.prepare(draftValues(formData));
       const uploadId = await stageFile(selectedFile, t('documents.employeeDocumentForm.saveError'), draftRef);
 
@@ -154,6 +254,7 @@ function EmployeeDocumentFormContent({
       const payload = {
         draft: draftRef,
         title: formData.title,
+        document_number: parsedNumber.data,
         document_type_id: formData.document_type_id,
         employee_id: employeeId,
         company_id: null, // Employee document, not company
@@ -186,7 +287,13 @@ function EmployeeDocumentFormContent({
 
   const handleClose = async () => {
     if (submitting.current) return;
-    try { if (!draft.session.current || await draft.session.current.close(() => window.confirm(t('documents.form.closeUnsavedConfirm')))) onClose(); }
+    // The extraction stops before the draft is closed, so a late answer can
+    // never write into a form that is on its way out.
+    extractionRef.current?.cancel();
+    try {
+      const closed = !draft.session.current || await draft.session.current.close(() => window.confirm(t('documents.form.closeUnsavedConfirm')));
+      if (closed) onClose();
+    }
     catch { toast.error(t('documents.employeeDocumentForm.saveError')); }
   };
 
@@ -210,9 +317,16 @@ function EmployeeDocumentFormContent({
           <fieldset disabled={isSubmitting || draft.status === 'discarding'} className="space-y-6">
           {formData.title.length > 120 && <p role="alert" className="text-destructive">{t('documents.form.validation.titleMaxLength')}</p>}
           {formData.notes.length > 5000 && <p role="alert" className="text-destructive">{t('documents.form.validation.notesTooLong')}</p>}
+          {formData.issue_date && formData.expiry_date && formData.expiry_date < formData.issue_date &&
+            <p role="alert" className="text-destructive">{t('documents.form.validation.invalidDateRange')}</p>}
           <DocumentDraftStatus status={draft.status} restored={draft.hasDraft} needsFile={!selectedFile} onDiscard={() => {
             allowLastSubmission.current = false;
-            void draft.session.current?.discard().catch(() => toast.error(t('documents.employeeDocumentForm.saveError')));
+            // The machine provenance is dropped before the draft is discarded,
+            // and the protection returns only when the discard succeeded.
+            extractionRef.current?.invalidate();
+            const session = draft.session.current;
+            if (!session) return;
+            void session.discard().then(() => { extractionRef.current?.reset(); }).catch(() => toast.error(t('documents.employeeDocumentForm.saveError')));
           }} />
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div className="md:col-span-2">
@@ -228,10 +342,22 @@ function EmployeeDocumentFormContent({
             </div>
 
             <div>
+              <Label htmlFor="document_number">{t('extraction.documentNumber')}</Label>
+              <Input
+                id="document_number"
+                type="text"
+                maxLength={128}
+                value={formData.document_number}
+                onChange={(e) => editForm({ document_number: e.target.value })}
+                placeholder={t('extraction.documentNumber')}
+              />
+            </div>
+
+            <div>
               <Label htmlFor="document_type_id">{t('documents.form.documentType')} *</Label>
               <Select
                 value={formData.document_type_id}
-                onValueChange={(value) => editForm({ document_type_id: value })}
+                onValueChange={(value) => { if (!value) return; editForm({ document_type_id: value }); }}
                 required
               >
                 <SelectTrigger>
@@ -251,7 +377,7 @@ function EmployeeDocumentFormContent({
               <Label htmlFor="ministry_id">{t('documents.form.ministry')}</Label>
               <Select
                 value={formData.ministry_id}
-                onValueChange={(value) => editForm({ ministry_id: value })}
+                onValueChange={(value) => { if (!value) return; editForm({ ministry_id: value }); }}
               >
                 <SelectTrigger>
                   <SelectValue placeholder={t('documents.form.selectMinistry')} />
@@ -361,6 +487,9 @@ function EmployeeDocumentFormContent({
               {t('documents.employeeDocumentForm.cancel')}
             </Button>
           </div>
+          {/* The extraction panel follows the actions, so the panel of a running
+              attempt never takes the place of the cancel of the form itself. */}
+          <EmployeeExtractionBridge stateRef={extractionRef} options={extractionOptions} disabled={isSubmitting || draft.status === 'discarding'} />
           </fieldset>
         </form>
         </div>

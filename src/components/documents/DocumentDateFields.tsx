@@ -11,7 +11,14 @@ import { calculateDocumentStatusFromDate } from '@/lib/statusUtils';
 import { cn } from '@/lib/utils';
 import type { DocumentFormData } from './documentFormSchema';
 
-export function DocumentDateFields() {
+/**
+ * The date fields report administrator edits through `onManualChange` so the
+ * extraction session can protect a manually picked or cleared date before the
+ * machine is allowed to propose one.
+ */
+export function DocumentDateFields({ onManualChange }: {
+  onManualChange?: (field: 'issue_date' | 'expiry_date') => void;
+}) {
   const form = useFormContext<DocumentFormData>();
   const { t } = useLanguage();
   // Use centralized status calculation
@@ -52,7 +59,7 @@ export function DocumentDateFields() {
                   <Calendar
                     mode="single"
                     selected={field.value}
-                    onSelect={field.onChange}
+                    onSelect={date => { onManualChange?.('issue_date'); field.onChange(date); }}
                     disabled={(date) =>
                       date > new Date() || date < new Date("1900-01-01")
                     }
@@ -108,7 +115,7 @@ export function DocumentDateFields() {
                   <Calendar
                     mode="single"
                     selected={field.value}
-                    onSelect={field.onChange}
+                    onSelect={date => { onManualChange?.('expiry_date'); field.onChange(date); }}
                     disabled={(date) => date < new Date()}
                     initialFocus
                     className="pointer-events-auto"
