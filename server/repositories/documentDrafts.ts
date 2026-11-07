@@ -3,10 +3,12 @@ import type { Db } from '../db/connection.js';
 import { RepositoryError, type Row } from './base.js';
 import { normalizeDate } from '../utils/dates.js';
 import { getString } from './settings.js';
+import { documentNumber } from '../contracts/documentNumber.js';
 
 export interface DraftReference { scope: string; revision: string; account?: string }
 const LIMITS: Record<string, number> = { title: 120, beneficiary_type: 8, company_id: 128, employee_id: 128,
-  document_type_id: 128, ministry_id: 128, entity_name: 100, notes: 5000, issue_date: 10, expiry_date: 10 };
+  document_type_id: 128, ministry_id: 128, entity_name: 100, notes: 5000, issue_date: 10, expiry_date: 10,
+  document_number: 128 };
 const REFERENCES: Record<string, string> = { company_id: 'companies', employee_id: 'employees', document_type_id: 'document_types', ministry_id: 'ministries' };
 
 function invalid(): never { throw new RepositoryError('Invalid document draft.', 'invalid_draft', 400); }
@@ -36,7 +38,18 @@ export function validateDraftValues(db: Db, raw: unknown): Row {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw) || Buffer.byteLength(JSON.stringify(raw)) > 16384) invalid();
   const values: Row = {};
   for (const [key, value] of Object.entries(raw)) {
-    if (!Object.hasOwn(LIMITS, key) || (value !== null && typeof value !== 'string') ||
+    if (!Object.hasOwn(LIMITS, key)) invalid();
+    // The number keeps its own representation, so it is trimmed and validated
+    // through the shared contract before the draft length limit applies.
+    if (key === 'document_number') {
+      const parsed = documentNumber.safeParse(value);
+      if (!parsed.success) invalid();
+      const number = parsed.data;
+      if (number !== null && number.length > LIMITS[key]) invalid();
+      values[key] = number;
+      continue;
+    }
+    if ((value !== null && typeof value !== 'string') ||
         (typeof value === 'string' && value.length > LIMITS[key])) invalid();
     if (key === 'beneficiary_type' && value !== 'employee' && value !== 'company') invalid();
     if (key.endsWith('_date') && value && normalizeDate(value) !== value) invalid();

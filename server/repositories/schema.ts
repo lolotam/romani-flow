@@ -75,6 +75,7 @@ export const TABLES: Record<string, TableSpec> = {
     columns: [
       'id',
       'title',
+      'document_number',
       'file_name',
       'file_path',
       'file_size',

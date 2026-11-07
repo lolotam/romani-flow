@@ -2,6 +2,7 @@ import { format } from 'date-fns';
 import { api, type Document } from '@/lib/api';
 import type { DocumentFormData } from './documentFormSchema';
 import type { DraftReference } from '@/lib/documentDraftSession';
+import { documentNumber } from '../../../server/contracts/documentNumber';
 
 /** Writes editable metadata; file paths and status remain server-owned. */
 export async function saveDocument(
@@ -17,6 +18,7 @@ export async function saveDocument(
     issue_date: data.issue_date ? format(data.issue_date, 'yyyy-MM-dd') : null,
     expiry_date: format(data.expiry_date, 'yyyy-MM-dd'),
     notes: data.notes || null,
+    document_number: documentNumber.parse(data.document_number),
     document_type_id: data.document_type_id,
     company_id: data.beneficiary_type === 'company' ? data.company_id : null,
     employee_id: data.beneficiary_type === 'employee' ? data.employee_id : null,

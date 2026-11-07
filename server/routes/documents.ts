@@ -12,6 +12,7 @@ import {
 import { getNumber } from '../repositories/settings.js';
 import { rememberSubmission } from '../repositories/formDefaults.js';
 import { draftReference, finishDraft } from '../repositories/documentDrafts.js';
+import { documentNumber } from '../contracts/documentNumber.js';
 import type { DocumentService } from '../services/documentService.js';
 import { documentStatus, normalizeDate } from '../utils/dates.js';
 
@@ -31,7 +32,17 @@ function readPayload(body: unknown): Row {
   if (typeof body !== 'object' || body === null || Array.isArray(body)) {
     throw new RepositoryError('Request body must be an object.', 'invalid_body', 400);
   }
-  return body as Row;
+  const payload: Row = { ...(body as Row) };
+  // The number is optional and only validated when the client sends the key:
+  // an omitted value keeps the stored one, so it is never cleared by accident.
+  if (Object.hasOwn(payload, 'document_number')) {
+    const parsed = documentNumber.safeParse(payload.document_number);
+    if (!parsed.success) {
+      throw new RepositoryError('Invalid document number.', 'invalid_document_number', 400);
+    }
+    payload.document_number = parsed.data;
+  }
+  return payload;
 }
 
 function assertWritable(payload: Row): void {
