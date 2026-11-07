@@ -21,7 +21,10 @@ const server = await createServer({ configFile: false, envFile: false,
 let browser;
 try {
   await server.listen();
-  browser = await chromium.launch({ channel: process.env.BROWSER_CHANNEL || 'chrome', headless: true });
+  browser = await chromium.launch({
+    ...(process.env.BROWSER_CHANNEL ? { channel: process.env.BROWSER_CHANNEL } : {}),
+    headless: true,
+  });
   for (const language of ['ar', 'en']) for (const width of [360, 430, 768, 1280]) {
     const page = await browser.newPage({ viewport: { width, height: 900 } });
     page.setDefaultTimeout(15000);
@@ -39,6 +42,16 @@ try {
     });
     await page.goto(`http://127.0.0.1:${server.httpServer.address().port}/fixture`);
     await page.getByRole('button').click();
+    const upload = page.getByRole('dialog');
+    await upload.waitFor();
+    await page.waitForTimeout(300); // Let the upload dialog's entry transform finish.
+    const uploadGeometry = await upload.evaluate(el => {
+      const r = el.getBoundingClientRect();
+      return { x: r.x, right: r.right, scroll: el.scrollWidth, client: el.clientWidth };
+    });
+    console.log('upload', language, width, uploadGeometry);
+    assert.ok(uploadGeometry.x >= 0 && uploadGeometry.right <= width + 1, 'upload dialog fits viewport');
+    assert.ok(uploadGeometry.scroll <= uploadGeometry.client + 1, 'upload dialog has no horizontal overflow');
     await page.locator('input[type=file]').setInputFiles({ name: `synthetic-${'document'.repeat(15)}.pdf`, mimeType: 'application/pdf', buffer: Buffer.from('%PDF-1.4\n%%EOF') });
     const form = page.locator('[role=dialog]').filter({ has: page.locator('form') });
     await form.waitFor();
