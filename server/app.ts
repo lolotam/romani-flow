@@ -24,6 +24,10 @@ import type { WhatsAppReminders } from './notifications/whatsapp/service.js';
 import { createReminderRuntime } from './whatsapp/runtime.js';
 import { createReminderRouter } from './notifications/whatsapp/routes.js';
 import { createDocumentDraftsRouter } from './routes/documentDrafts.js';
+import { createDocumentExtractionRouter } from './routes/documentExtraction.js';
+import { createExtractionService, type ExtractionClock } from './extraction/service.js';
+import { createDefaultTransport, type ExtractionTransport } from './extraction/http.js';
+import type { DecoderFactory } from './extraction/images.js';
 import { assertCurrentDraft, draftReference } from './repositories/documentDrafts.js';
 import { RepositoryError } from './repositories/base.js';
 import { prepareEmployee } from './notifications/whatsapp/employeePolicy.js';
@@ -44,6 +48,12 @@ export interface AppDependencies {
   documents: DocumentService;
   staticDir: string;
   reminders?: WhatsAppReminders;
+  /** The injected provider transport. A test always injects its own. */
+  extractionTransport?: ExtractionTransport;
+  /** The injected clock of the extraction pipeline. */
+  extractionClock?: ExtractionClock;
+  /** The injected image decoder. The native decoder stays the default. */
+  decoderFactory?: DecoderFactory;
 }
 
 export function createApp(deps: AppDependencies): Express {
@@ -52,6 +62,15 @@ export function createApp(deps: AppDependencies): Express {
   documents.configureNotifications({ coordinator: reminders.coordinator, changed: () => reminders.reconcile() });
   cron.setReminderEnqueue(() => reminders.schedule());
   const app = express();
+
+  // One service per application. The transport is injected, so the pipeline
+  // never reaches a provider by accident.
+  const extraction = createExtractionService(
+    config,
+    db,
+    deps.extractionTransport ?? createDefaultTransport(config.env),
+    deps.extractionClock,
+  );
 
   app.disable('x-powered-by');
   // The proxy is only trusted when the deployment actually sits behind one —
@@ -72,9 +91,21 @@ export function createApp(deps: AppDependencies): Express {
     next();
   });
 
+  // The cookie parser runs before the extraction route: the route needs the
+  // session, and it brings its own body parser for the prepared document.
+  app.use(cookieParser());
+
+  // The extraction route owns its body parser, so it is mounted before the
+  // global parser: the global limit of two megabytes stays untouched.
+  app.use(
+    '/api/document-extraction',
+    requireAuth(config, db),
+    requireAdmin,
+    createDocumentExtractionRouter(config, db, extraction, deps.decoderFactory),
+  );
+
   app.use(express.json({ limit: '2mb' }));
   app.use(express.urlencoded({ extended: true, limit: '2mb' }));
-  app.use(cookieParser());
 
   // Public endpoints.
   app.use('/health', createRootHealthRouter(db, () => mailer.isConfigured()));
@@ -89,7 +120,7 @@ export function createApp(deps: AppDependencies): Express {
   app.use('/api/form-defaults', authenticated, createFormDefaultsRouter(db));
   app.use('/api/document-drafts', authenticated, createDocumentDraftsRouter(db, reminders.coordinator));
 
-  app.use('/api/settings', authenticated, createSettingsRouter(config, db, cron, reminders));
+  app.use('/api/settings', authenticated, createSettingsRouter(config, db, cron, reminders, extraction));
   app.use('/api/files', authenticated, createFilesRouter(config, db, storage, documents));
   app.use('/api/email', authenticated, createEmailRouter(config, db, mailer, cron, storage));
   app.use('/api/backup', authenticated, createBackupRouter(db, documents, reminders));

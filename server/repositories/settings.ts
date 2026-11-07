@@ -41,6 +41,9 @@ export const SETTING_DEFINITIONS: SettingDefinition[] = [
   { key: 'cron.last_run_date', type: 'string', defaultValue: '' },
   { key: 'reminders.dismissed', type: 'string[]', defaultValue: [] },
   { key: 'reminders.pinned', type: 'string[]', defaultValue: [] },
+  { key: 'ai_extraction.enabled', type: 'boolean', defaultValue: false },
+  { key: 'ai_extraction.provider', type: 'string', defaultValue: '' },
+  { key: 'ai_extraction.model', type: 'string', defaultValue: '' },
 ];
 
 const SECRET_PREFIXES = ['smtp.', 'secret.', 'password', 'jwt'];

@@ -8,6 +8,7 @@ import {
   readAllSettings,
   type SettingValue,
 } from '../repositories/settings.js';
+import type { ExtractionService } from '../extraction/service.js';
 import { NOTIFICATION_INTERVALS } from '../services/intervals.js';
 import type { CronService } from '../services/cronService.js';
 import type { WhatsAppReminders } from '../notifications/whatsapp/service.js';
@@ -89,6 +90,27 @@ function languageRule(): Rule {
   };
 }
 
+/** The provider of an extraction is one of the two supported ones, or none. */
+function providerRule(): Rule {
+  return {
+    validate: (value) => (value === '' || value === 'groq' || value === 'openrouter' ? value : null),
+    message: "must be '', 'groq' or 'openrouter'",
+  };
+}
+
+/** The model of an extraction is an empty value or one model identifier. */
+function modelRule(): Rule {
+  return {
+    validate: (value) =>
+      typeof value === 'string' &&
+      value.length <= 128 &&
+      (value === '' || /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.:-]+$/.test(value))
+        ? value
+        : null,
+    message: 'must be empty or a model identifier of at most 128 characters',
+  };
+}
+
 function cronRule(): Rule {
   return {
     validate: (value) => {
@@ -116,9 +138,50 @@ const EDITABLE: Record<string, Rule> = {
   'cron.days': numberRule(1, 365),
   'cron.include_employees': boolRule(),
   'cron.include_documents': boolRule(),
+  'ai_extraction.enabled': boolRule(),
+  'ai_extraction.provider': providerRule(),
+  'ai_extraction.model': modelRule(),
 };
 
-export function createSettingsRouter(config: AppConfig, db: Db, cron: CronService, reminders: WhatsAppReminders): Router {
+/**
+ * Checks the effective extraction selection before anything is written.
+ *
+ * The combination of the current settings and the requested ones has to be
+ * usable: a disabled selection is always allowed, but an enabled selection
+ * needs a provider, a model the server offers, a configured key and the
+ * processing approval of the environment. The enabled selection is proved
+ * against the fresh metadata of the provider as well, so a revoked or a paid
+ * candidate is refused before a single setting is written. The check never
+ * changes a setting and never activates anything on its own.
+ */
+async function validateExtractionSelection(
+  config: AppConfig,
+  effective: Record<string, SettingValue>,
+  extraction: ExtractionService,
+): Promise<string | null> {
+  if (effective['ai_extraction.enabled'] !== true) return null;
+
+  const provider = String(effective['ai_extraction.provider'] ?? '');
+  const model = String(effective['ai_extraction.model'] ?? '');
+  if (!provider || !model) {
+    return 'Enabling the extraction needs a provider and a model.';
+  }
+  if (provider !== 'groq' && provider !== 'openrouter') {
+    return 'The selected provider is not known.';
+  }
+  if (!config.extraction.authorized) {
+    return 'External document processing is not authorized.';
+  }
+  return extraction.validateCandidate(provider, model);
+}
+
+export function createSettingsRouter(
+  config: AppConfig,
+  db: Db,
+  cron: CronService,
+  reminders: WhatsAppReminders,
+  extraction: ExtractionService,
+): Router {
   const router = Router();
 
   router.get('/', (_req, res) => {
@@ -177,6 +240,23 @@ export function createSettingsRouter(config: AppConfig, db: Db, cron: CronServic
             message: 'The settings were not saved because some values are not valid.',
             code: 'invalid_settings',
             rejected,
+          },
+        });
+        return;
+      }
+
+      // The effective combination is checked before the first write, so a
+      // rejected request changes neither a setting nor a notification.
+      const effective = { ...readAllSettings(db), ...accepted };
+      const changesExtraction = Object.keys(accepted).some(key => key.startsWith('ai_extraction.'));
+      const problem = changesExtraction ? await validateExtractionSelection(config, effective, extraction) : null;
+      if (problem) {
+        res.status(400).json({
+          data: null,
+          error: {
+            message: 'The settings were not saved because the extraction selection is not valid.',
+            code: 'invalid_settings',
+            rejected: [{ key: 'ai_extraction.enabled', reason: problem }],
           },
         });
         return;
