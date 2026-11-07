@@ -366,11 +366,17 @@ async function main() {
   const args = process.argv.slice(2);
   const isPreparationOnly = args.includes('--preparation');
   const isLifecycleOnly = args.includes('--lifecycle');
+  const isSettingsOnly = args.includes('--settings');
   const isBuiltMode = args.includes('--built');
 
   if (isLifecycleOnly) {
     const { main: runLifecycleMain } = await import('./verify-extraction-lifecycle.mjs');
     return await runLifecycleMain();
+  }
+
+  if (isSettingsOnly) {
+    const { main: runSettingsMain } = await import('./verify-extraction-settings.mjs');
+    return await runSettingsMain();
   }
 
   console.log('======================================================================');

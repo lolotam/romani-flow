@@ -10,6 +10,7 @@ import { login } from './en/login';
 import { index } from './en/index';
 import { notFound } from './en/notFound';
 import { common } from './en/common';
+import { extraction } from './en/extraction';
 
 export const en = {
   nav,
@@ -24,4 +25,5 @@ export const en = {
   index,
   notFound,
   common,
+  extraction,
 };

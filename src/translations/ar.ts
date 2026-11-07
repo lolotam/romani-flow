@@ -10,6 +10,7 @@ import { login } from './ar/login';
 import { index } from './ar/index';
 import { notFound } from './ar/notFound';
 import { common } from './ar/common';
+import { extraction } from './ar/extraction';
 
 export const ar = {
   nav,
@@ -24,4 +25,5 @@ export const ar = {
   index,
   notFound,
   common,
+  extraction,
 };

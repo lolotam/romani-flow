@@ -836,7 +836,7 @@ async function runLifecycleTests(page, api) {
   assert.equal(state12.retryAfterSeconds, 25, 'Captures retryAfterSeconds 25');
 
   // Assert retry button exists and is disabled using real Playwright locator
-  const retryBtn = page.getByRole('button', { name: /retry/i });
+  const retryBtn = page.getByRole('button', { name: /retry|إعادة الاستخراج/i });
   await retryBtn.waitFor({ state: 'attached', timeout: 5000 });
   const isDisabledInitially = await retryBtn.isDisabled();
   assert.ok(isDisabledInitially, 'Retry button must be disabled during active cooldown');
