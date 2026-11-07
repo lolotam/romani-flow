@@ -365,7 +365,13 @@ async function runFormsTests() {
 async function main() {
   const args = process.argv.slice(2);
   const isPreparationOnly = args.includes('--preparation');
+  const isLifecycleOnly = args.includes('--lifecycle');
   const isBuiltMode = args.includes('--built');
+
+  if (isLifecycleOnly) {
+    const { main: runLifecycleMain } = await import('./verify-extraction-lifecycle.mjs');
+    return await runLifecycleMain();
+  }
 
   console.log('======================================================================');
   console.log(`[BROWSER SUITE] Mode: ${isPreparationOnly ? 'PREPARATION GROUP ONLY' : 'DEFAULT FULL SUITE (ALL GROUPS)'}`);
