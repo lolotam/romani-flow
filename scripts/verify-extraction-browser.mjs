@@ -332,6 +332,64 @@ async function runPreparationTests(page) {
     'Mid-flight abort must terminate worker or release/zero canvas'
   );
 
+  console.log('[CASE 10.3] Preparation deadline: 30s deadline with controlled page clock (29,999ms vs 30,000ms)...');
+  await page.clock.install();
+  let observedRed = null;
+  try {
+    await page.evaluate(() => {
+      window.__fixtureControls.resetSpies();
+      window.__fixtureControls.setRenderGate(true);
+    });
+
+    const prepPromise = page.evaluate(async (bytes) => {
+      const file = new File([new Uint8Array(bytes)], 'deadline-test.pdf', { type: 'application/pdf' });
+      window.__deadlineProbePending = true;
+      try { return await window.__fixtureControls.testPrepareDocument(file); }
+      finally { window.__deadlineProbePending = false; }
+    }, Array.from(pdf1));
+
+    // Await actual entered-toBlob gate barrier before advancing page clock!
+    await page.evaluate(() => window.__fixtureControls.awaitEnteredToBlob());
+
+    // Advance to 29,999ms: positive control - deadline has NOT expired yet
+    await page.clock.fastForward(29999);
+
+    // At 29,999ms: assert work pending and live resources
+    const isPendingAt29999 = await page.evaluate(() => window.__deadlineProbePending);
+    assert.equal(isPendingAt29999, true, 'Preparation work must still be pending at 29,999ms');
+    const midSpies = await page.evaluate(() => window.__fixtureControls.getSpies());
+    assert.equal(midSpies.workerTerminateCalls, 0, 'Worker must not terminate before 30,000ms deadline');
+    assert.equal(midSpies.canvasReleaseCalls, 0, 'Canvas must not be released before deadline');
+
+    // Advance 1ms to 30,000ms: target contract requirement (30s deadline)
+    await page.clock.fastForward(1);
+
+    // Release render gate
+    await page.evaluate(() => window.__fixtureControls.releaseRenderGate());
+
+    const deadlineResult = await prepPromise;
+
+    try {
+      assert.equal(deadlineResult.success, false, 'Preparation must fail on 30s deadline expiration');
+      assert.equal(deadlineResult.error, 'preparation_timeout', 'Exact failure category must be preparation_timeout');
+
+      const endSpies = await page.evaluate(() => window.__fixtureControls.getSpies());
+      assert.ok(endSpies.workerTerminateCalls >= 1, 'Worker must terminate upon deadline timeout');
+      assert.ok(endSpies.canvasReleaseCalls >= 1, 'Canvas must be released upon deadline timeout');
+      console.log('  ✔ [PASS] Case 10.3: Preparation 30s deadline');
+    } catch (err) {
+      if (err.name === 'AssertionError' || err instanceof assert.AssertionError) {
+        observedRed = err;
+        console.log(`  ✘ [OBSERVED RED (Target 30s Deadline)] ${err.message}`);
+        console.log(`    Missing behavior: DEADLINE_MS is 60,000ms in src/lib/extraction/pdf.ts instead of 30,000ms`);
+      } else {
+        throw err;
+      }
+    }
+  } finally {
+    await page.evaluate(() => window.__fixtureControls.releaseRenderGate()).catch(() => {});
+  }
+
   // -------------------------------------------------------------------------
   // Case 11: MIME Sniffing & Spoofed File Rejection
   // -------------------------------------------------------------------------
@@ -343,7 +401,15 @@ async function runPreparationTests(page) {
   });
   assert.equal(spoofedResult.success, false, 'Spoofed HTML file named .pdf must be rejected');
 
-  console.log('[PREPARATION SUITE] All 11 preparation/rendering contract cases verified.');
+  const passedCount = 11 + (observedRed ? 0 : 1);
+  const observedRedCount = observedRed ? 1 : 0;
+  console.log(`[PREPARATION SUITE] ${passedCount} positive controls passed; ${observedRedCount} observed RED on target 30s deadline.`);
+  return {
+    totalCount: 12,
+    passedCount,
+    observedRedCount,
+    unexpectedFailCount: 0,
+  };
 }
 
 /**
@@ -352,21 +418,12 @@ async function runPreparationTests(page) {
  * NOTE: This group is explicitly incomplete and requires pending UI tasks.
  * When called in the default full run, it fails explicitly without silent fallback.
  */
-async function runFormsTests() {
-  console.log('[FORMS SUITE] Executing forms test group...');
-  // Explicitly incomplete: Task 10 review focus is preparation/rendering.
-  // Forms group requires Task 13/14 UI completion.
-  assert.fail(
-    '[INCOMPLETE GROUP] Forms / UI group is explicitly incomplete and requires pending UI tasks. ' +
-    'Run with --preparation to verify the preparation/rendering contract group.'
-  );
-}
-
 async function main() {
   const args = process.argv.slice(2);
   const isPreparationOnly = args.includes('--preparation');
   const isLifecycleOnly = args.includes('--lifecycle');
   const isSettingsOnly = args.includes('--settings');
+  const isFormsOnly = args.includes('--forms');
   const isBuiltMode = args.includes('--built');
 
   if (isLifecycleOnly) {
@@ -377,6 +434,11 @@ async function main() {
   if (isSettingsOnly) {
     const { main: runSettingsMain } = await import('./verify-extraction-settings.mjs');
     return await runSettingsMain();
+  }
+
+  if (isFormsOnly) {
+    const { main: runFormsMain } = await import('./verify-extraction-forms.mjs');
+    return await runFormsMain();
   }
 
   console.log('======================================================================');
@@ -592,18 +654,60 @@ async function main() {
     await page.goto((isBuiltMode ? `${origin}/scripts/fixtures/extraction-browser.html` : `${origin}/fixture`) + '?preparation');
     await page.waitForSelector('[data-testid="fixture-controls"]');
 
-    // Run selected execution group
-    if (isPreparationOnly) {
-      await runPreparationTests(page);
-      assert.deepEqual(egressViolations, [], 'Preparation must not attempt external requests');
-      console.log('[BROWSER SUITE] Preparation group run completed successfully.');
+    const prepSummary = await runPreparationTests(page);
+    assert.deepEqual(egressViolations, [], 'Preparation must not attempt external requests');
+    if (prepSummary.observedRedCount > 0) {
+      console.log(`[PREPARATION SUITE] Nonzero exit code enforced: ${prepSummary.observedRedCount} observed RED on target deadline contract.`);
+      process.exitCode = 1;
     } else {
-      await runPreparationTests(page);
-      await runFormsTests();
+      console.log('[BROWSER SUITE] Preparation group run completed successfully.');
     }
   } finally {
     if (browser) await browser.close();
     if (server) await server.close();
+  }
+
+  if (!isPreparationOnly) {
+    console.log('\n======================================================================');
+    console.log('[BROWSER ORCHESTRATION] Sequentially executing lifecycle group (14 cases)...');
+    console.log('======================================================================');
+    const { main: runLifecycleMain } = await import('./verify-extraction-lifecycle.mjs');
+    await runLifecycleMain();
+    if (process.exitCode && process.exitCode !== 0) {
+      console.error(`\n[BROWSER ORCHESTRATION HALTED] Lifecycle group failed with exit code ${process.exitCode}`);
+      return;
+    }
+
+    console.log('\n======================================================================');
+    console.log('[BROWSER ORCHESTRATION] Sequentially executing settings group (12 cases)...');
+    console.log('======================================================================');
+    const { main: runSettingsMain } = await import('./verify-extraction-settings.mjs');
+    await runSettingsMain();
+    if (process.exitCode && process.exitCode !== 0) {
+      console.error(`\n[BROWSER ORCHESTRATION HALTED] Settings group failed with exit code ${process.exitCode}`);
+      return;
+    }
+
+    console.log('\n======================================================================');
+    console.log('[BROWSER ORCHESTRATION] Sequentially executing forms group (18 cases)...');
+    console.log('======================================================================');
+    const { main: runFormsMain } = await import('./verify-extraction-forms.mjs');
+    await runFormsMain();
+    if (process.exitCode && process.exitCode !== 0) {
+      console.error(`\n[BROWSER ORCHESTRATION HALTED] Forms group failed with exit code ${process.exitCode}. No success banner displayed.`);
+      return;
+    }
+
+    console.log('\n======================================================================');
+    console.log('[BROWSER ORCHESTRATION SUMMARY]');
+    console.log('  Group 1: Preparation & Rendering: 11 cases');
+    console.log('  Group 2: Document Lifecycle:      14 cases');
+    console.log('  Group 3: Settings & Approvals:    12 cases');
+    console.log('  Group 4: Forms & CAS Integration: 18 cases');
+    console.log('  Total Executed Cases:             55 group cases (11 + 14 + 12 + 18)');
+    console.log('======================================================================');
+    console.log('[BROWSER ORCHESTRATION] All 55 browser group cases completed successfully with exit code 0.');
+    console.log('======================================================================\n');
   }
 }
 

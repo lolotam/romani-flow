@@ -692,3 +692,139 @@ test('service integration rejects OpenRouter ZDR preview missing explicit safety
   );
 });
 
+// ---------------------------------------------------------------------------
+// 9. Provider Wire Identity Bounds (Contradictory vs Absent Wire Field)
+// ---------------------------------------------------------------------------
+
+test('extractBatch accepts matching model identity (valid positive control)', async () => {
+  const mockTransport = async () => {
+    return new Response(
+      JSON.stringify({
+        model: MOCK_MODEL_ID,
+        choices: [
+          {
+            message: { content: JSON.stringify({ pages: [makeRawPage(1)] }) },
+            finish_reason: 'stop',
+          },
+        ],
+      }),
+      { status: 200, headers: { 'content-type': 'application/json' } }
+    );
+  };
+
+  const selection = {
+    provider: 'openrouter',
+    model: MOCK_MODEL_ID,
+    endpoint: MOCK_ENDPOINT_TAG,
+    maxImages: 1,
+    key: 'test-key',
+  };
+
+  const pages = await extractBatch(selection, [{ page: 1, mime: 'image/png', base64: VALID_PNG_BASE64 }], new AbortController().signal, mockTransport);
+  assert.equal(pages.length, 1);
+  assert.equal(pages[0].page, 1);
+});
+
+test('extractBatch rejects contradictory model identity with provider_identity_mismatch', async () => {
+  const mockTransport = async () => {
+    return new Response(
+      JSON.stringify({
+        model: 'rogue-unapproved/model:free',
+        choices: [
+          {
+            message: { content: JSON.stringify({ pages: [makeRawPage(1)] }) },
+            finish_reason: 'stop',
+          },
+        ],
+      }),
+      { status: 200, headers: { 'content-type': 'application/json' } }
+    );
+  };
+
+  const selection = {
+    provider: 'openrouter',
+    model: MOCK_MODEL_ID,
+    endpoint: MOCK_ENDPOINT_TAG,
+    maxImages: 1,
+    key: 'test-key',
+  };
+
+  await assert.rejects(
+    () => extractBatch(selection, [{ page: 1, mime: 'image/png', base64: VALID_PNG_BASE64 }], new AbortController().signal, mockTransport),
+    (err) => {
+      assert.equal(err.code, 'provider_identity_mismatch');
+      return true;
+    }
+  );
+});
+
+test('extractBatch characterization: accepts provider response when model wire field is absent in payload', async () => {
+  // Existing code behavior characterization: when model field is omitted by provider, readPages does not enforce presence.
+  const mockTransport = async () => {
+    return new Response(
+      JSON.stringify({
+        // model wire field absent (undefined)
+        choices: [
+          {
+            message: { content: JSON.stringify({ pages: [makeRawPage(1)] }) },
+            finish_reason: 'stop',
+          },
+        ],
+      }),
+      { status: 200, headers: { 'content-type': 'application/json' } }
+    );
+  };
+
+  const selection = {
+    provider: 'openrouter',
+    model: MOCK_MODEL_ID,
+    endpoint: MOCK_ENDPOINT_TAG,
+    maxImages: 1,
+    key: 'test-key',
+  };
+
+  const pages = await extractBatch(selection, [{ page: 1, mime: 'image/png', base64: VALID_PNG_BASE64 }], new AbortController().signal, mockTransport);
+  assert.equal(pages.length, 1);
+  assert.equal(pages[0].page, 1);
+});
+
+test('extractBatch pins endpoint in request body while documenting endpoint identity is unavailable on completion wire response', async () => {
+  // The completion wire response schema returns model, id, choices, usage, but does NOT return an endpoint tag.
+  // We prove request body correctly pins the endpoint tag, and test valid completion handling without fabricated response fields.
+  let capturedBody;
+  const mockTransport = async (url, init) => {
+    capturedBody = JSON.parse(init.body);
+    return new Response(
+      JSON.stringify({
+        model: MOCK_MODEL_ID,
+        choices: [
+          {
+            message: { content: JSON.stringify({ pages: [makeRawPage(1)] }) },
+            finish_reason: 'stop',
+          },
+        ],
+      }),
+      { status: 200, headers: { 'content-type': 'application/json' } }
+    );
+  };
+
+  const selection = {
+    provider: 'openrouter',
+    model: MOCK_MODEL_ID,
+    endpoint: MOCK_ENDPOINT_TAG,
+    maxImages: 1,
+    key: 'test-key',
+  };
+
+  const pages = await extractBatch(selection, [{ page: 1, mime: 'image/png', base64: VALID_PNG_BASE64 }], new AbortController().signal, mockTransport);
+  assert.equal(pages.length, 1);
+  assert.deepEqual(capturedBody.provider, {
+    only: [MOCK_ENDPOINT_TAG],
+    order: [MOCK_ENDPOINT_TAG],
+    allow_fallbacks: false,
+    require_parameters: true,
+    data_collection: 'deny',
+    zdr: true,
+    max_price: { prompt: 0, completion: 0, image: 0, request: 0 },
+  });
+});

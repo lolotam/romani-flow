@@ -19,9 +19,13 @@
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
+import http from 'node:http';
 import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { createServer } from 'vite';
+import { DatabaseSync } from 'node:sqlite';
+import express from 'express';
+import cookieParser from 'cookie-parser';
+import { createServer, build, preview } from 'vite';
 import { tsImport } from 'tsx/esm/api';
 import { syntheticPng } from './fixtures/extraction-pdf.mjs';
 import { format } from 'date-fns';
@@ -37,6 +41,48 @@ const { documentNumber } = await tsImport(
 const { createDocumentSchema } = await tsImport(
   '../src/components/documents/documentFormSchema.ts', import.meta.url,
 );
+
+const { runMigrations } = await tsImport(
+  '../server/db/migrator.ts', import.meta.url,
+);
+
+const { createDocumentDraftsRouter } = await tsImport(
+  '../server/routes/documentDrafts.ts', import.meta.url,
+);
+
+const { insertRow } = await tsImport(
+  '../server/repositories/base.ts', import.meta.url,
+);
+
+const { writeDraft } = await tsImport(
+  '../server/repositories/documentDrafts.ts', import.meta.url,
+);
+
+const { signSession, requireAuth, requireAdmin } = await tsImport(
+  '../server/middleware/auth.ts', import.meta.url,
+);
+
+const { loadConfig } = await tsImport(
+  '../server/config.ts', import.meta.url,
+);
+
+const { NotificationCoordinator } = await tsImport(
+  '../server/notifications/coordinator.ts', import.meta.url,
+);
+
+const fixtureConfig = loadConfig({
+  JWT_SECRET: 'fixture-jwt-secret-min-32-chars-task-17-review',
+  SESSION_COOKIE_NAME: 'romani_session',
+});
+
+function makeSessionCookie(accountId) {
+  return signSession(fixtureConfig, {
+    id: accountId,
+    email: `${accountId}@example.invalid`,
+    name: `Synthetic ${accountId}`,
+    role: 'admin',
+  });
+}
 
 // Required production modules that must exist
 const REQUIRED_MODULES = [
@@ -90,7 +136,8 @@ function runPreflightCheck() {
  * Stateful Mock API controller managing loopback HTTP routes and per-request barriers.
  */
 class FormsMockApi {
-  constructor() {
+  constructor(draftDb = null) {
+    this.draftDb = draftDb;
     this.currentAccount = 'account-admin-1';
     // Use server-known model IDs and settings from server/extraction/policy.ts
     this.extractionStatus = {
@@ -130,6 +177,46 @@ class FormsMockApi {
 
     this.drafts = new Map();
     this.formDefaults = null;
+
+    this.retiringPutHeld = false;
+    this.retiringPutDeferred = null;
+    this.retiringPutEntryDeferred = null;
+    this.retiringPutSettledDeferred = null;
+    this.draftRequestsLog = [];
+  }
+
+  armRetiringPutGate() {
+    this.retiringPutHeld = true;
+    let resolveEntry;
+    this.retiringPutEntryDeferred = new Promise((res) => { resolveEntry = res; });
+    this.retiringPutEntryDeferred.resolve = resolveEntry;
+
+    let resolveRelease;
+    this.retiringPutDeferred = new Promise((res) => { resolveRelease = res; });
+    this.retiringPutDeferred.resolve = resolveRelease;
+
+    let resolveSettled;
+    this.retiringPutSettledDeferred = new Promise((res) => { resolveSettled = res; });
+    this.retiringPutSettledDeferred.resolve = resolveSettled;
+  }
+
+  async waitForRetiringPutEntry(timeoutMs = 5000) {
+    if (!this.retiringPutEntryDeferred) return;
+    const timeout = new Promise((_, rej) => setTimeout(() => rej(new Error('Timeout waiting for retiring PUT entry')), timeoutMs));
+    await Promise.race([this.retiringPutEntryDeferred, timeout]);
+  }
+
+  releaseRetiringPut() {
+    if (this.retiringPutDeferred) {
+      this.retiringPutDeferred.resolve();
+      this.retiringPutHeld = false;
+    }
+  }
+
+  async waitForRetiringPutSettled(timeoutMs = 5000) {
+    if (!this.retiringPutSettledDeferred) return;
+    const timeout = new Promise((_, rej) => setTimeout(() => rej(new Error('Timeout waiting for retiring PUT to settle')), timeoutMs));
+    await Promise.race([this.retiringPutSettledDeferred, timeout]);
   }
 
   async reset() {
@@ -156,11 +243,17 @@ class FormsMockApi {
     for (const l of this.draftPutListeners) clearTimeout(l.timer);
     this.draftPutListeners = [];
     this.drafts.clear();
+    if (this.draftDb) {
+      this.draftDb.prepare('DELETE FROM document_drafts').run();
+    }
     this.formDefaults = null;
     this.currentAccount = 'account-admin-1';
+    this.releaseRetiringPut();
+    this.draftRequestsLog = [];
   }
 
   async settleAllHeld() {
+    this.releaseRetiringPut();
     await Promise.all(
       this.capturedRequests.map(async (req) => {
         if (!req.settled) {
@@ -298,16 +391,67 @@ class FormsMockApi {
     }
   }
 
-  getOrCreateDraft(scope) {
-    const key = `${this.currentAccount}:${scope}`;
-    if (!this.drafts.has(key)) {
-      this.drafts.set(key, {
-        revision: crypto.randomUUID(),
-        values: null,
-      });
-    }
-    return this.drafts.get(key);
+  getDraft(scope, account = this.currentAccount) {
+    if (!this.draftDb) return null;
+    const row = this.draftDb.prepare('SELECT revision, values_json FROM document_drafts WHERE user_id=? AND scope=?').get(account, scope);
+    if (!row) return null;
+    return {
+      revision: String(row.revision),
+      values: row.values_json ? JSON.parse(String(row.values_json)) : null,
+    };
   }
+
+  seedDraft(scope, values, account = this.currentAccount, revision = crypto.randomUUID()) {
+    if (!this.draftDb) return { revision, values };
+    this.draftDb.prepare(
+      "INSERT OR REPLACE INTO document_drafts(user_id, scope, revision, values_json, updated_at) VALUES(?, ?, ?, ?, ?)"
+    ).run(account, scope, revision, values ? JSON.stringify(values) : null, new Date().toISOString());
+    return { revision, values };
+  }
+
+  getOrCreateDraft(scope, account = this.currentAccount) {
+    let existing = this.getDraft(scope, account);
+    if (!existing) {
+      const rev = crypto.randomUUID();
+      this.seedDraft(scope, null, account, rev);
+      existing = { revision: rev, values: null };
+    }
+    const self = this;
+    return {
+      get revision() {
+        const cur = self.getDraft(scope, self.currentAccount);
+        return cur ? cur.revision : existing.revision;
+      },
+      set revision(rev) {
+        const cur = self.getDraft(scope, self.currentAccount);
+        self.seedDraft(scope, cur ? cur.values : null, self.currentAccount, rev);
+      },
+      get values() {
+        const cur = self.getDraft(scope, self.currentAccount);
+        return cur ? cur.values : null;
+      },
+      set values(vals) {
+        const cur = self.getDraft(scope, self.currentAccount);
+        self.seedDraft(scope, vals, self.currentAccount, cur ? cur.revision : crypto.randomUUID());
+      },
+    };
+  }
+}
+
+function createDraftsBackend(draftDb, config) {
+  const coordinator = new NotificationCoordinator();
+
+  const app = express();
+  app.use(cookieParser());
+  app.use(express.json());
+  app.use(requireAuth(config, draftDb));
+  app.use('/api/document-drafts', createDocumentDraftsRouter(draftDb, coordinator));
+  app.use((err, req, res, next) => {
+    const status = err.status || (err.code === 'draft_conflict' ? 409 : 500);
+    res.status(status).json({ data: null, error: { code: err.code || 'error', message: err.message } });
+  });
+
+  return app;
 }
 
 async function selectComboboxOption(page, labelText, optionText) {
@@ -317,6 +461,8 @@ async function selectComboboxOption(page, labelText, optionText) {
   await page.waitForSelector('[role="option"]', { timeout: 5000 });
   const option = page.locator(`[role="option"]:has-text("${optionText}")`).first();
   await option.click();
+  await page.waitForSelector('[role="option"]', { state: 'hidden', timeout: 5000 }).catch(() => {});
+  await trigger.filter({ hasText: optionText }).waitFor({ state: 'visible', timeout: 5000 });
 }
 
 async function selectPopoverDate(page, labelText, which = 'last') {
@@ -354,8 +500,10 @@ async function assertDateTriggerValue(page, labelText, expectedIsoDate) {
  *
  * @param {import('playwright').Page} page
  * @param {FormsMockApi} api
+ * @param {DatabaseSync} draftDb
+ * @param {number} draftsPort
  */
-async function runFormsTests(page, api) {
+async function runFormsTests(page, api, draftDb, draftsPort) {
   const validPng = syntheticPng({ width: 100, height: 100 });
   const results = [];
 
@@ -369,6 +517,7 @@ async function runFormsTests(page, api) {
     const start = Date.now();
     try {
       await api.reset();
+      await page.evaluate(() => window.__formsControls?.setAccount('account-admin-1')).catch(() => {});
       await fn();
       const duration = Date.now() - start;
       passedCount++;
@@ -1485,6 +1634,7 @@ async function runFormsTests(page, api) {
 
   await testCase('Case 18: Context changes clear machine values and preserve manual values', false, async () => {
     for (const variant of ['company', 'beneficiary', 'employee', 'filter']) {
+      console.log(`    [Case 18] Running variant: ${variant}`);
       await api.reset();
       const epoch = await page.evaluate(() => window.__formsControls.mountGeneral());
       await waitForFormReady(page, epoch);
@@ -1509,6 +1659,276 @@ async function runFormsTests(page, api) {
     }
   });
 
+  // -------------------------------------------------------------------------
+  // Case 19: Positive Control: Actual ReactDOM draft-probe mount, save, unmount, and successor restore against real Express CAS
+  // -------------------------------------------------------------------------
+  await testCase(
+    'Case 19: Positive Control: Actual ReactDOM draft-probe mount, save, unmount, and successor restore against real Express CAS',
+    true,
+    async () => {
+      // Step 1: Mount draft probe under company:comp-1
+      let epoch = await page.evaluate(() => {
+        return window.__formsControls.mountDraftProbe({ scope: 'company:comp-1' });
+      });
+      await page.waitForSelector('[data-testid="draft-probe-wrapper"]', { timeout: 10000 });
+      await page.waitForFunction(() => window.__draftProbeSession?.status === 'saved' || window.__draftProbeSession?.status === 'clean' || window.__draftProbeSession?.status === 'ready' || window.__draftProbeSession?.status === 'dirty', null, { timeout: 10000 });
+
+      // Step 2: Prepare initial draft values via real useDocumentDraft session
+      const savedRef = await page.evaluate(async () => {
+        return window.__draftProbeSession.prepare({ title: 'First probe title', notes: 'First probe note' });
+      });
+      assert.ok(savedRef.revision, 'Draft prepare returned committed revision');
+
+      // Step 3: Trigger real React unmount (runs effect cleanup, flushes draft)
+      epoch = await page.evaluate(() => window.__formsControls.unmount());
+      await page.waitForSelector('[data-testid="forms-mount-container"][data-mode="none"]', { timeout: 5000 });
+
+      // Step 4: Mount successor probe with same scope: asserts restore
+      epoch = await page.evaluate(() => {
+        return window.__formsControls.mountDraftProbe({ scope: 'company:comp-1' });
+      });
+      await page.waitForSelector('[data-testid="draft-probe-wrapper"]', { timeout: 10000 });
+      await page.waitForFunction(() => window.__draftProbeSession?.hasDraft === true, null, { timeout: 10000 });
+
+      // Verify restored values
+      const restored = await page.evaluate(() => window.__draftProbeSession.restoredValues);
+      assert.equal(restored?.title, 'First probe title', 'Successor probe restored title from real SQLite');
+      assert.equal(restored?.notes, 'First probe note', 'Successor probe restored notes from real SQLite');
+
+      // Step 5: Successor prepares second edit
+      const secondRef = await page.evaluate(async () => {
+        return window.__draftProbeSession.prepare({ title: 'Second probe title', notes: 'First probe note' });
+      });
+      assert.notEqual(secondRef.revision, savedRef.revision, 'Second edit advanced revision in SQLite');
+    }
+  );
+
+  // -------------------------------------------------------------------------
+  // Case 20: Positive Control: Real AuthProvider tenant isolation keeps draft scopes segregated in SQLite
+  // -------------------------------------------------------------------------
+  await testCase(
+    'Case 20: Positive Control: Real AuthProvider tenant isolation keeps draft scopes segregated in SQLite',
+    true,
+    async () => {
+      // Step 1: Account 1 saves draft for company:comp-1
+      api.currentAccount = 'account-admin-1';
+      let epoch = await page.evaluate(() => {
+        window.__formsControls.setAccount('account-admin-1');
+        return window.__formsControls.mountDraftProbe({ scope: 'company:comp-1' });
+      });
+      await page.waitForSelector('[data-testid="draft-probe-wrapper"]', { timeout: 10000 });
+      await page.evaluate(async () => {
+        await window.__draftProbeSession.prepare({ title: 'Account 1 Confidential Title' });
+      });
+
+      // Step 2: Switch to Account 2
+      api.currentAccount = 'account-admin-2';
+      epoch = await page.evaluate(() => {
+        window.__formsControls.setAccount('account-admin-2');
+        return window.__formsControls.mountDraftProbe({ scope: 'company:comp-1' });
+      });
+      await page.waitForSelector('[data-testid="draft-probe-wrapper"]', { timeout: 10000 });
+      await page.waitForFunction(() => window.__draftProbeSession?.status !== 'loading', null, { timeout: 10000 });
+
+      // Verify Account 2 sees empty draft (no leakage from Account 1)
+      const hasDraftAcct2 = await page.evaluate(() => window.__draftProbeSession?.hasDraft);
+      assert.equal(hasDraftAcct2, false, 'Account 2 must have clean draft without Account 1 data');
+
+      // Step 3: Switch back to Account 1
+      api.currentAccount = 'account-admin-1';
+      epoch = await page.evaluate(() => {
+        window.__formsControls.setAccount('account-admin-1');
+        return window.__formsControls.mountDraftProbe({ scope: 'company:comp-1' });
+      });
+      await page.waitForSelector('[data-testid="draft-probe-wrapper"]', { timeout: 10000 });
+      await page.waitForFunction(() => window.__draftProbeSession?.hasDraft === true, null, { timeout: 10000 });
+      const restoredAcct1 = await page.evaluate(() => window.__draftProbeSession.restoredValues);
+      assert.equal(restoredAcct1?.title, 'Account 1 Confidential Title', 'Account 1 draft restored intact');
+
+      // Step 4: Cross-account mismatch and authentication controls:
+      // Direct request with cookie for account-admin-1 but x-draft-account: account-admin-2
+      const mismatchRes = await fetch(`http://127.0.0.1:${draftsPort}/api/document-drafts/company:comp-1`, {
+        method: 'GET',
+        headers: {
+          cookie: `${fixtureConfig.cookieName}=${makeSessionCookie('account-admin-1')}`,
+          'x-draft-account': 'account-admin-2',
+        },
+      });
+      assert.equal(mismatchRes.status, 409, 'Cookie/header account mismatch must be refused with 409 draft_conflict');
+      const mismatchJson = await mismatchRes.json();
+      assert.equal(mismatchJson.error?.code, 'draft_conflict', 'Mismatch error code must be draft_conflict');
+
+      // Request without signed session cookie must be refused with 401 unauthenticated
+      const unauthRes = await fetch(`http://127.0.0.1:${draftsPort}/api/document-drafts/company:comp-1`, {
+        method: 'GET',
+        headers: {
+          'x-draft-account': 'account-admin-1',
+        },
+      });
+      assert.equal(unauthRes.status, 401, 'Request without session cookie must be refused with 401 unauthenticated');
+    }
+  );
+
+  // -------------------------------------------------------------------------
+  // Case 21: Positive Control: External SQLite revision mutation triggers 409 conflict and preserves unsaved memory edits
+  // -------------------------------------------------------------------------
+  await testCase(
+    'Case 21: Positive Control: External SQLite revision mutation triggers 409 conflict and preserves unsaved memory edits',
+    true,
+    async () => {
+      // Step 1: Mount probe under company:comp-1
+      let epoch = await page.evaluate(() => {
+        return window.__formsControls.mountDraftProbe({ scope: 'company:comp-1' });
+      });
+      await page.waitForSelector('[data-testid="draft-probe-wrapper"]', { timeout: 10000 });
+      await page.waitForFunction(() => window.__draftProbeSession?.status === 'saved' || window.__draftProbeSession?.status === 'ready', null, { timeout: 5000 });
+
+      // Save baseline draft keeping session active
+      await page.evaluate(async () => {
+        window.__draftProbeSession.change({ title: 'Baseline Title' });
+        await window.__draftProbeSession.flush();
+      });
+
+      // Step 2: Simulate another device/tab directly mutating SQLite revision
+      const currentRev = draftDb.prepare('SELECT revision FROM document_drafts WHERE user_id=? AND scope=?').get('account-admin-1', 'company:comp-1').revision;
+      writeDraft(draftDb, 'account-admin-1', { scope: 'company:comp-1', revision: String(currentRev) }, { title: 'Other Device Remote Edit' });
+
+      // Step 3: Local session attempts to save unsaved local changes
+      const conflictResult = await page.evaluate(async () => {
+        try {
+          window.__draftProbeSession.change({ title: 'Local Unsaved Conflict Title' });
+          await window.__draftProbeSession.flush();
+          return { conflicted: false };
+        } catch (err) {
+          return { conflicted: true, error: err.message };
+        }
+      });
+
+      assert.equal(conflictResult.conflicted, true, 'Stale revision edit must trigger conflict rejection');
+
+      // Await React re-render of draft.status to 'conflict'
+      await page.waitForFunction(() => window.__draftProbeSession?.status === 'conflict', null, { timeout: 5000 });
+      const finalConflictStatus = await page.evaluate(() => window.__draftProbeSession?.status);
+      assert.equal(finalConflictStatus, 'conflict', 'Draft status must transition to conflict');
+
+      // Step 4: Verify unsaved local edits are preserved in memory (not overwritten or dropped)
+      const sessionValues = await page.evaluate(() => {
+        const s = window.__draftProbeSession?.session?.current;
+        return s?.pending?.title || s?.draft?.values?.title;
+      });
+      assert.equal(sessionValues, 'Local Unsaved Conflict Title', 'Unsaved local edit preserved in memory during conflict');
+    }
+  );
+
+  // -------------------------------------------------------------------------
+  // Case 22: Real hook regression: rapid unmount and successor remount handoff race against real Express CAS
+  // -------------------------------------------------------------------------
+  await testCase(
+    'Case 22: Real hook regression: rapid unmount and successor remount handoff race against real Express CAS',
+    false,
+    async () => {
+      try {
+        api.draftRequestsLog = [];
+
+        // Step 1: Mount Probe 1 under company:comp-1
+        const epoch1 = await page.evaluate(() => {
+          return window.__formsControls.mountDraftProbe({ scope: 'company:comp-1' });
+        });
+        await page.waitForSelector(`[data-testid="draft-probe-wrapper"][data-form-epoch="${epoch1}"]`, { timeout: 10000 });
+        await page.waitForFunction(
+          (ep) => window.__draftProbeSession?.epoch === ep && (window.__draftProbeSession?.status === 'saved' || window.__draftProbeSession?.status === 'ready' || window.__draftProbeSession?.status === 'clean'),
+          epoch1,
+          { timeout: 5000 }
+        );
+
+        // Step 2: Queue dirty edit in Probe 1 (un-flushed in memory)
+        await page.evaluate(() => {
+          window.__draftProbeSession.change({ title: 'Probe 1 Retiring Title', notes: 'Probe 1 Retiring Note' });
+        });
+
+        // Step 3: Arm deterministic one-shot retiring-PUT gate
+        api.armRetiringPutGate();
+
+        // Step 4: Unmount Probe 1 (triggers effect cleanup and flush() in useDocumentDraft)
+        await page.evaluate(() => window.__formsControls.unmount());
+        await page.waitForSelector('[data-testid="forms-mount-container"][data-mode="none"]', { timeout: 5000 });
+
+        // Step 5: Await deterministic retiring-PUT entry barrier
+        await api.waitForRetiringPutEntry(5000);
+
+        // Step 6: Mount successor Probe 2 with same scope
+        const epoch2 = await page.evaluate(() => {
+          return window.__formsControls.mountDraftProbe({ scope: 'company:comp-1' });
+        });
+
+        // Step 7: Await mounted new probe epoch/session in DOM before old release,
+        // BUT do NOT wait for successor status saved (a correct handoff must delay its GET/load)
+        await page.waitForSelector(`[data-testid="draft-probe-wrapper"][data-form-epoch="${epoch2}"]`, { timeout: 10000 });
+        await page.waitForFunction(
+          (ep) => window.__draftProbeSession?.epoch === ep,
+          epoch2,
+          { timeout: 10000 }
+        );
+
+        // Record GET ordering evidence: in unpatched baseline, Probe 2 GET races before retiring PUT settles
+        const getRequestsBeforeRelease = api.draftRequestsLog.filter((r) => r.method === 'GET');
+        console.log(`    [Case 22 Handoff] Probe 2 mounted at epoch ${epoch2}; GET requests before predecessor release: ${getRequestsBeforeRelease.length}`);
+
+        // Step 8: Release predecessor held PUT and await settlement barrier
+        api.releaseRetiringPut();
+        await api.waitForRetiringPutSettled(5000);
+
+        // Step 9: Await restore and successor ready
+        await page.waitForFunction(
+          () => {
+            const s = window.__draftProbeSession?.status;
+            return s === 'ready' || s === 'saved' || s === 'clean' || s === 'conflict';
+          },
+          null,
+          { timeout: 8000 }
+        );
+
+        // Assert restored predecessor metadata:
+        // In unpatched baseline, Probe 2 GET raced before retiring PUT settled, so restored is null or stale
+        const restored = await page.evaluate(() => window.__draftProbeSession?.restoredValues);
+        assert.equal(
+          restored?.title,
+          'Probe 1 Retiring Title',
+          'Successor must restore predecessor retiring title (baseline hook GET raced before retiring PUT settled)'
+        );
+        assert.equal(
+          restored?.notes,
+          'Probe 1 Retiring Note',
+          'Successor must restore predecessor retiring notes'
+        );
+
+        // Step 10: Successor manual edits and actual server persistence with current revision
+        const successorEdit = await page.evaluate(async () => {
+          try {
+            window.__draftProbeSession.change({ title: 'Probe 2 Successor Title', notes: 'Probe 2 Successor Note' });
+            await window.__draftProbeSession.flush();
+            return { ok: true, status: window.__draftProbeSession?.status };
+          } catch (err) {
+            return { ok: false, error: err.message, status: window.__draftProbeSession?.status };
+          }
+        });
+
+        assert.equal(
+          successorEdit.ok,
+          true,
+          `Successor must persist manual edits without CAS conflict (failed with: ${successorEdit.error})`
+        );
+        assert.notEqual(successorEdit.status, 'conflict', 'Draft status must not transition to conflict');
+
+        // Verify actual server persistence with current revision
+        const serverDraft = api.getDraft('company:comp-1', 'account-admin-1');
+        assert.equal(serverDraft?.values?.title, 'Probe 2 Successor Title', 'Server SQLite must persist successor title with current revision');
+      } finally {
+        api.releaseRetiringPut();
+      }
+    }
+  );
+
   return {
     totalCount,
     passedCount,
@@ -1518,9 +1938,13 @@ async function runFormsTests(page, api) {
   };
 }
 
-async function main() {
+export async function main() {
+  const args = process.argv.slice(2);
+  const isBuiltMode = args.includes('--built');
+
   console.log('======================================================================');
   console.log('[FORMS SUITE] AI Document Extraction Forms Integration Suite (Task 10)');
+  console.log(`[FORMS SUITE] Target Fixture: ${isBuiltMode ? 'BUILT FIXTURE (REAL BUILD OUTPUT)' : 'DEV SERVER'}`);
   console.log('======================================================================');
 
   const preflight = runPreflightCheck();
@@ -1534,43 +1958,123 @@ async function main() {
   let server = null;
   let origin = '';
 
-  server = await createServer({
-    configFile: resolve('vite.config.ts'),
-    envFile: false,
-    server: {
-      port: 0,
-      host: '127.0.0.1',
-    },
-    plugins: [
-      {
-        name: 'forms-fixture-endpoint',
-        configureServer(s) {
-          s.middlewares.use('/forms-fixture', async (req, res, next) => {
-            try {
-              res.setHeader('Content-Type', 'text/html');
-              res.end(
-                await s.transformIndexHtml(
-                  '/forms-fixture',
-                  '<!DOCTYPE html><html><head><meta charset="utf-8"><title>Extraction Forms Fixture</title></head>' +
-                    '<body><div id="root"></div><script type="module" src="/scripts/fixtures/extraction-forms.tsx"></script></body></html>'
-                )
-              );
-            } catch (err) {
-              next(err);
-            }
-          });
+  if (isBuiltMode) {
+    const outDir = resolve('scripts/fixtures/.dist-forms');
+    fs.writeFileSync(
+      resolve('scripts/fixtures/extraction-forms.html'),
+      '<!doctype html><html><body><div id="root"></div><script type="module" src="/scripts/fixtures/extraction-forms.tsx"></script></body></html>'
+    );
+    console.log(`[BUILD] Building real forms fixture output to ${outDir}...`);
+    await build({
+      configFile: resolve('vite.config.ts'),
+      envFile: false,
+      esbuild: { jsx: 'automatic' },
+      resolve: { alias: { '@': resolve('src') } },
+      build: {
+        outDir,
+        emptyOutDir: false,
+        target: 'es2022',
+        rollupOptions: {
+          input: resolve('scripts/fixtures/extraction-forms.html'),
         },
       },
-    ],
-  });
+    });
 
-  await server.listen();
-  const port = server.httpServer.address().port;
-  origin = `http://127.0.0.1:${port}`;
-  console.log(`[FORMS SUITE] Dev fixture server listening at ${origin}`);
+    server = await preview({
+      configFile: resolve('vite.config.ts'),
+      envFile: false,
+      build: { outDir },
+      preview: { host: '127.0.0.1', port: 0 },
+    });
+    const port = server.httpServer.address().port;
+    origin = `http://127.0.0.1:${port}`;
+    console.log(`[FORMS SUITE] Built forms fixture preview listening at ${origin}`);
+  } else {
+    server = await createServer({
+      configFile: resolve('vite.config.ts'),
+      envFile: false,
+      server: {
+        port: 0,
+        host: '127.0.0.1',
+      },
+      plugins: [
+        {
+          name: 'forms-fixture-endpoint',
+          configureServer(s) {
+            s.middlewares.use('/forms-fixture', async (req, res, next) => {
+              try {
+                res.setHeader('Content-Type', 'text/html');
+                res.end(
+                  await s.transformIndexHtml(
+                    '/forms-fixture',
+                    '<!DOCTYPE html><html><head><meta charset="utf-8"><title>Extraction Forms Fixture</title></head>' +
+                      '<body><div id="root"></div><script type="module" src="/scripts/fixtures/extraction-forms.tsx"></script></body></html>'
+                  )
+                );
+              } catch (err) {
+                next(err);
+              }
+            });
+          },
+        },
+      ],
+    });
+
+    await server.listen();
+    const port = server.httpServer.address().port;
+    origin = `http://127.0.0.1:${port}`;
+    console.log(`[FORMS SUITE] Dev fixture server listening at ${origin}`);
+  }
 
   let browser = null;
-  const api = new FormsMockApi();
+  let draftsServer = null;
+  const draftDb = new DatabaseSync(':memory:');
+  draftDb.exec('PRAGMA foreign_keys=ON');
+  runMigrations(draftDb, resolve('server/db/migrations'));
+
+  for (const id of ['account-admin-1', 'account-admin-2', 'admin']) {
+    draftDb.prepare(
+      "INSERT OR REPLACE INTO admin_users(id, email, name, role, password_hash, created_at, updated_at) VALUES(?, ?, ?, ?, ?, '2026-01-01', '2026-01-01')"
+    ).run(id, `${id}@example.invalid`, `Synthetic ${id}`, 'admin', 'not-a-login-fixture');
+  }
+
+  insertRow(draftDb, 'companies', { id: 'comp-1', name: 'Romani Trading Co', name_ar: 'شركة روماني للتجارة' });
+  insertRow(draftDb, 'companies', { id: 'comp-2', name: 'Gulf Services Ltd', name_ar: 'شركة الخليج للخدمات' });
+  insertRow(draftDb, 'employees', { id: 'emp-1', company_id: 'comp-1', name: 'Ahmed Al-Sabah' });
+  insertRow(draftDb, 'employees', { id: 'emp-2', company_id: 'comp-1', name: 'Fatima Al-Mansoor' });
+  insertRow(draftDb, 'document_types', { id: 'type-civil-id', name: 'Civil ID', name_ar: 'البطاقة المدنية' });
+  insertRow(draftDb, 'document_types', { id: 'type-passport', name: 'Passport', name_ar: 'جواز السفر' });
+  insertRow(draftDb, 'document_types', { id: 'type-contract', name: 'Work Contract', name_ar: 'عقد العمل' });
+  insertRow(draftDb, 'ministries', { id: 'min-moi', name: 'Ministry of Interior', name_ar: 'وزارة الداخلية' });
+  insertRow(draftDb, 'ministries', { id: 'min-molf', name: 'Ministry of Labor', name_ar: 'وزارة العمل' });
+  insertRow(draftDb, 'documents', {
+    id: 'doc-edit-1',
+    title: 'Employee Passport',
+    document_type_id: 'type-passport',
+    company_id: 'comp-1',
+    ministry_id: 'min-moi',
+    created_at: '2026-01-01',
+    updated_at: '2026-01-01',
+  });
+  insertRow(draftDb, 'documents', {
+    id: 'doc-edit-2',
+    title: 'Civil ID Card Edit',
+    document_type_id: 'type-civil-id',
+    company_id: 'comp-1',
+    ministry_id: 'min-moi',
+    created_at: '2026-01-01',
+    updated_at: '2026-01-01',
+  });
+
+  const api = new FormsMockApi(draftDb);
+  const draftsApp = createDraftsBackend(draftDb, fixtureConfig);
+
+  draftsServer = await new Promise((res) => {
+    const s = http.createServer(draftsApp);
+    s.listen(0, '127.0.0.1', () => res(s));
+  });
+  const draftsPort = draftsServer.address().port;
+  console.log(`[FORMS SUITE] Real Express CAS + SQLite backend listening at http://127.0.0.1:${draftsPort}`);
 
   try {
     let playwright;
@@ -1595,6 +2099,13 @@ async function main() {
     const context = await browser.newContext({
       viewport: { width: 1280, height: 900 },
     });
+    await context.addCookies([
+      {
+        name: fixtureConfig.cookieName,
+        value: makeSessionCookie(api.currentAccount),
+        url: origin,
+      },
+    ]);
     const page = await context.newPage();
     const egressViolations = [];
     const pageErrors = [];
@@ -1682,48 +2193,60 @@ async function main() {
 
         if (url.pathname.startsWith('/api/document-drafts/')) {
           const scope = decodeURIComponent(url.pathname.slice('/api/document-drafts/'.length));
-          const draft = api.getOrCreateDraft(scope);
+          const method = req.method();
+          const draftAccount = req.headers()['x-draft-account'] || api.currentAccount;
 
-          if (req.method() === 'GET') {
-            return route.fulfill({
-              status: 200,
-              json: { data: { revision: draft.revision, values: draft.values }, error: null },
-            });
+          api.draftRequestsLog.push({
+            method,
+            scope,
+            draftAccount,
+            timestamp: Date.now(),
+          });
+
+          if (method === 'GET') {
+            api.getOrCreateDraft(scope, draftAccount);
           }
 
-          if (req.method() === 'PUT') {
-            const body = req.postDataJSON() || {};
-            if (body.revision !== draft.revision) {
-              return route.fulfill({
-                status: 409,
-                json: { data: null, error: { code: 'draft_conflict', message: 'Revision conflict' } },
-              });
+          if (method === 'PUT' && api.retiringPutHeld) {
+            if (api.retiringPutEntryDeferred) {
+              api.retiringPutEntryDeferred.resolve();
             }
-            const oldRev = draft.revision;
-            draft.revision = crypto.randomUUID();
-            draft.values = body.values || null;
-            api.recordDraftPut({ scope, revision: oldRev, newRevision: draft.revision, values: draft.values });
-            return route.fulfill({
-              status: 200,
-              json: { data: { revision: draft.revision }, error: null },
-            });
+            await api.retiringPutDeferred;
           }
 
-          if (req.method() === 'DELETE') {
-            draft.revision = crypto.randomUUID();
-            draft.values = null;
-            return route.fulfill({
-              status: 200,
-              json: { data: { revision: draft.revision }, error: null },
-            });
-          }
+          const postData = req.postData();
+          const forwardHeaders = { ...req.headers() };
+          // Authority cookie based on fixture account not draft header
+          const authAccount = api.currentAccount;
+          const token = makeSessionCookie(authAccount);
+          forwardHeaders['cookie'] = `${fixtureConfig.cookieName}=${token}`;
 
-          if (req.method() === 'POST' && url.pathname.endsWith('/close')) {
-            return route.fulfill({
-              status: 200,
-              json: { data: { closed: true }, error: null },
-            });
+          const forwardRes = await fetch(`http://127.0.0.1:${draftsPort}${url.pathname}`, {
+            method,
+            headers: forwardHeaders,
+            body: ['POST', 'PUT', 'PATCH'].includes(method) ? postData : undefined,
+          });
+          const resText = await forwardRes.text();
+          if (method === 'PUT' && forwardRes.status === 200) {
+            try {
+              const parsed = JSON.parse(resText);
+              const postJson = req.postDataJSON() || {};
+              api.recordDraftPut({
+                scope,
+                revision: postJson.revision,
+                newRevision: parsed.data?.revision,
+                values: postJson.values,
+              });
+            } catch (_) {}
+            if (api.retiringPutSettledDeferred) {
+              api.retiringPutSettledDeferred.resolve();
+            }
           }
+          return route.fulfill({
+            status: forwardRes.status,
+            headers: Object.fromEntries(forwardRes.headers.entries()),
+            body: resText,
+          });
         }
 
         if (url.pathname === '/api/files/upload') {
@@ -1892,10 +2415,13 @@ async function main() {
       return route.continue();
     });
 
-    await page.goto(`${origin}/forms-fixture`);
+    const fixtureUrl = isBuiltMode
+      ? `${origin}/scripts/fixtures/extraction-forms.html`
+      : `${origin}/forms-fixture`;
+    await page.goto(fixtureUrl);
     await page.waitForSelector('[data-testid="forms-mount-container"]', { timeout: 10000 });
 
-    const testSummary = await runFormsTests(page, api);
+    const testSummary = await runFormsTests(page, api, draftDb, draftsPort);
 
     assert.deepEqual(egressViolations, [], 'Forms suite must not attempt external egress');
     assert.deepEqual(pageErrors, [], 'Forms suite must not produce uncaught page errors');
@@ -1922,6 +2448,8 @@ async function main() {
     await api.settleAllHeld();
     if (browser) await browser.close();
     if (server) await server.close();
+    if (draftsServer) await new Promise((res) => draftsServer.close(res));
+    if (draftDb) draftDb.close();
   }
 }
 

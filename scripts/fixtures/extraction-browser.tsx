@@ -69,6 +69,9 @@ declare global {
       testPdfRender: (bytes: Uint8Array, signal?: AbortSignal) => Promise<{ success: boolean; result?: PreparedDocumentResult; error?: string }>;
       testExtractDocument: (payload: ExtractionRequest, account?: string) => Promise<{ success: boolean; result?: ExtractionResult; error?: string }>;
       testAssetUrl: (url: string) => Promise<{ status: number; contentType: string | null; ok: boolean; error?: string }>;
+      setRenderGate: (held: boolean) => void;
+      awaitEnteredToBlob: () => Promise<void>;
+      releaseRenderGate: () => void;
     };
   }
 }
@@ -130,6 +133,30 @@ if (typeof window !== 'undefined') {
       }
     }
   }
+}
+
+let renderGateHeld = false;
+let renderGateResolvers: Array<() => void> = [];
+let toBlobEnteredResolvers: Array<() => void> = [];
+let toBlobEntered = false;
+
+if (typeof HTMLCanvasElement !== 'undefined' && HTMLCanvasElement.prototype) {
+  const originalToBlob = HTMLCanvasElement.prototype.toBlob;
+  HTMLCanvasElement.prototype.toBlob = function (callback, type, quality) {
+    if (renderGateHeld) {
+      toBlobEntered = true;
+      const waiters = toBlobEnteredResolvers;
+      toBlobEnteredResolvers = [];
+      waiters.forEach((r) => r());
+      new Promise<void>((resolve) => {
+        renderGateResolvers.push(resolve);
+      }).then(() => {
+        originalToBlob.call(this, callback, type, quality);
+      });
+      return;
+    }
+    return originalToBlob.call(this, callback, type, quality);
+  };
 }
 
 export function ExtractionBrowserFixture() {
@@ -218,6 +245,36 @@ export function ExtractionBrowserFixture() {
           const message = err instanceof Error ? err.message : String(err);
           return { status: 0, contentType: null, ok: false, error: message };
         }
+      },
+      setRenderGate: (held: boolean) => {
+        renderGateHeld = held;
+        if (!held) {
+          const resolvers = renderGateResolvers;
+          renderGateResolvers = [];
+          resolvers.forEach((r) => r());
+          const entryResolvers = toBlobEnteredResolvers;
+          toBlobEnteredResolvers = [];
+          entryResolvers.forEach((r) => r());
+          toBlobEntered = false;
+        } else {
+          toBlobEntered = false;
+        }
+      },
+      awaitEnteredToBlob: () => {
+        if (toBlobEntered) return Promise.resolve();
+        return new Promise<void>((resolve) => {
+          toBlobEnteredResolvers.push(resolve);
+        });
+      },
+      releaseRenderGate: () => {
+        renderGateHeld = false;
+        const gateResolvers = renderGateResolvers;
+        renderGateResolvers = [];
+        gateResolvers.forEach((r) => r());
+        const entryResolvers = toBlobEnteredResolvers;
+        toBlobEnteredResolvers = [];
+        entryResolvers.forEach((r) => r());
+        toBlobEntered = false;
       },
     };
   }, [mode, account]);

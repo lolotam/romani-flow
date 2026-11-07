@@ -17,6 +17,8 @@ import { DocumentEditorDialog } from '../../src/components/documents/DocumentDia
 import { DocumentForm } from '../../src/components/DocumentForm';
 import { EmployeeDocumentForm } from '../../src/components/EmployeeDocumentForm';
 import type { DocumentFormProps } from '../../src/components/documents/documentFormSchema';
+import { useDocumentDraft } from '../../src/hooks/useDocumentDraft';
+import { DocumentDraftSession, type DraftReference, type DraftStatus, type DraftValues } from '../../src/lib/documentDraftSession';
 
 const DEFAULT_DOCUMENT_TYPES = [
   { id: 'type-civil-id', name: 'Civil ID', name_ar: 'البطاقة المدنية' },
@@ -58,6 +60,24 @@ export interface EmployeeMountOptions {
   uploadedFile?: File | null;
 }
 
+export interface DraftProbeMountOptions {
+  scope: string;
+}
+
+export interface DraftProbeSessionHandle {
+  epoch: number;
+  session: React.RefObject<DocumentDraftSession | null>;
+  status: DraftStatus;
+  hasDraft: boolean;
+  reference: () => Promise<DraftReference>;
+  prepare: (values: DraftValues) => Promise<DraftReference>;
+  change: (values: DraftValues) => void;
+  flush: () => Promise<void>;
+  resume: (error?: unknown) => void;
+  restoredValues: DraftValues | null;
+  reRenderCount: number;
+}
+
 export interface EventLogEntry {
   type: string;
   payload?: unknown;
@@ -67,13 +87,14 @@ export interface EventLogEntry {
 export interface FormsControls {
   mountGeneral: (opts?: GeneralMountOptions) => number;
   mountEmployee: (opts?: EmployeeMountOptions) => number;
+  mountDraftProbe: (opts: DraftProbeMountOptions) => number;
   unmount: () => number;
   setFile: (file: File | null) => void;
   setAccount: (accountId: string) => number;
   getEventLog: () => EventLogEntry[];
   clearEventLog: () => void;
   getState: () => {
-    mode: 'general' | 'employee' | 'none';
+    mode: 'general' | 'employee' | 'draft-probe' | 'none';
     mountEpoch: number;
     currentAccount: string;
     isAuthReady: boolean;
@@ -88,19 +109,81 @@ export interface FormsControls {
 declare global {
   interface Window {
     __formsControls?: FormsControls;
+    __draftProbeSession?: DraftProbeSessionHandle | null;
   }
+}
+
+interface DraftProbeProps {
+  scope: string;
+  account: string;
+  mountEpoch: number;
+  onRestore: (values: DraftValues | null) => void;
+  onStatusChange: (status: DraftStatus) => void;
+}
+
+function DraftProbe({ scope, account, mountEpoch, onRestore, onStatusChange }: DraftProbeProps) {
+  const [restored, setRestored] = useState<DraftValues | null>(null);
+  const reRenderCountRef = useRef(0);
+  reRenderCountRef.current++;
+
+  const handleRestore = useCallback((vals: DraftValues | null) => {
+    setRestored(vals);
+    onRestore(vals);
+  }, [onRestore]);
+
+  const draft = useDocumentDraft(scope, handleRestore, true);
+
+  useEffect(() => {
+    onStatusChange(draft.status);
+  }, [draft.status, onStatusChange]);
+
+  useEffect(() => {
+    window.__draftProbeSession = {
+      epoch: mountEpoch,
+      session: draft.session,
+      status: draft.status,
+      hasDraft: draft.hasDraft,
+      reference: draft.reference,
+      prepare: draft.prepare,
+      change: (vals: DraftValues) => draft.session.current?.change(vals),
+      flush: () => draft.session.current ? draft.session.current.flush() : Promise.resolve(),
+      resume: (err?: unknown) => draft.session.current?.resume(err),
+      restoredValues: restored,
+      reRenderCount: reRenderCountRef.current,
+    };
+  });
+
+  return (
+    <div
+      data-testid="draft-probe-wrapper"
+      data-form-epoch={mountEpoch}
+      data-probe-scope={scope}
+      data-probe-account={account}
+      data-probe-status={draft.status}
+      data-has-draft={draft.hasDraft ? 'true' : 'false'}
+      data-rerender-count={reRenderCountRef.current}
+      style={{ backgroundColor: '#ffffff', padding: '1rem', borderRadius: '8px', border: '1px solid #e2e8f0' }}
+    >
+      <div data-testid="probe-status-display">Status: {draft.status}</div>
+      <div data-testid="probe-has-draft-display">HasDraft: {draft.hasDraft ? 'true' : 'false'}</div>
+      <div data-testid="probe-restored-display">{JSON.stringify(restored)}</div>
+    </div>
+  );
 }
 
 interface FormsContainerProps {
   currentAccount: string;
   mountEpoch: number;
-  mode: 'general' | 'employee' | 'none';
+  mode: 'general' | 'employee' | 'draft-probe' | 'none';
   generalProps: GeneralMountOptions;
   employeeProps: EmployeeMountOptions;
+  probeScope: string;
   onGeneralClose: (epoch: number) => void;
   onGeneralSuccess: (epoch: number) => void;
   onEmployeeClose: (epoch: number) => void;
   onEmployeeSave: (epoch: number) => void;
+  onProbeRestore: (epoch: number, vals: DraftValues | null) => void;
+  onProbeStatusChange: (epoch: number, status: DraftStatus) => void;
 }
 
 function FormsContainer({
@@ -109,10 +192,13 @@ function FormsContainer({
   mode,
   generalProps,
   employeeProps,
+  probeScope,
   onGeneralClose,
   onGeneralSuccess,
   onEmployeeClose,
   onEmployeeSave,
+  onProbeRestore,
+  onProbeStatusChange,
 }: FormsContainerProps) {
   const { user, isLoading } = useAuth();
   const isAuthReady = !isLoading && user?.id === currentAccount;
@@ -202,6 +288,17 @@ function FormsContainer({
         </div>
       )}
 
+      {mode === 'draft-probe' && (
+        <DraftProbe
+          key={`draft-probe-${currentAccount}-${mountEpoch}`}
+          scope={probeScope}
+          account={currentAccount}
+          mountEpoch={mountEpoch}
+          onRestore={(vals) => onProbeRestore(mountEpoch, vals)}
+          onStatusChange={(status) => onProbeStatusChange(mountEpoch, status)}
+        />
+      )}
+
       <Toaster />
     </div>
   );
@@ -211,7 +308,8 @@ export function ExtractionFormsFixture() {
   const [currentAccount, setCurrentAccount] = useState<string>('account-admin-1');
   const [mountEpoch, setMountEpoch] = useState<number>(1);
   const activeEpochRef = useRef<number>(1);
-  const [mode, setMode] = useState<'general' | 'employee' | 'none'>('general');
+  const [mode, setMode] = useState<'general' | 'employee' | 'draft-probe' | 'none'>('general');
+  const [probeScope, setProbeScope] = useState<string>('company:comp-1');
   const eventLogRef = useRef<EventLogEntry[]>([]);
 
   const logEvent = useCallback((type: string, payload?: unknown) => {
@@ -258,6 +356,16 @@ export function ExtractionFormsFixture() {
     logEvent('employee:onSave');
   }, [logEvent]);
 
+  const handleProbeRestore = useCallback((epoch: number, vals: DraftValues | null) => {
+    if (epoch !== activeEpochRef.current) return;
+    logEvent('draftProbe:onRestore', vals);
+  }, [logEvent]);
+
+  const handleProbeStatusChange = useCallback((epoch: number, status: DraftStatus) => {
+    if (epoch !== activeEpochRef.current) return;
+    logEvent('draftProbe:onStatusChange', status);
+  }, [logEvent]);
+
   // Single-owner account and mount control
   useEffect(() => {
     window.__formsControls = {
@@ -292,11 +400,20 @@ export function ExtractionFormsFixture() {
         setMode('employee');
         return next;
       },
+      mountDraftProbe: (opts) => {
+        const next = activeEpochRef.current + 1;
+        activeEpochRef.current = next;
+        setMountEpoch(next);
+        setProbeScope(opts.scope);
+        setMode('draft-probe');
+        return next;
+      },
       unmount: () => {
         const next = activeEpochRef.current + 1;
         activeEpochRef.current = next;
         setMountEpoch(next);
         setMode('none');
+        window.__draftProbeSession = null;
         return next;
       },
       setAccount: (acct: string) => {
@@ -352,7 +469,7 @@ export function ExtractionFormsFixture() {
         };
       },
     };
-  }, [mode, currentAccount, generalProps, employeeProps]);
+  }, [mode, currentAccount, generalProps, employeeProps, probeScope]);
 
   return (
     <AuthProvider key={`auth-${currentAccount}`}>
@@ -363,15 +480,19 @@ export function ExtractionFormsFixture() {
           mode={mode}
           generalProps={generalProps}
           employeeProps={employeeProps}
+          probeScope={probeScope}
           onGeneralClose={handleGeneralClose}
           onGeneralSuccess={handleGeneralSuccess}
           onEmployeeClose={handleEmployeeClose}
           onEmployeeSave={handleEmployeeSave}
+          onProbeRestore={handleProbeRestore}
+          onProbeStatusChange={handleProbeStatusChange}
         />
       </LanguageProvider>
     </AuthProvider>
   );
 }
+
 
 const rootEl = document.getElementById('root');
 if (rootEl) {

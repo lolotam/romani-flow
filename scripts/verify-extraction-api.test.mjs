@@ -14,6 +14,9 @@ import {
   MOCK_MODEL_ID,
   makeMockGroqModels,
 } from './fixtures/extraction-data.mjs';
+import { DocumentDraftSession } from '../src/lib/documentDraftSession.ts';
+import { ApiRequestError } from '../src/lib/api/http.ts';
+
 
 // ---------------------------------------------------------------------------
 // 1. Authorization & Processing Permission Gates
@@ -822,3 +825,265 @@ test('aborted native pending retains request slot until underlying native settle
   } finally { resolveNative(); }
 });
 
+// ---------------------------------------------------------------------------
+// 10. Plan Matrix Gaps: Late Versions, Account Cookie Switch, Save Retries
+// ---------------------------------------------------------------------------
+
+function makeDraftTransport(f, userId = 'admin', interceptor = null) {
+  return async (url, options = {}) => {
+    let onDone = null;
+    if (interceptor) {
+      const intercepted = await interceptor(url, options);
+      if (typeof intercepted === 'function') {
+        onDone = intercepted;
+      } else if (intercepted !== undefined) {
+        return intercepted;
+      }
+    }
+    const res = await f.request(url, {
+      method: options.method ?? 'GET',
+      body: options.body,
+      userId,
+      headers: {
+        'x-draft-account': userId,
+        ...(options.headers ?? {}),
+      },
+    });
+    if (onDone) {
+      await onDone(res);
+    }
+
+    return {
+      data: res.status >= 200 && res.status < 300 ? res.json.data : null,
+      error:
+        res.status >= 400
+          ? new ApiRequestError(
+              res.json?.error?.message ?? 'Request failed',
+              res.json?.error?.code ?? 'unknown',
+              res.status,
+            )
+          : null,
+    };
+  };
+}
+
+test('late catalog and settings changes between form admission and extraction reject with 409 stale version', () =>
+  extractionApi(async (f) => {
+    // 1. Settings version mismatch (valid 64-char hex format)
+    const staleSettingsRequest = {
+      ...f.validRequest,
+      settingsVersion: '0'.repeat(64),
+    };
+    const resSettings = await f.request('/api/document-extraction', {
+      method: 'POST',
+      body: staleSettingsRequest,
+      headers: { 'x-draft-account': 'admin' },
+    });
+    assert.equal(resSettings.status, 409);
+    assert.equal(resSettings.json.error.code, 'stale_settings');
+
+    // 2. Catalog version mismatch (valid 64-char hex format)
+    const staleCatalogRequest = {
+      ...f.validRequest,
+      catalogVersion: '0'.repeat(64),
+    };
+    const resCatalog = await f.request('/api/document-extraction', {
+      method: 'POST',
+      body: staleCatalogRequest,
+      headers: { 'x-draft-account': 'admin' },
+    });
+    assert.equal(resCatalog.status, 409);
+    assert.equal(resCatalog.json.error.code, 'stale_catalog');
+  }, { enabled: true, authorized: true }));
+
+test('account cookie switch mid-operation rejects with 409 conflict and prevents cross-account leakage', () =>
+  extractionApi(async (f) => {
+    f.seedUser('admin2', 'admin');
+
+    const res = await f.request('/api/document-drafts/' + encodeURIComponent(f.validScope), {
+      method: 'GET',
+      userId: 'admin2',
+      headers: { 'x-draft-account': 'admin' },
+    });
+    assert.equal(res.status, 409);
+    assert.equal(res.json.error.code, 'draft_conflict');
+  }, { enabled: true, authorized: true }));
+
+test('document save transaction rejects stale draft revision with 409 and succeeds upon reference refresh retry', () =>
+  extractionApi(async (f) => {
+    const scope = f.validScope;
+    const initialDraft = (await f.request(`/api/document-drafts/${encodeURIComponent(scope)}`, {
+      headers: { 'x-draft-account': 'admin' },
+    })).json.data;
+
+    const putRes = await f.request(`/api/document-drafts/${encodeURIComponent(scope)}`, {
+      method: 'PUT',
+      body: { revision: initialDraft.revision, values: { title: 'First Revision' } },
+      headers: { 'x-draft-account': 'admin' },
+    });
+    assert.equal(putRes.status, 200);
+    const rev1 = putRes.json.data.revision;
+
+    const putRes2 = await f.request(`/api/document-drafts/${encodeURIComponent(scope)}`, {
+      method: 'PUT',
+      body: { revision: rev1, values: { title: 'Second Revision' } },
+      headers: { 'x-draft-account': 'admin' },
+    });
+    assert.equal(putRes2.status, 200);
+    const rev2 = putRes2.json.data.revision;
+
+    // Stale save attempt using rev1
+    const staleDocSave = await f.request('/api/documents', {
+      method: 'POST',
+      body: {
+        title: 'New Stale Document',
+        document_type_id: 'type-civil-id',
+        company_id: f.validScope.replace('company:', ''),
+        draft: { scope, revision: rev1, account: 'admin' },
+      },
+      headers: { 'x-draft-account': 'admin' },
+    });
+    assert.equal(staleDocSave.status, 409);
+    assert.equal(staleDocSave.json.error.code, 'draft_conflict');
+
+    // Retry with fresh revision rev2 succeeds
+    const freshDocSave = await f.request('/api/documents', {
+      method: 'POST',
+      body: {
+        title: 'New Fresh Document',
+        document_type_id: 'type-civil-id',
+        company_id: f.validScope.replace('company:', ''),
+        draft: { scope, revision: rev2, account: 'admin' },
+      },
+      headers: { 'x-draft-account': 'admin' },
+    });
+    assert.equal(freshDocSave.status, 201);
+    assert.ok(freshDocSave.json.data?.[0]?.id);
+  }, { enabled: true, authorized: true }));
+
+test('repeated save attempt with committed draft reference rejects replay without duplicate document creation', () =>
+  extractionApi(async (f) => {
+    const scope = f.validScope;
+    const initialDraft = (await f.request(`/api/document-drafts/${encodeURIComponent(scope)}`, {
+      headers: { 'x-draft-account': 'admin' },
+    })).json.data;
+
+    const putRes = await f.request(`/api/document-drafts/${encodeURIComponent(scope)}`, {
+      method: 'PUT',
+      body: { revision: initialDraft.revision, values: { title: 'Commit Once' } },
+      headers: { 'x-draft-account': 'admin' },
+    });
+    const rev = putRes.json.data.revision;
+
+    const save1 = await f.request('/api/documents', {
+      method: 'POST',
+      body: {
+        title: 'Doc Commit 1',
+        document_type_id: 'type-civil-id',
+        company_id: f.validScope.replace('company:', ''),
+        draft: { scope, revision: rev, account: 'admin' },
+      },
+      headers: { 'x-draft-account': 'admin' },
+    });
+    assert.equal(save1.status, 201);
+
+    const save2 = await f.request('/api/documents', {
+      method: 'POST',
+      body: {
+        title: 'Doc Commit 2',
+        document_type_id: 'type-civil-id',
+        company_id: f.validScope.replace('company:', ''),
+        draft: { scope, revision: rev, account: 'admin' },
+      },
+      headers: { 'x-draft-account': 'admin' },
+    });
+    assert.equal(save2.status, 409);
+    assert.equal(save2.json.error.code, 'draft_conflict');
+  }, { enabled: true, authorized: true }));
+
+
+// ---------------------------------------------------------------------------
+// 11. Part C: Pure-Class Draft Session CAS Characterization
+// ---------------------------------------------------------------------------
+
+test('pure-class DocumentDraftSession: retiring session held PUT characterization with deterministic barriers', () =>
+  extractionApi(async (f) => {
+    let releasePut;
+    const putGate = new Promise((resolve) => {
+      releasePut = resolve;
+    });
+    let enteredPutResolve;
+    const enteredPut = new Promise((resolve) => {
+      enteredPutResolve = resolve;
+    });
+    let settledPutResolve;
+    const settledPut = new Promise((resolve) => {
+      settledPutResolve = resolve;
+    });
+
+    const session1Transport = makeDraftTransport(f, 'admin', async (url, options) => {
+      if (options.method === 'PUT') {
+        enteredPutResolve();
+        await putGate;
+        return () => {
+          settledPutResolve();
+        };
+      }
+    });
+
+    const session2Transport = makeDraftTransport(f, 'admin');
+    let s1;
+    let s2;
+
+    try {
+      // 1. Session 1 mounts and loads initial draft revision
+      s1 = new DocumentDraftSession(f.validScope, () => {}, () => {}, session1Transport);
+      await s1.flush();
+
+      // 2. Session 1 user types an edit
+      s1.change({ title: 'Draft from Retiring Session 1' });
+
+      // 3. Session 1 unmounts: dispose(true) initiates unawaited flush()
+      s1.dispose(true);
+      await enteredPut;
+
+      // 4. Session 2 mounts in the same scope and same account ('admin') while s1's PUT is held
+      s2 = new DocumentDraftSession(f.validScope, () => {}, () => {}, session2Transport);
+      await s2.flush();
+
+      // 5. Release Session 1's held PUT so it commits to the server
+      releasePut();
+      await settledPut;
+
+      const dbRow = f.db
+        .prepare('SELECT user_id, revision, values_json FROM document_drafts WHERE user_id=? AND scope=?')
+        .get('admin', f.validScope);
+      assert.equal(dbRow.user_id, 'admin');
+      assert.ok(dbRow.values_json.includes('Draft from Retiring Session 1'));
+
+      // 6. Session 2 user edits a field
+      s2.change({ title: 'New Form Session 2 User Edit' });
+
+      // 7. Explicit CAS characterization: Two direct class instances without shared owner/context
+      // correctly report 409 draft_conflict on stale revision and retain unsaved manual edits.
+      await assert.rejects(
+        () => s2.prepare({ title: 'New Form Session 2 User Edit' }),
+        (err) => {
+          assert.equal(err.status, 409);
+          assert.equal(err.code, 'draft_conflict');
+          return true;
+        },
+      );
+
+      // Verify unsaved manual edit is retained in memory for user recovery
+      assert.equal(s2.pending?.title, 'New Form Session 2 User Edit');
+    } finally {
+      releasePut?.();
+      if (s1) {
+        try { s1.dispose(); } catch {}
+      }
+      if (s2) {
+        try { s2.dispose(); } catch {}
+      }
+    }
+  }, { enabled: true, authorized: true }));

@@ -381,3 +381,69 @@ test('cleanup returns exact expected empty field values without leaking payload 
   assert.equal(clears.ministry_id, undefined);
   assert.equal(clears.title, undefined);
 });
+
+// ---------------------------------------------------------------------------
+// 13. Pure-Class ExtractionSession Unit Characterization: Field Protection & Invalidation
+// ---------------------------------------------------------------------------
+
+test('pure-class ExtractionSession: manual field protection prevents ticket suggestion overwrites across simulated edits', () => {
+  const session = new ExtractionSession();
+  const initial = createEmptyValues({ title: 'contract.pdf' });
+  const ticket = session.begin('ctx:doc-1', initial);
+
+  // Machine applies document_number and document_type_id
+  const patch1 = session.apply(ticket, {
+    document_number: '290010112345',
+    document_type_id: 'type-civil-id',
+  }, initial);
+
+  assert.deepEqual(patch1, {
+    document_number: '290010112345',
+    document_type_id: 'type-civil-id',
+  });
+
+  const currentValues = { ...initial, ...patch1 };
+
+  // User manually edits notes and issue_date; marks them manual
+  session.manual('notes');
+  session.manual('issue_date');
+  const userEditedValues = {
+    ...currentValues,
+    notes: 'Manually verified document notes',
+    issue_date: '2024-06-01',
+  };
+
+  // A late second suggestion arrives trying to overwrite notes, issue_date, and document_number
+  const secondPatch = session.apply(ticket, {
+    issue_date: '2024-01-01',
+    notes: 'AI suggested note',
+    document_number: '290010112345',
+  }, userEditedValues);
+
+  // User-edited manual fields are rejected; unchanged document_number is not re-applied
+  assert.equal(secondPatch.notes, undefined);
+  assert.equal(secondPatch.issue_date, undefined);
+  assert.equal(secondPatch.document_number, undefined);
+  assert.deepEqual(secondPatch, {});
+});
+
+test('pure-class ExtractionSession: session invalidation marks ticket not current and drops late suggestion application', () => {
+  const session = new ExtractionSession();
+  const initial = createEmptyValues({ title: 'doc.pdf' });
+  const ticket = session.begin('ctx:cancel-test', initial);
+
+  assert.equal(session.current(ticket), true);
+
+  // Invalidation simulates cancellation (such as aborting rendering or clearing context)
+  session.invalidate();
+
+  assert.equal(session.current(ticket), false);
+
+  // Late arrival on invalidated ticket produces an empty patch
+  const latePatch = session.apply(ticket, {
+    document_number: 'AI-LATE-123',
+    document_type_id: 'type-civil-id',
+  }, initial);
+
+  assert.deepEqual(latePatch, {}, 'Invalidated session must produce empty patch on late arrival');
+});

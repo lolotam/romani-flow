@@ -4,6 +4,12 @@ import {
   normalizePages,
   matchCatalog,
 } from '../server/extraction/normalize.ts';
+import path from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
+import { runMigrations } from '../server/db/migrator.ts';
+import { loadConfig } from '../server/config.ts';
+import { describeExtractionStatus } from '../server/extraction/policy.ts';
+
 
 // ---------------------------------------------------------------------------
 // Synthetic test fixtures
@@ -231,4 +237,43 @@ test('prompt injection text in extracted pages is treated as untrusted data with
   assert.equal(fields2.title.value, null);
   assert.equal(fields2.title.state, 'review');
   assert.equal(fields2.title.reason, 'invalid');
+});
+
+// ---------------------------------------------------------------------------
+// 3. Plan Contract Regressions: Source Cap min(20MiB, config.maxUploadBytes)
+// ---------------------------------------------------------------------------
+
+test('contract positive control: describeExtractionStatus maxSourceBytes with default / higher cap returns 20MiB', () => {
+  const db = new DatabaseSync(':memory:');
+  try {
+    runMigrations(db, path.resolve('server/db/migrations'));
+    const config = loadConfig({});
+    // Default cap is 25 MiB (> 20 MiB hard limit)
+    const status = describeExtractionStatus(db, config);
+    assert.equal(
+      status.maxSourceBytes,
+      20 * 1024 * 1024,
+      'Status maxSourceBytes under default/higher cap must be 20MiB',
+    );
+  } finally {
+    db.close();
+  }
+});
+
+test('contract regression: describeExtractionStatus maxSourceBytes is min(20MiB, config.maxUploadBytes)', () => {
+  const db = new DatabaseSync(':memory:');
+  try {
+    runMigrations(db, path.resolve('server/db/migrations'));
+    const config = loadConfig({});
+    // Configured upload cap lower than hard limit (10 MiB < 20 MiB)
+    config.maxUploadBytes = 10 * 1024 * 1024;
+    const status = describeExtractionStatus(db, config);
+    assert.equal(
+      status.maxSourceBytes,
+      10 * 1024 * 1024,
+      'Status maxSourceBytes must respect min(20MiB, configuredUploadCap) instead of hardcoding 20MiB',
+    );
+  } finally {
+    db.close();
+  }
 });
