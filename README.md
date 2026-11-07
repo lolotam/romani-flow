@@ -28,6 +28,11 @@ outside the container, so the data survives every rebuild.
 - Expiry tracking with a derived status: valid, expiring soon, expired
 - Preview and download through authenticated endpoints
 - **Send one document, or a multi-selected batch, by email with the files attached**
+- Optional document number: free text, up to 128 characters, leading zeros kept
+- **Optional AI extraction** that proposes field values for an administrator to
+  review — it is **off by default** and needs an explicit owner authorization
+  before any document is sent to a provider (see
+  [the extraction contract](docs/AI_DOCUMENT_EXTRACTION.md))
 
 ### Reminders
 - A daily scheduled job that reports expiring employee residencies and documents
@@ -138,6 +143,30 @@ The SMTP password is read from the environment **only**. It is never written to
 the database and never returned by the API — the Settings screen only shows
 whether SMTP is configured.
 
+### Optional AI document extraction
+
+The extraction of document fields is **off by default** and needs three
+independent things before it can run: the administrator switches it on in
+Settings, the backend environment carries the owner's processing authorization
+and the approvals, and a provider key is present. While it is off, manual file
+selection, metadata drafts and Save keep their existing behavior and **no
+document byte is sent to a provider**. Ordinary Save still uploads the
+attachment to this application's own server.
+
+The provider and the model are always chosen explicitly by an administrator;
+there is no automatic selection, no automatic retry and no paid fallback. A
+candidate the provider marked clear may fill an empty, untouched field
+automatically; every other value, and the title, needs an explicit accept. The
+backend keys live only in the environment — never in the browser bundle and
+never in an API answer. The candidate list shown in Settings is an **offline**
+list of locally approved models; it proves that a model may be chosen, not that
+a provider still serves it.
+
+The environment variables, the endpoint contract, the limits, the error codes
+and the migration are described in
+[the extraction contract](docs/AI_DOCUMENT_EXTRACTION.md). Nothing in that
+document authorizes an activation, a provider call or a production migration.
+
 ---
 
 ## Saved form entries and catalogs
@@ -189,6 +218,7 @@ The SPA talks to a small REST API. It serves the same envelope everywhere:
 | Email | `GET /api/email/status`, `POST /api/email/test`, `GET /api/email/expiry-preview`, `POST /api/email/expiry-report`, `POST /api/email/send-documents`, `GET /api/email/log` |
 | Scheduler | `GET /api/cron/status`, `PUT /api/cron/schedule` |
 | Settings | `GET/PUT /api/settings` |
+| Extraction (optional, off) | `GET /api/document-extraction/status`, `GET /api/document-extraction/candidates`, `GET /api/document-extraction/models`, `POST /api/document-extraction` |
 | Backup | `GET /api/backup/export`, `POST /api/backup/erase` |
 | Health | `GET /api/health` |
 

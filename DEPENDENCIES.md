@@ -55,6 +55,48 @@
 "cmdk": "^1.1.1"                     // Command menu
 ```
 
+### AI document extraction (optional, off by default)
+```json
+"pdfjs-dist": "6.5.438"              // Pinned PDF renderer (exact version, no range)
+"sharp": "0.35.5"                    // Native image decoder for the server
+```
+
+Both dependencies serve one optional feature that is **disabled by default**
+and requires an explicit owner authorization before any document is processed.
+See [`docs/AI_DOCUMENT_EXTRACTION.md`](docs/AI_DOCUMENT_EXTRACTION.md).
+
+`pdfjs-dist` is pinned to an exact version on purpose: the renderer is
+configured to report its own diagnostics instead of swallowing them, and that
+behaviour is verified against one specific release. The version is also the
+name of the local asset directory, so the application always renders with the
+files of the installed release.
+
+`sharp` is the default decoder of the server-side image admission. It is the
+one native addition of this feature; `node:sqlite` was chosen deliberately for
+the database precisely because it needs no native compilation. The runtime
+image installs the production dependencies with `npm ci --omit=dev` on
+`node:24-alpine`, so the `sharp` binary has to be resolvable in that stage. No
+Docker build of the image was run in this documentation checkout, so the image
+build itself is not claimed to be verified here.
+
+**Local assets, no CDN.** The renderer reaches no **external** host for an
+asset: every asset comes from the application's own origin. The Vite plugin
+`romani-pdfjs-assets` reads the installed package and serves exactly four
+directories of it, in the development server and in the preview of a build
+alike:
+
+```text
+/pdfjs/6.5.438/cmaps/
+/pdfjs/6.5.438/standard_fonts/
+/pdfjs/6.5.438/wasm/
+/pdfjs/6.5.438/iccs/
+```
+
+Every other path is refused. The build emits exactly the same files under the
+same names, so the development server and a built application behave
+identically. `pdfjs-dist` is excluded from the dependency pre-bundling, and the
+renderer runs in its own ES-module worker.
+
 ## Development Dependencies
 
 ### Build Tools & Bundlers

@@ -24,6 +24,58 @@ Uploads from draft-enabled forms carry the account/revision reference and stage 
 
 Save & Add Next replaces the reset baseline with blank document metadata, clears the selected file and shows a fresh file picker; another submission requires an explicit new selection. The new filename becomes the next discard baseline title. A change-file control remains available after selecting a file, and the picker validates only its advertised PDF/JPEG/PNG types. Initial typing does not change the loading status before the first revision arrives. During Discard the fields are disabled and a distinct status is shown. If an already-open control still delivers an edit, it is retained against the new revision rather than silently replaced by the discard response.
 
+## The optional document number
+
+`document_number` is part of the draft metadata. It is optional free text: the
+value is trimmed and limited to 128 characters, and an absent or blank value is
+stored as `NULL`. Leading zeros, letters, separators and the digits of the
+source are preserved, because the number is never parsed into a number. Only
+strings are accepted; a number or a boolean is rejected instead of being
+coerced, since a coerced value would silently change the identity of the
+document. Duplicates are permitted.
+
+A draft of a new document starts with an empty number. The restore of the last
+successful submission clears the field explicitly, so a **new** record never
+inherits the number of the preceding document. An existing document and its
+scoped unfinished draft (`edit:<id>`) restore their own value.
+
+Migration `009_document_number.sql` adds the nullable column
+`documents.document_number` with a check that the value is text and at most 128
+characters. The column is additive: no existing row is rewritten and nothing is
+backfilled, and the column and the previous data are retained when the feature
+is switched off. The migration still has to pass the production
+release/migration gate before it is applied to a production database, and the
+server applies pending migrations on start, so the startup path needs its own
+explicit authorization. See
+[`AI_DOCUMENT_EXTRACTION.md`](AI_DOCUMENT_EXTRACTION.md).
+
+## Applied metadata only
+
+The optional extraction adds nothing to the draft except metadata that the
+administrator applied. The suggestion panel of a document form shows the
+candidates of one attempt as plain text, with the reason a candidate was not
+applied. A candidate the server marked `clear` may fill an empty field that no
+administrator touched since the attempt started; the title always needs an
+explicit accept action.
+
+When a candidate is accepted, the value enters the draft through the ordinary
+change of the draft session, so the order of the writes and the revision of the
+scope stay the ones of the session itself. An explicit accept is a manual
+action: the field becomes administrator-owned and is protected for the rest of
+the form session. A value an administrator typed, cleared or restored is
+protected the same way and is never overwritten by a later attempt.
+
+Nothing else of an attempt is persisted. Provider answers, raw OCR output, page
+images, image bytes, keys and confidence data never enter a draft, the
+database or an export. A draft therefore contains exactly the fields of the
+form, including the document number — the same rule as before, extended by one
+optional field.
+
+Replacing or removing the attached file clears only the values the machine
+filled and that nobody changed afterwards; a value an administrator edited,
+cleared or accepted stays. Save alone stages the attachment and writes the
+final metadata, and the existing final-save validation remains authoritative.
+
 ## Upload retries and failed cleanup
 
 An open form retains its staged upload after a failed document save. Reuse validates the current account/draft revision and confirms the upload is still pending; a consumed or missing upload is staged again. No file path is accepted from the browser.
