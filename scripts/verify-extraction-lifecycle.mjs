@@ -499,6 +499,10 @@ async function runLifecycleTests(page, api) {
     initialOpen: false,
     initialReady: true,
   });
+  await page.evaluate(bytes => window.__lifecycleControls.setFile(
+    new File([new Uint8Array(bytes)], 'closed.png', { type: 'image/png' }),
+  ), Array.from(validPng));
+  await page.waitForFunction(() => window.__lifecycleControls.getState().selectedFileName === 'closed.png');
 
   await page.evaluate(() => {
     window.__lifecycleControls.retry();
@@ -512,6 +516,10 @@ async function runLifecycleTests(page, api) {
     initialOpen: true,
     initialReady: false,
   });
+  await page.evaluate(bytes => window.__lifecycleControls.setFile(
+    new File([new Uint8Array(bytes)], 'not-ready.png', { type: 'image/png' }),
+  ), Array.from(validPng));
+  await page.waitForFunction(() => window.__lifecycleControls.getState().selectedFileName === 'not-ready.png');
 
   await page.evaluate(() => {
     window.__lifecycleControls.retry();

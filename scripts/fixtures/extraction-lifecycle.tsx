@@ -60,6 +60,7 @@ export interface LifecycleControls {
     lastAppliedPatch: Partial<Values> | null;
     onStartCount: number;
     mountEpoch: number;
+    selectedFileName: string | null;
   };
 }
 
@@ -173,6 +174,7 @@ function ExtractionLifecycleMount({
         lastAppliedPatch,
         onStartCount,
         mountEpoch,
+        selectedFileName: file?.name ?? null,
       }),
     };
   }, [
