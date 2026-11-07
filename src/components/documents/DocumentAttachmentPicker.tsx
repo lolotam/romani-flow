@@ -10,7 +10,7 @@ export function DocumentAttachmentPicker({ file, editingDocument, disabled, onSe
   onSelect: (file: File) => void; onChange: () => void;
 }) {
   const { t } = useLanguage();
-  return <div className="space-y-3">
+  return <div className="min-w-0 space-y-3">
     <DocumentAttachment uploadedFile={file} editingDocument={editingDocument} />
     {file && <Button type="button" variant="outline" disabled={disabled} onClick={onChange}>{t('documents.chooseFiles')}</Button>}
     {!file && <UploadDropzone selectionOnly maxFiles={1} maxFileSize={20 * 1024 * 1024}
