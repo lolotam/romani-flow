@@ -18,7 +18,7 @@
     "test:email": "node --import tsx --test scripts/verify-email-delivery.test.mjs",
     "test:config": "node --import tsx --test scripts/verify-config.test.mjs",
     "pretest:extraction": "node --input-type=commonjs -e \"const fs=require('node:fs'); for(const file of require('./package.json').scripts['test:extraction'].split(' ').filter(value=>value.endsWith('.test.mjs'))) fs.accessSync(file)\"",
-    "test:extraction": "node --import tsx --test scripts/verify-document-number.test.mjs scripts/verify-document-number-migration.test.mjs scripts/verify-extraction-foundation.test.mjs scripts/verify-extraction-contract.test.mjs scripts/verify-extraction-policy.test.mjs scripts/verify-extraction-api.test.mjs scripts/verify-extraction-providers.test.mjs scripts/verify-extraction-images.test.mjs scripts/verify-extraction-session.test.mjs",
+    "test:extraction": "node --import tsx --test scripts/verify-document-number.test.mjs scripts/verify-document-number-migration.test.mjs scripts/verify-extraction-foundation.test.mjs scripts/verify-extraction-contract.test.mjs scripts/verify-extraction-policy.test.mjs scripts/verify-extraction-api.test.mjs scripts/verify-extraction-providers.test.mjs scripts/verify-extraction-images.test.mjs scripts/verify-extraction-session.test.mjs scripts/verify-extraction-candidates.test.mjs scripts/verify-extraction-candidate-write.test.mjs",
     "test:extraction:browser": "node scripts/verify-extraction-browser.mjs",
     "verify:api:local": "node --import tsx scripts/verify-api-local.mjs",
     "test:operations": "node --import tsx --test scripts/verify-operations.test.mjs",

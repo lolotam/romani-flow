@@ -9,6 +9,7 @@ import {
   type SettingValue,
 } from '../repositories/settings.js';
 import type { ExtractionService } from '../extraction/service.js';
+import type { CandidateValidation } from '../extraction/candidates.js';
 import { NOTIFICATION_INTERVALS } from '../services/intervals.js';
 import type { CronService } from '../services/cronService.js';
 import type { WhatsAppReminders } from '../notifications/whatsapp/service.js';
@@ -153,26 +154,53 @@ const EDITABLE: Record<string, Rule> = {
  * against the fresh metadata of the provider as well, so a revoked or a paid
  * candidate is refused before a single setting is written. The check never
  * changes a setting and never activates anything on its own.
+ *
+ * The request keeps the requested candidate immutable and hands the authority
+ * of that candidate back, so the caller can read the authority again right
+ * before it writes.
  */
 async function validateExtractionSelection(
   config: AppConfig,
   effective: Record<string, SettingValue>,
   extraction: ExtractionService,
-): Promise<string | null> {
-  if (effective['ai_extraction.enabled'] !== true) return null;
+  userId: string,
+): Promise<CandidateValidation> {
+  if (effective['ai_extraction.enabled'] !== true) {
+    return { problem: null, authority: null };
+  }
 
   const provider = String(effective['ai_extraction.provider'] ?? '');
   const model = String(effective['ai_extraction.model'] ?? '');
   if (!provider || !model) {
-    return 'Enabling the extraction needs a provider and a model.';
+    return { problem: 'Enabling the extraction needs a provider and a model.', authority: null };
   }
   if (provider !== 'groq' && provider !== 'openrouter') {
-    return 'The selected provider is not known.';
+    return { problem: 'The selected provider is not known.', authority: null };
   }
   if (!config.extraction.authorized) {
-    return 'External document processing is not authorized.';
+    return { problem: 'External document processing is not authorized.', authority: null };
   }
-  return extraction.validateCandidate(provider, model);
+  return extraction.validateCandidate({
+    userId,
+    provider,
+    model,
+    context: config.extraction.context,
+  });
+}
+
+/**
+ * A refusal of the settings write at its real boundary.
+ *
+ * The write of the reminders is the moment the database changes, so the
+ * authority of a selection has to hold there. The refusal carries the reason
+ * the caller reports, and it never leaves a partially written configuration
+ * behind.
+ */
+class SettingsWriteRefused extends Error {
+  constructor(readonly reason: string) {
+    super(reason);
+    this.name = 'SettingsWriteRefused';
+  }
 }
 
 export function createSettingsRouter(
@@ -249,20 +277,68 @@ export function createSettingsRouter(
       // rejected request changes neither a setting nor a notification.
       const effective = { ...readAllSettings(db), ...accepted };
       const changesExtraction = Object.keys(accepted).some(key => key.startsWith('ai_extraction.'));
-      const problem = changesExtraction ? await validateExtractionSelection(config, effective, extraction) : null;
-      if (problem) {
+      const validation = changesExtraction
+        ? await validateExtractionSelection(config, effective, extraction, req.user!.id)
+        : { problem: null, authority: null };
+      if (validation.problem) {
         res.status(400).json({
           data: null,
           error: {
             message: 'The settings were not saved because the extraction selection is not valid.',
             code: 'invalid_settings',
-            rejected: [{ key: 'ai_extraction.enabled', reason: problem }],
+            rejected: [{ key: 'ai_extraction.enabled', reason: validation.problem }],
           },
         });
         return;
       }
 
-      await reminders.saveSettings(accepted);
+      // The authority of the selection is read again before the first write.
+      // A role, a context or an approval that changed while the remote proof
+      // was pending refuses the whole request, so a mixed request never
+      // writes half of its settings.
+      const authority = validation.authority;
+      if (authority) {
+        const refused = extraction.assertCandidateAuthority(authority);
+        if (refused) {
+          res.status(400).json({
+            data: null,
+            error: {
+              message: 'The settings were not saved because the extraction selection is not valid.',
+              code: 'invalid_settings',
+              rejected: [{ key: 'ai_extraction.enabled', reason: refused }],
+            },
+          });
+          return;
+        }
+      }
+
+      // The same authority is proved again at the real write boundary. The
+      // assertion runs inside the coordinator of the reminders, after every
+      // await and directly before the settings are applied, so a role, a
+      // context or an approval that changed while the write was queued or
+      // while the enable check was pending refuses the whole request before
+      // a single setting, notification or job changes.
+      const beforeWrite = authority
+        ? () => {
+          const refused = extraction.assertCandidateAuthority(authority);
+          if (refused) throw new SettingsWriteRefused(refused);
+        }
+        : undefined;
+
+      try {
+        await reminders.saveSettings(accepted, beforeWrite);
+      } catch (error) {
+        if (!(error instanceof SettingsWriteRefused)) throw error;
+        res.status(400).json({
+          data: null,
+          error: {
+            message: 'The settings were not saved because the extraction selection is not valid.',
+            code: 'invalid_settings',
+            rejected: [{ key: 'ai_extraction.enabled', reason: error.reason }],
+          },
+        });
+        return;
+      }
       cron.reschedule();
 
       res.json({ data: { updated: Object.keys(accepted), rejected: [] }, error: null });

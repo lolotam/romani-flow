@@ -20,6 +20,8 @@ import {
   resolveApprovedSelection,
 } from './policy.js';
 import { extractBatch, type Selection } from './provider.js';
+import { createCandidateCatalogue } from './candidates.js';
+import type { CandidateListing, CandidateRequest, CandidateValidation, SelectionAuthority } from './candidates.js';
 import {
   ExtractionError,
   PROVIDER_URLS,
@@ -61,10 +63,12 @@ export interface ExtractionServiceConfig {
 export interface ExtractionService {
   status(): ExtractionStatus;
   models(provider: 'groq' | 'openrouter', signal: AbortSignal): Promise<ModelChoice[]>;
+  candidates(provider: 'groq' | 'openrouter'): CandidateListing;
   run(request: ExtractionRequest, userId: string, signal: AbortSignal): Promise<ExtractionResult>;
   preflight(req: Request, res: Response, next: NextFunction): void;
   acquire(req: Request, res: Response, next: NextFunction): void;
-  validateCandidate(provider: 'groq' | 'openrouter', model: string): Promise<string | null>;
+  validateCandidate(request: CandidateRequest): Promise<CandidateValidation>;
+  assertCandidateAuthority(authority: SelectionAuthority): string | null;
 }
 
 /** The clock of the running process. */
@@ -439,39 +443,22 @@ export function createExtractionService(
   };
 
   /**
-   * Validates a candidate selection of the settings.
+   * The catalogue of the candidates and the authority of a selection.
    *
-   * The candidate is proved against the fresh metadata of the provider with
-   * the injected transport, so a revoked or a paid candidate is refused
-   * before a setting is written. Fresh metadata never authorizes an
-   * unapproved context: the approval of the owner stays the first gate.
+   * The catalogue owns the offline listing and the validation of a
+   * selection, and the pipeline owns the proof of a selection against the
+   * live metadata of the provider.
    */
-  const validateCandidate = async (
-    provider: 'groq' | 'openrouter',
-    model: string,
-  ): Promise<string | null> => {
-    if (!config.extraction.authorized || !config.extraction.context) {
-      return 'External document processing is not authorized.';
-    }
-    try {
-      assertPrivacyAttestations(config.extraction, provider);
-    } catch {
-      return 'External document processing is not authorized.';
-    }
-    const resolved = resolveApprovedSelection(config.extraction, provider, model, now());
-    if (!resolved.ok) {
-      if (resolved.refusal === 'not_configured') return 'The selected provider is not configured.';
-      if (resolved.refusal === 'invalid_model') return 'The selected model identifier is not valid.';
-      return 'The selected model is not one of the approved models.';
-    }
-    const controller = new AbortController();
-    try {
-      await assertEligible(resolved.selection, resolved.approval, controller.signal, () => undefined);
-    } catch {
-      return 'The selected model is not eligible.';
-    }
-    return null;
-  };
+  const catalogue = createCandidateCatalogue({ db, config, now, assertEligible });
 
-  return { status, models, run, preflight, acquire, validateCandidate };
+  return {
+    status,
+    models,
+    candidates: catalogue.candidates,
+    run,
+    preflight,
+    acquire,
+    validateCandidate: catalogue.validateCandidate,
+    assertCandidateAuthority: catalogue.assertCandidateAuthority,
+  };
 }

@@ -387,13 +387,27 @@ export async function extractionApi(run, options = {}) {
   const storage = new StorageService(config.uploadsDir);
   storage.ensureDirectories();
 
+  const sendTextCalls = [];
+  const defaultWhatsAppTransport = {
+    status: async () => ({ configured: false, state: 'disconnected' }),
+    sendText: async (...args) => {
+      sendTextCalls.push(args);
+      return { kind: 'permanent_failed', error: 'disabled' };
+    },
+  };
+  const baseWhatsAppTransport = options.whatsappTransport ?? options.reminderTransport ?? defaultWhatsAppTransport;
+  const whatsappTransport = {
+    status: (...args) => baseWhatsAppTransport.status(...args),
+    sendText: async (...args) => {
+      sendTextCalls.push(args);
+      return baseWhatsAppTransport.sendText(...args);
+    },
+  };
+
   const reminders = new WhatsAppReminders(
     db,
     'romani',
-    {
-      status: async () => ({ configured: false, state: 'disconnected' }),
-      sendText: async () => ({ kind: 'permanent_failed', error: 'disabled' }),
-    },
+    whatsappTransport,
     () => new Date('2026-01-01T00:00:00Z')
   );
 
@@ -497,6 +511,10 @@ export async function extractionApi(run, options = {}) {
       waitForTransportCall,
       waitForTransportSettlement,
       validScope,
+      reminders,
+      coordinator: reminders.coordinator,
+      whatsappTransport,
+      sendTextCalls,
     });
   } finally {
     globalThis.fetch = originalFetch;

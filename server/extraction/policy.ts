@@ -55,7 +55,7 @@ export function isUnexpired(approval: Approval | undefined, now: string): boolea
 }
 
 /** Reports whether a model identifier belongs to a routing family. */
-function isRouterModel(modelId: string): boolean {
+export function isRouterModel(modelId: string): boolean {
   const author = modelId.split('/')[0] ?? '';
   return ROUTER_AUTHORS.has(author.toLowerCase());
 }
@@ -364,6 +364,22 @@ export function assertPrivacyAttestations(
   if (!config.openRouterNoByok || !config.openRouterZdrOnly) {
     throw new ExtractionError('processing_not_authorized', 403, 'External document processing is not authorized.');
   }
+}
+
+/**
+ * Reports whether the privacy attestations of the environment hold.
+ *
+ * It is the predicate behind the attestations: the live pipeline refuses a
+ * missing attestation, and the offline catalogue needs the same rules, so
+ * both read the answer from one place.
+ */
+export function hasPrivacyAttestations(
+  config: ExtractionConfig,
+  provider: 'groq' | 'openrouter',
+): boolean {
+  if (!config.dataControlsApproved) return false;
+  if (provider === 'groq') return config.groqFreeAccount;
+  return config.openRouterNoByok && config.openRouterZdrOnly;
 }
 
 /** Checks the settings version of a request. */

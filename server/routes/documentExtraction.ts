@@ -293,6 +293,36 @@ export function createDocumentExtractionRouter(
     }),
   );
 
+  /**
+   * The offline catalogue of the candidates.
+   *
+   * The listing is local: it reads the current approvals, the configured
+   * keys and the privacy attestations of the server and it performs no
+   * transport call at all. It answers "what may I choose locally" and never
+   * "what may I process now": the persisted enabled flag is ignored, every
+   * other local predicate still applies, and the answer says that the
+   * verification is offline. It never returns a key, an approval or an
+   * endpoint tag.
+   */
+  router.get(
+    '/candidates',
+    asyncHandler(async (req, res) => {
+      const provider = req.query.provider;
+      if (provider !== 'groq' && provider !== 'openrouter') {
+        res.status(400).json({
+          data: null,
+          error: {
+            message: 'The provider is not known.',
+            code: 'invalid_provider',
+            requestId: randomUUID(),
+          },
+        });
+        return;
+      }
+      res.json({ data: service.candidates(provider), error: null });
+    }),
+  );
+
   router.get(
     '/models',
     asyncHandler(async (req, res) => {
