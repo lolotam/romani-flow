@@ -23,7 +23,7 @@ test('additive 007 upgrades existing employees with opt-in false and default glo
   fs.copyFileSync('server/db/migrations/007_whatsapp_notifications.sql',path.join(dir,'007_whatsapp_notifications.sql'));
   const result=runMigrations(db,dir);
   assert.deepEqual(result.applied,['007_whatsapp_notifications.sql']);
-  assert.deepEqual(runMigrations(db,path.resolve('server/db/migrations')).applied,['008_document_drafts.sql']);
+  assert.deepEqual(runMigrations(db,path.resolve('server/db/migrations')).applied,['008_document_drafts.sql','009_document_number.sql']);
   assert.equal(db.prepare('SELECT count(*) n FROM document_drafts').get().n,0);
   assert.equal(db.prepare('SELECT name FROM employees WHERE id=?').get('existing').name,'Synthetic');
   assert.equal(db.prepare('SELECT whatsapp_notifications_enabled enabled FROM employees WHERE id=?').get('existing').enabled,0);
