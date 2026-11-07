@@ -431,7 +431,7 @@ export function assertCurrent(
  */
 export function describeExtractionStatus(
   db: Db,
-  config: { extraction: ExtractionConfig },
+  config: { extraction: ExtractionConfig; maxUploadBytes?: number },
   now: string,
 ): ExtractionStatus {
   const enabled = getBoolean(db, 'ai_extraction.enabled');
@@ -480,6 +480,9 @@ export function describeExtractionStatus(
     reason,
     settingsVersion: settingsVersion(db, config),
     catalogVersion: readCatalogs(db).version,
-    maxSourceBytes: limits.source,
+    // The advertised cap is the smaller of the hard source bound of the
+    // pipeline and the upload cap of the server, so a client never reads a
+    // bound the server would refuse.
+    maxSourceBytes: Math.min(limits.source, config.maxUploadBytes ?? limits.source),
   };
 }

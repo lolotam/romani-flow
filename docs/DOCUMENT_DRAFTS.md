@@ -51,6 +51,13 @@ explicit authorization. See
 
 ## Applied metadata only
 
+Retiring hook sessions expose the actual settlement of their load, writes and
+in-flight deletion. A new hook session for the same account and scope waits
+before loading, so it reads the predecessor's committed revision. Different
+accounts and scopes remain independent. A waiting session that is unmounted
+does not send a late GET. Real competing-writer conflicts still require explicit
+recovery; there is no blind conflict retry or overwrite.
+
 The optional extraction adds nothing to the draft except metadata that the
 administrator applied. The suggestion panel of a document form shows the
 candidates of one attempt as plain text, with the reason a candidate was not

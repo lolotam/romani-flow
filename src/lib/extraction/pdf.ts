@@ -67,7 +67,7 @@ const MAX_INLINE_IMAGE_BYTES = 16_000_000;
 const JPEG_QUALITY = 0.85;
 
 /** The time the whole preparation of one document may take. */
-const DEADLINE_MS = 60_000;
+const DEADLINE_MS = 30_000;
 
 /**
  * The level the dedicated worker reports its diagnostics with.

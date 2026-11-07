@@ -1086,13 +1086,15 @@ export async function main() {
       throw importErr;
     }
 
-    const { chromium } = playwright;
+    const browserEngine = process.env.BROWSER_ENGINE || 'chromium';
+    if (!['chromium', 'firefox'].includes(browserEngine)) throw new Error('Unsupported test browser engine');
+    const browserType = playwright[browserEngine];
     try {
-      browser = await chromium.launch({
+      browser = await browserType.launch({
         ...(process.env.BROWSER_CHANNEL ? { channel: process.env.BROWSER_CHANNEL } : {}),
         headless: true,
       });
-      console.log('[BROWSER SUITE] Chromium browser launched successfully.');
+      console.log('[BROWSER SUITE] Browser launched successfully.');
     } catch (launchErr) {
       console.error('======================================================================');
       console.error('[BROWSER SUITE] BROWSER BINARY NOT PROVISIONED ON THIS ENVIRONMENT');

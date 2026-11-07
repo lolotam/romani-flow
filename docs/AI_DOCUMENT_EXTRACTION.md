@@ -1,7 +1,7 @@
 # AI document extraction
 
 Status: implemented in the local repository and **disabled by default**. This
-document describes the code as it is on `17e57f18`; it is an operational
+document describes the local implementation and its final integration fixes; it is an operational
 contract, not an activation instruction and not a release note. Nothing has been
 published or deployed: the terminal state is reviewed local commits.
 
@@ -306,24 +306,18 @@ and of file uploads.
   agree with the signature; a renamed document is refused.
 * the source bound is checked before the bytes are read, so an oversized file
   is refused without being loaded. The bound is the `maxSourceBytes` value of
-  the status, which is `limits.source` — a fixed **20 MiB**
-  (`server/contracts/documentExtraction.ts`). This is a different limit from
-  the attachment upload cap of the server (`MAX_UPLOAD_MB`, applied by the
-  upload middleware when the attachment is staged at Save) and from the 20 MB
-  client-side file-picker bound of the document form. The plan had proposed the
-  source bound as `min(20 MiB, config.maxUploadBytes)`; the implementation uses
-  the fixed 20 MiB of the shared contract, so a deployment that lowers
-  `MAX_UPLOAD_MB` below 20 MiB has a smaller *upload* cap and an unchanged
-  20 MiB *extraction* source bound.
+  the status: `min(limits.source, config.maxUploadBytes)`. The shared hard
+  maximum is **20 MiB**; lowering `MAX_UPLOAD_MB` also lowers the advertised
+  extraction source bound. The picker still has its separate 20 MiB limit.
 * A JPEG or PNG is a single page and is **never** downsampled: an oversized
   picture fails instead of being silently shrunk.
 * A PDF is rendered page by page into JPEG page images at quality `0.85`. The
   renderer refuses a document with more than 10 pages, a rendered page above
   4,000,000 pixels or an edge above 8192 pixels, more than 50,000 operators per
   page, more than 16,000,000 image-operand pixels per page or more than
-  16,000,000 inline image bytes per page. The whole preparation has a 60 second
-  deadline (`DEADLINE_MS` in `src/lib/extraction/pdf.ts`); the plan had proposed
-  30 seconds, and the implementation uses the longer value.
+  16,000,000 inline image bytes per page. The whole preparation has a **30 second**
+  deadline (`DEADLINE_MS` in `src/lib/extraction/pdf.ts`). The caller is rejected
+  at the deadline even if browser-owned encoding has not physically settled.
 * The pinned PDF.js release is configured to **report** its diagnostics instead
   of swallowing them, and the dedicated worker turns a diagnostic into a
   rejection. This matters: with the swallowing behaviour the renderer removes
@@ -482,7 +476,7 @@ prevents the inference. A paid fallback is never used automatically.
 | Provider response message content | `16 KiB` | same |
 | Output tokens per request | `4096` | same |
 | Browser request timeout | `50_000 ms` | `src/lib/api/documentExtraction.ts` |
-| Local preparation deadline | `60_000 ms` | `src/lib/extraction/pdf.ts` |
+| Local preparation deadline | `30_000 ms` | `src/lib/extraction/pdf.ts` |
 | Provider cooldown | `1..300 s` | `server/extraction/service.ts` |
 
 A rate-limited answer starts a cooldown for the account. The announced
@@ -698,23 +692,29 @@ a documentation task.
 The `--preparation` browser run above is the preparation path only. It is not
 the full browser orchestration, and it is not a proof of the built forms.
 
-Still open, and **not** claimed here:
+The integration suite now includes the real React hook, signed session cookies,
+the Express CAS route and in-memory SQLite. Same-account/scope successors wait
+for a retiring session's actual work before loading its revision. Cross-account
+isolation and genuine competing-writer conflicts remain enforced; there is no
+automatic conflict overwrite. The source cap and preparation deadline follow
+the limits documented above.
 
-* the assembled regression and the **isolated local API verification**
-  (`scripts/verify-api-local.mjs` / `npm run verify:api:local`, one fresh
-  loopback app with an in-memory database and stubbed provider transports) —
-  **Task 17**;
-* the draft disposal / revision audit of the form session. The deterministic
-  source-boundary probe of Task 17 shows that a retiring session and a new
-  session of the same scope end in a `conflict` instead of a silent overwrite,
-  and that Save stays blocked until the form is reopened. It uses the real
-  class with a deterministic synthetic transport, **not** the real route, the
-  real database or a browser, and the UI text that points at "another device"
-  is inaccurate for this same-device ordering. The reproduction through the
-  real hook/form and the loopback CAS route is still open — **Task 17**;
-* the final parent guards, the full browser suite (`npm run
-  test:extraction:browser`) and the local-only handoff — **Task 18**;
-* any full release, activation or OCR accuracy claim.
+`npm run verify:api:local` runs the existing API verifier against one temporary
+loopback service with ephemeral synthetic credentials and stubbed transports.
+The final local run reports 47 passed and zero failed. The assembled Node
+extraction suite reports 204 passed, zero failed and zero skipped.
+
+The full browser runner executes preparation, lifecycle, settings and forms
+sequentially in dev and built modes. Set `BROWSER_ENGINE` to `chromium` (default)
+or `firefox` to choose explicitly; an unsupported engine is rejected. The local
+validation uses the pinned Playwright browsers Chromium141.0.7390.37 and
+Firefox142.0.1. This establishes synthetic behavior, not provider accuracy or
+live account eligibility.
+
+Not established by this local validation: actual Safari18/WebKit-device
+behavior, a Docker/Alpine native build, external inference quality, production
+migration, activation or deployment. Those are not authorized by a passing
+local test suite.
 
 ---
 

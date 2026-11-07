@@ -320,12 +320,16 @@ class FormsMockApi {
     if (this.capturedDocuments.length > expectedIndex) {
       return Promise.resolve(this.capturedDocuments[expectedIndex]);
     }
-    return new Promise((res, rej) => {
+    const pending = new Promise((res, rej) => {
       const timer = setTimeout(() => {
         rej(new Error(`Timeout waiting for document save index ${expectedIndex}`));
       }, timeoutMs);
       this.documentListeners.push({ expectedIndex, resolve: res, reject: rej, timer });
     });
+    // The caller may still be awaiting its click. Keep the rejection handled
+    // until that caller awaits this same promise; the failure still propagates.
+    void pending.catch(() => undefined);
+    return pending;
   }
 
   recordDocument(doc) {
@@ -431,8 +435,8 @@ class FormsMockApi {
         return cur ? cur.values : null;
       },
       set values(vals) {
-        const cur = self.getDraft(scope, self.currentAccount);
-        self.seedDraft(scope, vals, self.currentAccount, cur ? cur.revision : crypto.randomUUID());
+        // A fixture write is a new revision, just like a real CAS write.
+        self.seedDraft(scope, vals, self.currentAccount, crypto.randomUUID());
       },
     };
   }
@@ -474,6 +478,8 @@ async function selectPopoverDate(page, labelText, which = 'last') {
     .locator('[role="gridcell"] button:not([disabled]), button[name="day"]:not([disabled])');
   const dayBtn = which === 'first' ? dayBtns.first() : dayBtns.last();
   await dayBtn.click();
+  await page.keyboard.press('Escape');
+  await dayBtn.waitFor({ state: 'hidden', timeout: 5000 });
 }
 
 async function waitForFormReady(page, expectedEpoch) {
@@ -525,6 +531,13 @@ async function runFormsTests(page, api, draftDb, draftsPort) {
       console.log(`  ✔ [PASS] ${name} (${duration}ms)`);
     } catch (err) {
       const duration = Date.now() - start;
+      const failureState = await page.locator('form').evaluateAll(forms => forms.map(form => ({
+        valid: form.checkValidity(),
+        fields: Array.from(form.querySelectorAll('input, select')).map(field => ({ name: field.name || field.id, value: field.value, valid: field.checkValidity() })),
+        buttons: Array.from(form.querySelectorAll('button[type="submit"]')).map(button => ({ disabled: button.disabled, text: button.textContent })),
+        alerts: Array.from(document.querySelectorAll('[role="alert"]')).map(alert => alert.textContent),
+      }))).catch(() => []);
+      console.log('[FORM FAILURE STATE]', JSON.stringify(failureState));
       const isAssertionError = err.name === 'AssertionError' || err instanceof assert.AssertionError;
       if (isPositiveControl) {
         unexpectedFailCount++;
@@ -1717,6 +1730,7 @@ async function runFormsTests(page, api, draftDb, draftsPort) {
         return window.__formsControls.mountDraftProbe({ scope: 'company:comp-1' });
       });
       await page.waitForSelector('[data-testid="draft-probe-wrapper"]', { timeout: 10000 });
+      await page.waitForFunction(ep => window.__draftProbeSession?.epoch === ep && window.__draftProbeSession?.status === 'saved', epoch, { timeout: 5000 });
       await page.evaluate(async () => {
         await window.__draftProbeSession.prepare({ title: 'Account 1 Confidential Title' });
       });
@@ -1728,7 +1742,7 @@ async function runFormsTests(page, api, draftDb, draftsPort) {
         return window.__formsControls.mountDraftProbe({ scope: 'company:comp-1' });
       });
       await page.waitForSelector('[data-testid="draft-probe-wrapper"]', { timeout: 10000 });
-      await page.waitForFunction(() => window.__draftProbeSession?.status !== 'loading', null, { timeout: 10000 });
+      await page.waitForFunction(ep => window.__draftProbeSession?.epoch === ep && window.__draftProbeSession?.status === 'saved', epoch, { timeout: 5000 });
 
       // Verify Account 2 sees empty draft (no leakage from Account 1)
       const hasDraftAcct2 = await page.evaluate(() => window.__draftProbeSession?.hasDraft);
@@ -1741,7 +1755,7 @@ async function runFormsTests(page, api, draftDb, draftsPort) {
         return window.__formsControls.mountDraftProbe({ scope: 'company:comp-1' });
       });
       await page.waitForSelector('[data-testid="draft-probe-wrapper"]', { timeout: 10000 });
-      await page.waitForFunction(() => window.__draftProbeSession?.hasDraft === true, null, { timeout: 10000 });
+      await page.waitForFunction(ep => window.__draftProbeSession?.epoch === ep && window.__draftProbeSession?.status === 'saved' && window.__draftProbeSession?.hasDraft === true, epoch, { timeout: 5000 });
       const restoredAcct1 = await page.evaluate(() => window.__draftProbeSession.restoredValues);
       assert.equal(restoredAcct1?.title, 'Account 1 Confidential Title', 'Account 1 draft restored intact');
 
@@ -2089,12 +2103,14 @@ export async function main() {
       throw importErr;
     }
 
-    const { chromium } = playwright;
-    browser = await chromium.launch({
+    const browserEngine = process.env.BROWSER_ENGINE || 'chromium';
+    if (!['chromium', 'firefox'].includes(browserEngine)) throw new Error('Unsupported test browser engine');
+    const browserType = playwright[browserEngine];
+    browser = await browserType.launch({
       ...(process.env.BROWSER_CHANNEL ? { channel: process.env.BROWSER_CHANNEL } : {}),
       headless: true,
     });
-    console.log('[FORMS SUITE] Chromium browser launched successfully.');
+    console.log('[FORMS SUITE] Browser launched successfully.');
 
     const context = await browser.newContext({
       viewport: { width: 1280, height: 900 },

@@ -333,7 +333,8 @@ async function runPreparationTests(page) {
   );
 
   console.log('[CASE 10.3] Preparation deadline: 30s deadline with controlled page clock (29,999ms vs 30,000ms)...');
-  await page.clock.install();
+  const deadlineClock = new Date('2030-01-01T00:00:00Z');
+  await page.clock.install({ time: deadlineClock });
   let observedRed = null;
   try {
     await page.evaluate(() => {
@@ -343,16 +344,32 @@ async function runPreparationTests(page) {
 
     const prepPromise = page.evaluate(async (bytes) => {
       const file = new File([new Uint8Array(bytes)], 'deadline-test.pdf', { type: 'application/pdf' });
+      const originalTimer = window.setTimeout;
+      window.setTimeout = (callback, delay, ...args) => {
+        if (delay === 30_000 || delay === 60_000) window.__deadlineTimerStart = Date.now();
+        return originalTimer(callback, delay, ...args);
+      };
       window.__deadlineProbePending = true;
       try { return await window.__fixtureControls.testPrepareDocument(file); }
-      finally { window.__deadlineProbePending = false; }
+      finally { window.__deadlineProbePending = false; window.setTimeout = originalTimer; }
     }, Array.from(pdf1));
 
     // Await actual entered-toBlob gate barrier before advancing page clock!
-    await page.evaluate(() => window.__fixtureControls.awaitEnteredToBlob());
+    let entryTimer;
+    try {
+      await Promise.race([
+        page.evaluate(() => window.__fixtureControls.awaitEnteredToBlob()),
+        new Promise((_, reject) => { entryTimer = setTimeout(() => reject(new Error('PDF did not reach encoding gate')), 5000); }),
+      ]);
+    } finally { clearTimeout(entryTimer); }
+    // Let real rAF reach encoding first, then freeze the clock and calculate
+    // the boundary from the actual timer registration, not elapsed tool time.
+    await page.clock.pauseAt(new Date(await page.evaluate(() => Date.now() + 50)));
+    const elapsed = await page.evaluate(() => Date.now() - window.__deadlineTimerStart);
+    assert.ok(Number.isFinite(elapsed) && elapsed < 29999, 'Deadline registration observed before boundary');
 
     // Advance to 29,999ms: positive control - deadline has NOT expired yet
-    await page.clock.fastForward(29999);
+    await page.clock.fastForward(29999 - elapsed);
 
     // At 29,999ms: assert work pending and live resources
     const isPendingAt29999 = await page.evaluate(() => window.__deadlineProbePending);
@@ -554,13 +571,15 @@ async function main() {
       throw importErr;
     }
 
-    const { chromium } = playwright;
+    const browserEngine = process.env.BROWSER_ENGINE || 'chromium';
+    if (!['chromium', 'firefox'].includes(browserEngine)) throw new Error('Unsupported test browser engine');
+    const browserType = playwright[browserEngine];
     try {
-      browser = await chromium.launch({
+      browser = await browserType.launch({
         ...(process.env.BROWSER_CHANNEL ? { channel: process.env.BROWSER_CHANNEL } : {}),
         headless: true,
       });
-      console.log('[BROWSER SUITE] Chromium browser launched successfully.');
+      console.log('[BROWSER SUITE] Browser launched successfully.');
     } catch (launchErr) {
       console.error('======================================================================');
       console.error('[BROWSER SUITE] BROWSER BINARY NOT PROVISIONED ON THIS ENVIRONMENT');
@@ -689,7 +708,7 @@ async function main() {
     }
 
     console.log('\n======================================================================');
-    console.log('[BROWSER ORCHESTRATION] Sequentially executing forms group (18 cases)...');
+    console.log('[BROWSER ORCHESTRATION] Sequentially executing forms group (22 cases)...');
     console.log('======================================================================');
     const { main: runFormsMain } = await import('./verify-extraction-forms.mjs');
     await runFormsMain();
@@ -700,13 +719,13 @@ async function main() {
 
     console.log('\n======================================================================');
     console.log('[BROWSER ORCHESTRATION SUMMARY]');
-    console.log('  Group 1: Preparation & Rendering: 11 cases');
+    console.log('  Group 1: Preparation & Rendering: 12 cases');
     console.log('  Group 2: Document Lifecycle:      14 cases');
     console.log('  Group 3: Settings & Approvals:    12 cases');
-    console.log('  Group 4: Forms & CAS Integration: 18 cases');
-    console.log('  Total Executed Cases:             55 group cases (11 + 14 + 12 + 18)');
+    console.log('  Group 4: Forms & CAS Integration: 22 cases');
+    console.log('  Total Executed Cases:             60 group cases (12 + 14 + 12 + 22)');
     console.log('======================================================================');
-    console.log('[BROWSER ORCHESTRATION] All 55 browser group cases completed successfully with exit code 0.');
+    console.log('[BROWSER ORCHESTRATION] All 60 browser group cases completed successfully with exit code 0.');
     console.log('======================================================================\n');
   }
 }
