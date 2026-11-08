@@ -15,6 +15,7 @@
 import {
   MAX_IMAGE_DIMENSION,
   MAX_IMAGE_PIXELS,
+  displayedDimensions,
   readImageHeader,
   sniffImageKind,
 } from './imageHeader';
@@ -112,9 +113,11 @@ function assertSupportedSource(file: File, kind: SourceKind): void {
  *
  * The header is checked before the bitmap is created, and the decoded
  * bitmap is checked against the header afterwards, so a picture that only
- * pretends to be small is refused. The bitmap is always closed and the
- * picture is never downsampled: an oversized source fails instead of being
- * silently shrunk.
+ * pretends to be small is refused. A JPEG that carries an EXIF orientation is
+ * compared against the edges its orientation shows, so a turned picture is
+ * prepared while a picture that does not match its own header is still
+ * refused. The bitmap is always closed and the picture is never downsampled:
+ * an oversized source fails instead of being silently shrunk.
  */
 async function prepareImage(
   bytes: Uint8Array,
@@ -123,11 +126,12 @@ async function prepareImage(
 ): Promise<PreparedDocument> {
   const header = readImageHeader(bytes);
   const mime = header.mime;
+  const shown = displayedDimensions(header);
   let bitmap: ImageBitmap | null = null;
   try {
     bitmap = await createImageBitmap(new Blob([bytes], { type: mime }));
     assertNotAborted(signal);
-    if (bitmap.width !== header.width || bitmap.height !== header.height) {
+    if (bitmap.width !== shown.width || bitmap.height !== shown.height) {
       throw preparationFailure(failureCode.invalid);
     }
     if (

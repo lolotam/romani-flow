@@ -183,15 +183,32 @@ function readPages(
   } catch {
     throw providerError('provider_malformed_response');
   }
+  const expected = images.map(image => image.page).sort((a, b) => a - b);
+  if (!hasExpectedPageCount(parsed, expected.length)) throw providerError('provider_malformed_response');
   const batch = rawBatch.safeParse(parsed);
   if (!batch.success) throw providerError('provider_malformed_response');
 
-  const expected = images.map(image => image.page).sort((a, b) => a - b);
   const actual = batch.data.pages.map(page => page.page).sort((a, b) => a - b);
   if (actual.length !== expected.length || actual.some((page, index) => page !== expected[index])) {
     throw providerError('provider_malformed_response');
   }
   return batch.data.pages;
+}
+
+/**
+ * Reports whether a provider answer carries the pages the batch asked for.
+ *
+ * The check costs the same for every answer: it looks at the top level of the
+ * answer and at the length of its pages array, and it never walks a page. An
+ * answer that is not an object, that carries no pages, more pages than the
+ * contract allows or a different number of pages than the batch asked for is
+ * refused before the schema reads a single page of it.
+ */
+function hasExpectedPageCount(parsed: unknown, expected: number): boolean {
+  if (!isRecord(parsed)) return false;
+  const pages = parsed.pages;
+  if (!Array.isArray(pages)) return false;
+  return pages.length >= 1 && pages.length <= 10 && pages.length === expected;
 }
 
 /**

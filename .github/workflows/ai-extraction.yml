@@ -1,0 +1,58 @@
+name: AI extraction verification
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  node-gates:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run lint
+      - run: npm run build
+      - run: npm run test:extraction
+      - run: npm run test:config
+      - run: npm run test:forms
+      - run: npm run test:operations
+      - run: npm run test:email
+      - run: npm run test:whatsapp-pairing
+      - run: npm run test:whatsapp
+      - run: npm run verify:api:local
+  browser-gates:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      max-parallel: 1
+      matrix:
+        browser: [chromium, firefox]
+    env:
+      BROWSER_ENGINE: ${{ matrix.browser }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci
+      - run: npx --no-install playwright install --with-deps ${{ matrix.browser }}
+      - run: node scripts/verify-extraction-browser.mjs
+      - run: node scripts/verify-extraction-browser.mjs --built
+      - if: matrix.browser == 'chromium'
+        run: node scripts/verify-document-layout.mjs

@@ -81,7 +81,7 @@ export async function extractionApi(run, options = {}) {
   // Seed extraction settings
   const enabled = options.enabled ?? false;
   const provider = options.provider ?? (enabled ? 'openrouter' : '');
-  const model = options.model ?? (enabled ? MOCK_MODEL_ID : '');
+  const model = options.model ?? (enabled ? (provider === 'groq' ? MOCK_GROQ_MODEL_ID : MOCK_MODEL_ID) : '');
   setSetting(db, 'ai_extraction.enabled', enabled);
   setSetting(db, 'ai_extraction.provider', provider);
   setSetting(db, 'ai_extraction.model', model);
@@ -92,7 +92,7 @@ export async function extractionApi(run, options = {}) {
 
   const defaultApprovals = options.approvals ?? [
     provider === 'groq'
-      ? makeMockGroqApproval()
+      ? makeMockGroqApproval({ model: model || MOCK_GROQ_MODEL_ID })
       : makeMockApproval({
           model: model || MOCK_MODEL_ID,
           endpoint: options.endpoint ?? MOCK_ENDPOINT_TAG,
@@ -113,7 +113,7 @@ export async function extractionApi(run, options = {}) {
     openRouterKey:
       options.openRouterKey !== undefined
         ? options.openRouterKey
-        : (provider === 'openrouter' || enabled ? 'mock-openrouter-key' : null),
+        : (provider === 'openrouter' ? 'mock-openrouter-key' : null),
     groqFreeAccount: options.groqFreeAccount ?? true,
     dataControlsApproved: options.dataControlsApproved ?? true,
     openRouterNoByok: options.openRouterNoByok ?? true,
@@ -363,11 +363,14 @@ export async function extractionApi(run, options = {}) {
     }
   };
 
+  let base;
+
   // Guard globalThis.fetch so no non-loopback calls can escape
   const originalFetch = globalThis.fetch;
   globalThis.fetch = async (input, init) => {
     const urlStr = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
-    if (urlStr.startsWith('http://127.0.0.1:') || urlStr.startsWith('http://localhost:')) {
+    const target = new URL(urlStr);
+    if (base && target.origin === base && !target.username && !target.password) {
       return originalFetch(input, init);
     }
     throw new Error('external_inference_forbidden: ' + urlStr);
@@ -423,13 +426,17 @@ export async function extractionApi(run, options = {}) {
     reminders,
     staticDir: dir,
     extractionTransport,
-    ...(options.clock ? { extractionClock: options.clock } : {}),
+    extractionClock: options.clock ?? {
+      now: () => Date.parse('2026-11-08T00:00:00Z'),
+      setTimeout: (callback, ms) => setTimeout(callback, ms),
+      clearTimeout: timer => clearTimeout(timer),
+    },
     ...(options.decoderFactory ? { decoderFactory: options.decoderFactory } : {}),
   });
 
   const server = http.createServer(app);
   await new Promise((r) => server.listen(0, '127.0.0.1', r));
-  const base = 'http://127.0.0.1:' + server.address().port;
+  base = 'http://127.0.0.1:' + server.address().port;
 
   const request = async (
     url,

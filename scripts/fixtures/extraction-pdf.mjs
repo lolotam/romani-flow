@@ -293,8 +293,12 @@ export function syntheticPng({ width = 64, height = 64, corrupted = false } = {}
   return Buffer.concat([sig, ihdr, idat, iend]);
 }
 
-/** Generates real synthetic JPEG bytes; oversized cases retain valid headers and pixels. */
-export async function syntheticJpeg({ width = 64, height = 64, corrupted = false } = {}) {
+/** Generates real synthetic JPEG bytes; oversized cases retain valid headers and pixels; supports EXIF orientation. */
+export async function syntheticJpeg({ width = 64, height = 64, corrupted = false, orientation = undefined } = {}) {
   if (corrupted) return Buffer.from([0xff, 0xd8, 0, 0, 0]);
-  return sharp({ create: { width, height, channels: 3, background: { r: 0, g: 0, b: 0 } } }).jpeg().toBuffer();
+  let pipeline = sharp({ create: { width, height, channels: 3, background: { r: 0, g: 0, b: 0 } } });
+  if (orientation !== undefined) {
+    pipeline = pipeline.withMetadata({ orientation });
+  }
+  return pipeline.jpeg().toBuffer();
 }

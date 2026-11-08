@@ -18,7 +18,12 @@ export async function saveDocument(
     issue_date: data.issue_date ? format(data.issue_date, 'yyyy-MM-dd') : null,
     expiry_date: format(data.expiry_date, 'yyyy-MM-dd'),
     notes: data.notes || null,
-    document_number: documentNumber.parse(data.document_number),
+    // An absent number is left out of the request, so a stored number survives
+    // an update that never touched it. An explicit empty or null number is
+    // sent and clears the stored value.
+    ...(data.document_number !== undefined
+      ? { document_number: documentNumber.parse(data.document_number) }
+      : {}),
     document_type_id: data.document_type_id,
     company_id: data.beneficiary_type === 'company' ? data.company_id : null,
     employee_id: data.beneficiary_type === 'employee' ? data.employee_id : null,

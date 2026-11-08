@@ -450,6 +450,11 @@ export function describeExtractionStatus(
           item => item.provider === provider && item.model === model && isUnexpired(item, now),
         )
       : undefined;
+  // The attestations of the environment are local facts of the provider, and
+  // they are the same facts the live pipeline proves before every outbound
+  // call. A status that advertises readiness without them would promise a
+  // processing the server refuses, so readiness needs them as well.
+  const attested = provider !== null && hasPrivacyAttestations(config.extraction, provider);
   const available =
     enabled &&
     processingAuthorized &&
@@ -457,7 +462,8 @@ export function describeExtractionStatus(
     provider !== null &&
     Boolean(model) &&
     Boolean(approval) &&
-    configured[provider];
+    configured[provider] &&
+    attested;
   const reason = !enabled
     ? 'disabled'
     : !processingAuthorized
@@ -466,9 +472,11 @@ export function describeExtractionStatus(
         ? 'not_configured'
         : !configured[provider]
           ? 'provider_not_configured'
-          : !approval
-            ? 'not_approved'
-            : 'ready';
+          : !attested
+            ? 'not_authorized'
+            : !approval
+              ? 'not_approved'
+              : 'ready';
   return {
     enabled,
     provider: provider ?? '',

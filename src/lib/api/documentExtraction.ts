@@ -63,15 +63,6 @@ const modelChoiceSchema = z
 export type ModelChoice = z.infer<typeof modelChoiceSchema>;
 
 /**
- * The epoch of the running extraction calls.
- *
- * Every extraction request takes the next epoch. An answer that belongs to
- * an older epoch is obsolete and is refused, even when the transport did not
- * notice the cancellation.
- */
-let extractionEpoch = 0;
-
-/**
  * Reads the public status of the extraction.
  *
  * The answer is validated before it is returned, so a changed or broken
@@ -116,7 +107,11 @@ export async function getExtractionModels(
  * The request is refused before it leaves the page when the caller already
  * cancelled it or when the encoded request is larger than the budget of the
  * endpoint. The answer is validated with the shared contract before it is
- * returned, and an obsolete answer is refused.
+ * returned, and a cancelled answer is refused.
+ *
+ * The wrapper keeps no state of its own: which answer belongs to which
+ * attempt is decided by the form that started the attempt, so two forms that
+ * extract at the same time never cancel each other.
  */
 export async function extractDocument(
   body: ExtractionRequest,
@@ -124,7 +119,6 @@ export async function extractDocument(
   signal?: AbortSignal,
 ): Promise<ExtractionResult> {
   if (signal?.aborted) throw abortedError();
-  const epoch = (extractionEpoch += 1);
   const encoded = new TextEncoder().encode(JSON.stringify(body)).byteLength;
   if (encoded > MAX_REQUEST_BYTES) throw new Error('payload_too_large');
   if (!extractionRequest.safeParse(body).success) throw new Error('extraction_invalid_request');
@@ -136,7 +130,7 @@ export async function extractDocument(
     timeoutMs: REQUEST_TIMEOUT_MS,
     signal,
   });
-  if (signal?.aborted || epoch !== extractionEpoch) throw abortedError();
+  if (signal?.aborted) throw abortedError();
   if (envelope.error) throw envelope.error;
   const parsed = resultSchema.safeParse(envelope.data);
   if (!parsed.success) throw new Error('extraction_invalid_response');

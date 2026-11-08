@@ -18,7 +18,53 @@ import {
 } from '../../src/hooks/useDocumentExtraction';
 import { DocumentExtractionPanel } from '../../src/components/documents/DocumentExtractionPanel';
 
+// Tracks actual extraction HTTP/body settlement without changing hook or form behavior.
+const nativeFetch = window.fetch.bind(window);
+const extractionReads = new Map<string, { settled: boolean; outcome: string }>();
+const bitmapWork = new Set<Promise<ImageBitmap>>();
+const nativeBitmap = window.createImageBitmap.bind(window);
+window.createImageBitmap = ((...args: Parameters<typeof createImageBitmap>) => {
+  const work = nativeBitmap(...args);
+  bitmapWork.add(work);
+  void work.finally(() => bitmapWork.delete(work)).catch(() => {});
+  return work;
+}) as typeof createImageBitmap;
+const taskTurn = () => new Promise<void>(resolve => {
+  const channel = new MessageChannel();
+  channel.port1.onmessage = () => { channel.port1.close(); channel.port2.close(); resolve(); };
+  channel.port2.postMessage(null);
+});
+window.__extractionProbe = {
+  reads: extractionReads,
+  drain: async () => {
+    // React passive effects and continuations use browser tasks; native image decode is awaited too.
+    for (let i = 0; i < 3; i++) { await taskTurn(); await Promise.allSettled([...bitmapWork]); }
+  },
+};
+window.fetch = async (input, init) => {
+  const url = new URL(typeof input === 'string' ? input : input instanceof URL ? input.href : input.url, location.href);
+  if (url.pathname !== '/api/document-extraction' || init?.method !== 'POST') return nativeFetch(input, init);
+  let id = `malformed-${extractionReads.size}`;
+  try { id = JSON.parse(String(init.body)).requestId ?? id; } catch { /* Observe malformed POSTs too; never prevent transport. */ }
+  const record = { settled: false, outcome: 'pending' };
+  extractionReads.set(id, record);
+  try {
+    const response = await nativeFetch(input, init);
+    const text = response.text.bind(response);
+    response.text = async () => {
+      try { return await text(); }
+      finally { record.settled = true; record.outcome = 'response'; }
+    };
+    return response;
+  } catch (error) {
+    record.settled = true;
+    record.outcome = init.signal?.aborted ? 'abort' : 'error';
+    throw error;
+  }
+};
+
 export interface LifecycleMountProps {
+  secondForm?: boolean;
   initialAccount?: string | null;
   initialScope?: string;
   initialContext?: string;
@@ -61,21 +107,29 @@ export interface LifecycleControls {
     onStartCount: number;
     mountEpoch: number;
     selectedFileName: string | null;
+    ready: boolean;
   };
 }
 
 declare global {
   interface Window {
+    __extractionProbe: {
+      reads: Map<string, { settled: boolean; outcome: string }>;
+      drain: () => Promise<void>;
+    };
     __lifecycleControls?: LifecycleControls;
+    __secondLifecycleControls?: LifecycleControls;
   }
 }
 
 interface InnerMountProps extends LifecycleMountProps {
+  controlSlot?: 'primary' | 'second';
   mountEpoch: number;
   remount: (props?: LifecycleMountProps) => void;
 }
 
 function ExtractionLifecycleMount({
+  controlSlot = 'primary',
   mountEpoch,
   remount,
   initialAccount = 'account-admin-1',
@@ -142,7 +196,7 @@ function ExtractionLifecycleMount({
   });
 
   useEffect(() => {
-    window.__lifecycleControls = {
+    const controls: LifecycleControls = {
       remount,
       setAccount: (acct: string | null) => setAccount(acct),
       setScope: (s: string) => setScope(s),
@@ -175,9 +229,16 @@ function ExtractionLifecycleMount({
         onStartCount,
         mountEpoch,
         selectedFileName: file?.name ?? null,
+        ready,
       }),
     };
+    if (controlSlot === 'second') window.__secondLifecycleControls = controls;
+    else window.__lifecycleControls = controls;
+    return () => {
+      if (controlSlot === 'second') delete window.__secondLifecycleControls;
+    };
   }, [
+    controlSlot,
     remount,
     account,
     scope,
@@ -195,7 +256,7 @@ function ExtractionLifecycleMount({
 
   return (
     <div
-      data-testid="lifecycle-mount-container"
+      data-testid={controlSlot === 'primary' ? 'lifecycle-mount-container' : 'second-lifecycle-mount-container'}
       data-mount-epoch={mountEpoch}
       style={{ padding: '1rem', minHeight: '100vh', fontFamily: 'system-ui, -apple-system, sans-serif' }}
     >
@@ -243,6 +304,15 @@ export function ExtractionLifecycleFixture() {
             remount={handleRemount}
             {...mountProps}
           />
+          {mountProps.secondForm && (
+            <ExtractionLifecycleMount
+              key={`second-${mountEpoch}`}
+              controlSlot="second"
+              mountEpoch={mountEpoch}
+              remount={handleRemount}
+              initialScope="independent-second-form"
+            />
+          )}
         </div>
       </LanguageProvider>
     </AuthProvider>

@@ -135,6 +135,14 @@ function runPreflightCheck() {
 /**
  * Stateful Mock API controller managing loopback HTTP routes and per-request barriers.
  */
+function boundedGate(promise, label, timeoutMs = 5000) {
+  let timer;
+  return Promise.race([
+    promise,
+    new Promise((_, reject) => { timer = setTimeout(() => reject(new Error(`Timeout: ${label}`)), timeoutMs); }),
+  ]).finally(() => clearTimeout(timer));
+}
+
 class FormsMockApi {
   constructor(draftDb = null) {
     this.draftDb = draftDb;
@@ -164,6 +172,14 @@ class FormsMockApi {
     this.capturedUploads = [];
     this.uploadListeners = [];
 
+    this.documentFailure = false;
+    this.cleanupFailure = false;
+    // The deliberate failed-save boundary and the console diagnostics it is
+    // allowed to produce. The counts are compared at the end of the suite, so
+    // an extra or a missing diagnostic is still a failure.
+    this.armedFailedSaveDiagnostics = 0;
+    this.acceptedFailedSaveDiagnostics = 0;
+    this.cleanupCalls = [];
     this.documentCalls = 0;
     this.capturedDocuments = [];
     this.documentListeners = [];
@@ -178,11 +194,25 @@ class FormsMockApi {
     this.drafts = new Map();
     this.formDefaults = null;
 
+    this.initialDraftGet = null;
     this.retiringPutHeld = false;
     this.retiringPutDeferred = null;
     this.retiringPutEntryDeferred = null;
     this.retiringPutSettledDeferred = null;
     this.draftRequestsLog = [];
+  }
+
+  armInitialDraftGet(scope) {
+    let enter, release, settle;
+    const gate = {
+      scope, claimed: false,
+      entered: new Promise(resolve => { enter = resolve; }),
+      released: new Promise(resolve => { release = resolve; }),
+      settled: new Promise(resolve => { settle = resolve; }),
+      enter: value => enter(value), release: () => release(), settle: () => settle(),
+    };
+    this.initialDraftGet = gate;
+    return gate;
   }
 
   armRetiringPutGate() {
@@ -202,8 +232,7 @@ class FormsMockApi {
 
   async waitForRetiringPutEntry(timeoutMs = 5000) {
     if (!this.retiringPutEntryDeferred) return;
-    const timeout = new Promise((_, rej) => setTimeout(() => rej(new Error('Timeout waiting for retiring PUT entry')), timeoutMs));
-    await Promise.race([this.retiringPutEntryDeferred, timeout]);
+    await boundedGate(this.retiringPutEntryDeferred, 'retiring PUT entry', timeoutMs);
   }
 
   releaseRetiringPut() {
@@ -215,8 +244,7 @@ class FormsMockApi {
 
   async waitForRetiringPutSettled(timeoutMs = 5000) {
     if (!this.retiringPutSettledDeferred) return;
-    const timeout = new Promise((_, rej) => setTimeout(() => rej(new Error('Timeout waiting for retiring PUT to settle')), timeoutMs));
-    await Promise.race([this.retiringPutSettledDeferred, timeout]);
+    await boundedGate(this.retiringPutSettledDeferred, 'retiring PUT settlement', timeoutMs);
   }
 
   async reset() {
@@ -231,6 +259,9 @@ class FormsMockApi {
     this.capturedUploads = [];
     for (const l of this.uploadListeners) clearTimeout(l.timer);
     this.uploadListeners = [];
+    this.documentFailure = false;
+    this.cleanupFailure = false;
+    this.cleanupCalls = [];
     this.documentCalls = 0;
     this.capturedDocuments = [];
     for (const l of this.documentListeners) clearTimeout(l.timer);
@@ -253,6 +284,12 @@ class FormsMockApi {
   }
 
   async settleAllHeld() {
+    if (this.initialDraftGet) {
+      const gate = this.initialDraftGet;
+      gate.release();
+      if (gate.claimed) await boundedGate(gate.settled, 'initial draft GET cleanup');
+      this.initialDraftGet = null;
+    }
     this.releaseRetiringPut();
     await Promise.all(
       this.capturedRequests.map(async (req) => {
@@ -519,6 +556,7 @@ async function runFormsTests(page, api, draftDb, draftsPort) {
   let unexpectedFailCount = 0;
 
   async function testCase(name, isPositiveControl, fn) {
+    if (process.argv.includes('--remaining-review') && !/Case 14:|Case 15:|Case 16:|cleanup|Radix/.test(name)) return;
     totalCount++;
     const start = Date.now();
     try {
@@ -558,6 +596,8 @@ async function runFormsTests(page, api, draftDb, draftsPort) {
         console.log(`    Unexpected Error: ${err.stack || err.message}`);
       }
     } finally {
+      await page.evaluate(() => window.__formsControls?.unmount()).catch(() => {});
+      await boundedGate(page.evaluate(() => window.__extractionProbe.drain()), 'client task/decode settlement').catch(() => {});
       await api.settleAllHeld();
     }
   }
@@ -1248,6 +1288,10 @@ async function runFormsTests(page, api, draftDb, draftsPort) {
         document_type_id: { value: 'type-civil-id', state: 'clear', alternatives: [], reason: 'none' },
       });
 
+      for (const field of ['document_number', 'ministry_id', 'expiry_date']) {
+        assert.equal(req.responseFields[field].state, 'clear', `${field} must actually be proposed`);
+        assert.ok(req.responseFields[field].value, `${field} proposal must be nonempty`);
+      }
       // Await response and application settlement in DOM
       const generalTypeTrigger = form.locator('label:has-text("نوع الوثيقة")').locator('..').locator('button[role="combobox"]').first();
       await generalTypeTrigger.filter({ hasText: 'البطاقة المدنية' }).waitFor({ state: 'visible', timeout: 5000 });
@@ -1310,6 +1354,10 @@ async function runFormsTests(page, api, draftDb, draftsPort) {
         document_type_id: { value: 'type-civil-id', state: 'clear', alternatives: [], reason: 'none' },
       });
 
+      for (const field of ['document_number', 'ministry_id', 'expiry_date']) {
+        assert.equal(req.responseFields[field].state, 'clear', `${field} must actually be proposed`);
+        assert.ok(req.responseFields[field].value, `${field} proposal must be nonempty`);
+      }
       // Await response and application settlement in DOM
       const empTypeTrigger = form.locator('label:has-text("نوع الوثيقة")').locator('..').locator('button').first();
       await empTypeTrigger.filter({ hasText: 'البطاقة المدنية' }).waitFor({ state: 'visible', timeout: 5000 });
@@ -1943,6 +1991,152 @@ async function runFormsTests(page, api, draftDb, draftsPort) {
     }
   );
 
+  // Codex 4504559743: hold the initial real authenticated draft GET response.
+  for (const mode of ['general', 'employee']) {
+    for (const earlyEdit of [false, true]) {
+      await testCase(`PR16 initial draft GET: ${mode}, ${earlyEdit ? 'early manual edit' : 'unchanged delayed-load control'}`, !earlyEdit, async () => {
+        await page.evaluate(() => window.__formsControls.unmount());
+        await page.waitForSelector('form', { state: 'detached', timeout: 5000 });
+        const scope = mode === 'general' ? 'company:comp-1' : 'employee:emp-1';
+        api.seedDraft(scope, { title: 'Saved draft title', notes: 'Saved draft note' });
+        const gate = api.armInitialDraftGet(scope);
+        try {
+          const epoch = await page.evaluate(mode => mode === 'general'
+            ? window.__formsControls.mountGeneral({ preselectedCompanyId: 'comp-1' })
+            : window.__formsControls.mountEmployee({ isOpen: true, employeeId: 'emp-1' }), mode);
+          await waitForFormReady(page, epoch);
+          const entered = await boundedGate(gate.entered, `${mode} initial GET entry`);
+          assert.equal(entered.status, 200, 'Held reply must come from successful real auth/router/SQLite GET');
+          assert.equal(entered.body.data.values.title, 'Saved draft title');
+          assert.equal(api.postCalls, 0, 'No extraction POST before the initial draft is ready');
+          const form = page.locator('form');
+          const title = form.locator(mode === 'general' ? 'input[name="title"]' : '#title');
+          const notes = form.locator(mode === 'general' ? 'textarea[name="notes"]' : '#notes');
+          if (earlyEdit) {
+            await title.fill('Manual title before GET');
+            await notes.fill('Manual note before GET');
+          }
+          assert.equal(api.postCalls, 0, 'Manual edits while GET is held cannot dispatch extraction');
+          const responsePromise = page.waitForResponse(response => response.request().method() === 'GET' && new URL(response.url()).pathname === `/api/document-drafts/${encodeURIComponent(scope)}`, { timeout: 5000 });
+          gate.release();
+          const response = await responsePromise;
+          assert.equal(response.status(), 200);
+          await boundedGate(response.finished(), `${mode} browser GET settlement`);
+          await boundedGate(gate.settled, `${mode} GET handler settlement`);
+          await form.locator('[role="status"]').filter({ hasText: /\u0627\u0644\u0645\u0633\u0648\u062f\u0629 \u0645\u062d\u0641\u0648\u0638\u0629 \u0639\u0644\u0649 \u062d\u0633\u0627\u0628\u0643|Draft saved to your account/ }).waitFor({ state: 'visible', timeout: 5000 });
+          assert.equal(await title.inputValue(), earlyEdit ? 'Manual title before GET' : 'Saved draft title');
+          assert.equal(await notes.inputValue(), earlyEdit ? 'Manual note before GET' : 'Saved draft note');
+          await page.locator('input[type="file"]').setInputFiles({ name: `${mode}-early-draft.png`, mimeType: 'image/png', buffer: validPng });
+          // Timeout becomes a concrete missing-POST assertion, never an expected pass.
+          const request = await api.waitForRequest(0, 2500).catch(() => null);
+          assert.ok(request, `${mode}: successful initial GET followed by file selection must dispatch extraction POST despite early manual edits`);
+          assert.equal(api.postCalls, 1);
+          await request.fulfillSuccess();
+          const numberSelector = mode === 'general' ? 'input[name="document_number"]' : '#document_number';
+          const number = form.locator(numberSelector);
+          await page.waitForFunction(selector => document.querySelector(selector)?.value === '290010112345', numberSelector, { timeout: 5000 });
+          assert.equal(await number.inputValue(), '290010112345', 'Untouched number receives the extraction suggestion');
+          assert.equal(await title.inputValue(), earlyEdit ? 'Manual title before GET' : 'Saved draft title');
+          assert.equal(await notes.inputValue(), earlyEdit ? 'Manual note before GET' : 'Saved draft note');
+          assert.equal(api.uploadCalls, 0);
+          assert.equal(api.documentCalls, 0);
+        } finally {
+          gate.release();
+          if (gate.claimed) await boundedGate(gate.settled, `${mode} final GET settlement`);
+        }
+      });
+    }
+  }
+
+  // Drive real prop updates and native Radix change events only. No synthetic
+  // empty onValueChange call is injected: an intentional user clear stays meaningful.
+  for (const beneficiary of ['company', 'employee']) {
+    await testCase(`Radix ${beneficiary} restored selection survives beneficiary catalog refresh`, false, async () => {
+      const id = beneficiary === 'company' ? 'comp-1' : 'emp-1';
+      api.getOrCreateDraft('new').values = {
+        title: 'Restored beneficiary', beneficiary_type: beneficiary,
+        company_id: beneficiary === 'company' ? id : '', employee_id: beneficiary === 'employee' ? id : '',
+      };
+      const epoch = await page.evaluate(() => window.__formsControls.mountGeneral());
+      await waitForFormReady(page, epoch);
+      await page.waitForFunction(expected => [...document.querySelectorAll('form select')].some(select => select.value === expected), id);
+      await page.evaluate(() => {
+        window.__radixChanges = [];
+        document.querySelector('form').addEventListener('change', event => {
+          if (event.target instanceof HTMLSelectElement) window.__radixChanges.push(event.target.value);
+        });
+        window.__formsControls.refreshBeneficiaries(true);
+      });
+      await boundedGate(page.evaluate(() => window.__extractionProbe.drain()), 'client task/decode settlement');
+      await page.evaluate(() => window.__formsControls.refreshBeneficiaries(false));
+      await boundedGate(page.evaluate(() => window.__extractionProbe.drain()), 'client task/decode settlement');
+      const observed = await page.evaluate(() => ({
+        selections: [...document.querySelectorAll('form select')].map(select => select.value),
+        changes: window.__radixChanges,
+      }));
+      console.log('[RADIX CATALOG REFRESH EVIDENCE]', beneficiary, JSON.stringify(observed));
+      assert.ok(observed.selections.includes(id), 'Restored beneficiary survives actual option unload/reload');
+      assert.equal(api.postCalls, 0);
+    });
+  }
+
+  // Real forms stage only during Save. A failed document POST leaves a genuine
+  // staged upload; the subsequent Choose files action exercises abandonUpload.
+  for (const mode of ['general', 'employee']) {
+    for (const fails of [false, true]) {
+      await testCase(`${mode} staged attachment cleanup ${fails ? 'failure retains old attachment and machine/manual values' : 'success clears only machine values'}`, !fails, async () => {
+        api.documentFailure = `fixture_document_write_failed_${mode}_${fails}`;
+        api.armedFailedSaveDiagnostics += 1;
+        api.cleanupFailure = fails ? `fixture_cleanup_failed_${mode}` : false;
+        const epoch = await page.evaluate(({ bytes, mode }) => {
+          const file = new File([new Uint8Array(bytes)], 'cleanup-original.png', { type: 'image/png' });
+          return mode === 'general'
+            ? window.__formsControls.mountGeneral({ uploadedFile: file, preselectedCompanyId: 'comp-1' })
+            : window.__formsControls.mountEmployee({ uploadedFile: file, employeeId: 'emp-1', isOpen: true });
+        }, { bytes: Array.from(validPng), mode });
+        await waitForFormReady(page, epoch);
+        const form = page.locator('form');
+        const request = await api.waitForRequest(0);
+        await request.fulfillSuccess();
+        const number = form.locator(mode === 'general' ? 'input[name="document_number"]' : '#document_number');
+        const title = form.locator(mode === 'general' ? 'input[name="title"]' : '#title');
+        const notes = form.locator(mode === 'general' ? 'textarea[name="notes"]' : '#notes');
+        await title.fill('Manual cleanup title');
+        await notes.fill('Manual cleanup note');
+        assert.equal(await number.inputValue(), '290010112345');
+        const beforeSelects = await form.locator('select').evaluateAll(elements => elements.map(element => element.value));
+        const documentAttempt = api.waitForDocument(0);
+        await form.locator('button[type="submit"]').click();
+        const attempt = await documentAttempt;
+        assert.ok(attempt.payload.upload_id, 'Save must stage an actual upload first');
+        assert.equal(api.uploadCalls, 1);
+        await page.getByText(api.documentFailure, { exact: true }).waitFor();
+        await form.locator('button[type="submit"]').waitFor({ state: 'visible' });
+        await page.waitForFunction(() => !document.querySelector('form button[type="submit"]')?.disabled);
+        // Observe the real cleanup route, then wait for the form handler's visible outcome.
+        const deletion = page.waitForResponse(response => response.request().method() === 'DELETE' && response.url().includes('/api/files/uploads/'));
+        await page.getByRole('button', { name: /Choose files|\u0627\u062e\u062a\u0631 \u0627\u0644\u0645\u0644\u0641\u0627\u062a/ }).first().click();
+        const deleted = await deletion;
+        await deleted.finished();
+        if (fails) await page.getByText(api.cleanupFailure, { exact: true }).waitFor();
+        else await page.locator('input[type="file"]').waitFor({ state: 'attached' });
+        await boundedGate(page.evaluate(() => window.__extractionProbe.drain()), 'client task/decode settlement');
+        assert.equal(api.cleanupCalls.length, 1);
+        assert.equal(deleted.status(), fails ? 503 : 200);
+        assert.equal(await title.inputValue(), 'Manual cleanup title');
+        assert.equal(await notes.inputValue(), 'Manual cleanup note');
+        const afterSelects = await form.locator('select').evaluateAll(elements => elements.map(element => element.value));
+        const attachmentInputCount = await page.locator('input[type="file"]').count();
+        console.log('[CLEANUP EVIDENCE]', JSON.stringify({ mode, fails, status: deleted.status(), attachmentInputCount,
+          number: await number.inputValue(), beforeSelects, afterSelects }));
+        assert.equal(attachmentInputCount, fails ? 0 : 1, 'Failed cleanup keeps the old attachment selected');
+        assert.equal(await number.inputValue(), fails ? '290010112345' : '', 'Machine number follows actual attachment cleanup outcome');
+        if (fails) assert.deepEqual(afterSelects, beforeSelects, 'Failed cleanup keeps machine catalog values');
+        else assert.ok(!afterSelects.includes('type-civil-id') && !afterSelects.includes('min-moi'), 'Successful cleanup clears machine catalog values');
+      });
+    }
+  }
+
   return {
     totalCount,
     passedCount,
@@ -2125,16 +2319,36 @@ export async function main() {
     const page = await context.newPage();
     const egressViolations = [];
     const pageErrors = [];
+    const consoleErrors = [];
+    const expectedHttpErrors = new Set();
     const unexpectedApiRequests = [];
 
     page.setDefaultTimeout(15000);
 
-    page.on('console', (msg) => {
-      if (msg.type() === 'error') {
-        if (!msg.text().includes('429') && !msg.text().includes('503') && !msg.text().includes('draft_conflict')) {
-          console.error('[PAGE CONSOLE ERROR]', msg.text());
-        }
+    page.on('console', msg => {
+      if (msg.type() !== 'error') return;
+      const match = /^Failed to load resource: the server responded with a status of (\d{3})\b/.exec(msg.text());
+      // Negative HTTP cases deliberately render Chromium's standard resource diagnostic.
+      if (match && expectedHttpErrors.has(`${msg.location().url}|${match[1]}`)) return;
+      // Only the deliberate failed-save boundary used by the cleanup regression.
+      // Chromium prints the error name and the code in the console text, while
+      // Firefox prints only the error name, so the code cannot be part of the
+      // match on every engine. The accepted diagnostics are counted and
+      // compared with the armed boundaries, so a further error is still caught.
+      const firstLine = msg.text().split('\n')[0];
+      const failedSaveDiagnostic = api.documentFailure && [
+        `\u062e\u0637\u0623 \u0641\u064a \u062d\u0641\u0638 \u0627\u0644\u0648\u062b\u064a\u0642\u0629: ApiRequestError: ${api.documentFailure}`,
+        `Error saving document: ApiRequestError: ${api.documentFailure}`,
+        `\u062e\u0637\u0623 \u0641\u064a \u062d\u0641\u0638 \u0627\u0644\u0648\u062b\u064a\u0642\u0629: Error`,
+        `Error saving document: Error`,
+      ].includes(firstLine);
+      if (failedSaveDiagnostic) {
+        api.acceptedFailedSaveDiagnostics += 1;
+        console.log('[EXPECTED FAILED-SAVE DIAGNOSTIC]', firstLine);
+        return;
       }
+      consoleErrors.push(msg.text());
+      console.error('[UNEXPECTED PAGE CONSOLE ERROR]', msg.text());
     });
 
     page.on('pageerror', (err) => {
@@ -2146,8 +2360,13 @@ export async function main() {
     await page.route('**/*', async (route) => {
       const req = route.request();
       const url = new URL(req.url());
+      const fulfill = route.fulfill.bind(route);
+      route.fulfill = options => {
+        if (options.status >= 400) expectedHttpErrors.add(`${url.href}|${options.status}`);
+        return fulfill(options);
+      };
 
-      if (url.hostname !== '127.0.0.1' && url.hostname !== 'localhost') {
+      if (url.origin !== origin || url.username || url.password) {
         egressViolations.push(req.url());
         console.error(`[SECURITY BLOCKED] Disallowed non-loopback egress: ${req.url()}`);
         return route.abort('blockedbyclient');
@@ -2219,6 +2438,10 @@ export async function main() {
             timestamp: Date.now(),
           });
 
+          const initialGate = method === 'GET' && api.initialDraftGet?.scope === scope && !api.initialDraftGet.claimed
+            ? api.initialDraftGet : null;
+          if (initialGate) initialGate.claimed = true;
+
           if (method === 'GET') {
             api.getOrCreateDraft(scope, draftAccount);
           }
@@ -2237,32 +2460,40 @@ export async function main() {
           const token = makeSessionCookie(authAccount);
           forwardHeaders['cookie'] = `${fixtureConfig.cookieName}=${token}`;
 
-          const forwardRes = await fetch(`http://127.0.0.1:${draftsPort}${url.pathname}`, {
-            method,
-            headers: forwardHeaders,
-            body: ['POST', 'PUT', 'PATCH'].includes(method) ? postData : undefined,
-          });
-          const resText = await forwardRes.text();
-          if (method === 'PUT' && forwardRes.status === 200) {
-            try {
-              const parsed = JSON.parse(resText);
-              const postJson = req.postDataJSON() || {};
-              api.recordDraftPut({
-                scope,
-                revision: postJson.revision,
-                newRevision: parsed.data?.revision,
-                values: postJson.values,
-              });
-            } catch (_) {}
-            if (api.retiringPutSettledDeferred) {
-              api.retiringPutSettledDeferred.resolve();
+          try {
+            const forwardRes = await fetch(`http://127.0.0.1:${draftsPort}${url.pathname}`, {
+              method,
+              headers: forwardHeaders,
+              body: ['POST', 'PUT', 'PATCH'].includes(method) ? postData : undefined,
+            });
+            const resText = await forwardRes.text();
+            if (method === 'PUT' && forwardRes.status === 200) {
+              try {
+                const parsed = JSON.parse(resText);
+                const postJson = req.postDataJSON() || {};
+                api.recordDraftPut({
+                  scope,
+                  revision: postJson.revision,
+                  newRevision: parsed.data?.revision,
+                  values: postJson.values,
+                });
+              } catch (_) {}
+              if (api.retiringPutSettledDeferred) {
+                api.retiringPutSettledDeferred.resolve();
+              }
             }
+            if (initialGate) {
+              initialGate.enter({ status: forwardRes.status, body: JSON.parse(resText), scope });
+              await boundedGate(initialGate.released, 'initial draft GET release', 10000);
+            }
+            return await route.fulfill({
+              status: forwardRes.status,
+              headers: Object.fromEntries(forwardRes.headers.entries()),
+              body: resText,
+            });
+          } finally {
+            initialGate?.settle();
           }
-          return route.fulfill({
-            status: forwardRes.status,
-            headers: Object.fromEntries(forwardRes.headers.entries()),
-            body: resText,
-          });
         }
 
         if (url.pathname === '/api/files/upload') {
@@ -2286,6 +2517,9 @@ export async function main() {
 
         if (url.pathname.startsWith('/api/files/uploads/')) {
           if (req.method() === 'DELETE') {
+            api.cleanupCalls.push(url.pathname);
+            if (api.cleanupFailure) return route.fulfill({ status: 503,
+              json: { data: null, error: { code: 'storage_unavailable', message: api.cleanupFailure } } });
             return route.fulfill({
               status: 200,
               json: { data: { cleanupPending: false }, error: null },
@@ -2310,6 +2544,11 @@ export async function main() {
               ...payload,
             };
             api.recordDocument({ id: doc.id, payload });
+            // A concurrent catalog deletion causes a rolled-back FK failure in
+            // errorHandler: 409/resource_in_use; unlike an unknown 5xx outcome,
+            // this is a proven non-write and the real draft session resumes.
+            if (api.documentFailure) return route.fulfill({ status: 409,
+              json: { data: null, error: { code: 'resource_in_use', message: api.documentFailure } } });
             return route.fulfill({
               status: 200,
               json: { data: [doc], error: null },
@@ -2340,6 +2579,7 @@ export async function main() {
 
         if (url.pathname === '/api/document-extraction') {
           if (req.method() === 'POST') {
+            const attemptIndex = api.postCalls++;
             const rawBody = req.postData() || '';
             let payload;
             try {
@@ -2361,7 +2601,7 @@ export async function main() {
 
             const captured = {
               id: payload.requestId,
-              index: api.postCalls++,
+              index: attemptIndex,
               payload,
               route,
               settled: false,
@@ -2384,12 +2624,12 @@ export async function main() {
                     ...fieldsOverride,
                   },
                 };
+                captured.responseFields = responseData.fields;
                 const parseRes = resultSchema.safeParse(responseData);
                 assert.ok(parseRes.success, `Mock response conforms to resultSchema`);
-                return await route.fulfill({
-                  status: 200,
-                  json: { data: responseData, error: null },
-                });
+                await route.fulfill({ status: 200, json: { data: responseData, error: null } });
+                await page.waitForFunction(id => window.__extractionProbe.reads.get(id)?.settled, payload.requestId);
+                await boundedGate(page.evaluate(() => window.__extractionProbe.drain()), 'client task/decode settlement');
               },
               fulfillRateLimit: async (retryAfterSeconds = 25) => {
                 if (captured.settled) return;
@@ -2436,10 +2676,27 @@ export async function main() {
       : `${origin}/forms-fixture`;
     await page.goto(fixtureUrl);
     await page.waitForSelector('[data-testid="forms-mount-container"]', { timeout: 10000 });
+    // The counter must see malformed attempts before the mock parser rejects them.
+    const malformedStatus = await page.evaluate(async () => {
+      const response = await fetch('/api/document-extraction', { method: 'POST', body: '{' });
+      await response.text();
+      return response.status;
+    });
+    assert.equal(malformedStatus, 400);
+    assert.equal(api.postCalls, 1, 'Malformed extraction POST is still an HTTP attempt');
+    console.log('[HARNESS CONTROL] Malformed extraction POST counted before parsing');
+    await api.reset();
+
 
     const testSummary = await runFormsTests(page, api, draftDb, draftsPort);
 
     assert.deepEqual(egressViolations, [], 'Forms suite must not attempt external egress');
+    assert.deepEqual(consoleErrors, [], 'Forms suite must not emit unexpected console errors');
+    assert.equal(
+      api.acceptedFailedSaveDiagnostics,
+      api.armedFailedSaveDiagnostics,
+      'Every armed failed-save boundary must produce exactly one expected console diagnostic',
+    );
     assert.deepEqual(pageErrors, [], 'Forms suite must not produce uncaught page errors');
     assert.deepEqual(unexpectedApiRequests, [], 'Forms suite must not call unexpected APIs');
 
@@ -2460,6 +2717,7 @@ export async function main() {
       console.log('[FORMS SUITE EXIT] Zero exit code (0): all test cases passed.\n');
       process.exitCode = 0;
     }
+    return testSummary;
   } finally {
     await api.settleAllHeld();
     if (browser) await browser.close();

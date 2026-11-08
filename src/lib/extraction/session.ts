@@ -16,10 +16,9 @@
  *
  * - Only an empty field that no administrator touched since the request
  *   started may be filled automatically.
- * - A deliberate clear and a clear that is followed by an edit back are both
- *   permanent protections for the rest of the form session.
- * - A restored draft value and a stored value of an existing document are
- *   protected as well.
+ * - A deliberate clear, a clear that is followed by an edit back, a restored
+ *   draft value and a stored value of an existing document are permanent
+ *   protections for the rest of the form session.
  * - On a replacement of the attachment only the values that the machine
  *   filled and that nobody changed afterwards are cleared.
  * - An answer of an obsolete request never writes anything.
@@ -54,12 +53,10 @@ interface AppliedValue {
 }
 
 /**
- * The provenance controller of one document form.
- *
- * A form creates one session when it opens and keeps it until the form is
- * reset. The session answers three questions for the form: may a suggestion
- * be written, which values have to be cleared when the attachment changes,
- * and is the answer of a request still relevant.
+ * The provenance controller of one document form. A form creates one session
+ * when it opens and keeps it until the form is reset. The session answers
+ * three questions: may a suggestion be written, which values have to be
+ * cleared when the attachment changes, and is the answer still relevant.
  */
 export class ExtractionSession {
   /** The identity of the newest attempt. Every attempt gets the next number. */
@@ -401,12 +398,8 @@ const DEFAULT_RETRY_AFTER_SECONDS = 30;
  */
 export function describeFailure(error: unknown): FailureOutcome {
   if (isAbortError(error)) return { phase: 'cancelled', errorCode: null, retryAfterSeconds: null };
-  if (error instanceof ApiRequestError && error.status === 401) {
-    return { phase: 'unavailable', errorCode: 'unauthenticated', retryAfterSeconds: null };
-  }
-  if (error instanceof ApiRequestError && error.status === 403) {
-    return { phase: 'unavailable', errorCode: 'forbidden', retryAfterSeconds: null };
-  }
+  if (error instanceof ApiRequestError && error.status === 401) return { phase: 'unavailable', errorCode: 'unauthenticated', retryAfterSeconds: null };
+  if (error instanceof ApiRequestError && error.status === 403) return { phase: 'unavailable', errorCode: forbiddenErrorCode(error.code), retryAfterSeconds: null };
   const seconds = retryAfterOf(error);
   if (seconds !== null) {
     return { phase: 'cooldown', errorCode: failureCodeOf(error), retryAfterSeconds: seconds };
@@ -422,6 +415,17 @@ export function failureCodeOf(error: unknown): string {
   if (error instanceof ApiRequestError) return approvedErrorCode(error.code);
   if (error instanceof Error && isPreparationFailure(error)) return approvedErrorCode(error.message);
   return 'network_error';
+}
+
+/**
+ * Reads the approved code of a refused request.
+ *
+ * A refusal that carries a reason the dictionary knows keeps that reason, a
+ * refusal without one stays a plain refusal and never leaks the reason the
+ * server sent.
+ */
+function forbiddenErrorCode(code: string): string {
+  return approvedErrorCodes.has(code) || Object.prototype.hasOwnProperty.call(approvedErrorFallbacks, code) ? approvedErrorCode(code) : 'forbidden';
 }
 
 /**
@@ -455,19 +459,16 @@ const approvedErrorCodes = new Set<string>([
 ]);
 /** The codes of the server and of the preparation that lead to another code. */
 const approvedErrorFallbacks: Record<string, string> = {
-  payload_too_large: 'request_too_large',
-  bad_request: 'invalid_request',
-  extraction_invalid_request: 'invalid_request',
-  extraction_invalid_response: 'invalid_result',
-  provider_malformed_response: 'invalid_result',
-  invalid_model: 'provider_unavailable',
-  service_unavailable: 'provider_unavailable',
-  preparation_encrypted: 'unsupported_file',
-  preparation_invalid: 'invalid_image',
-  preparation_timeout: 'extraction_timeout',
-  extraction_rate_limit: 'provider_rate_limit',
-  http_error: 'network_error',
-  upload_failed: 'network_error',
+  payload_too_large: 'request_too_large', bad_request: 'invalid_request',
+  extraction_invalid_request: 'invalid_request', extraction_invalid_response: 'invalid_result',
+  provider_malformed_response: 'invalid_result', invalid_model: 'provider_unavailable',
+  service_unavailable: 'provider_unavailable', preparation_encrypted: 'unsupported_file',
+  preparation_invalid: 'invalid_image', preparation_timeout: 'extraction_timeout',
+  extraction_rate_limit: 'provider_rate_limit', http_error: 'network_error',
+  upload_failed: 'network_error', provider_not_configured: 'unconfigured',
+  not_configured: 'unconfigured', disabled: 'extraction_disabled',
+  not_authorized: 'processing_not_authorized', not_approved: 'processing_not_authorized',
+  invalid_origin: 'origin_forbidden',
 };
 
 /**
@@ -478,7 +479,7 @@ const approvedErrorFallbacks: Record<string, string> = {
  */
 export function approvedErrorCode(code: string): string {
   if (approvedErrorCodes.has(code)) return code;
-  return approvedErrorFallbacks[code] ?? 'network_error';
+  return Object.prototype.hasOwnProperty.call(approvedErrorFallbacks, code) ? approvedErrorFallbacks[code] : 'network_error';
 }
 
 /**

@@ -2,23 +2,19 @@
  * The asynchronous lifecycle of one document extraction.
  *
  * The hook owns the whole life of an extraction inside a document form: the
- * single automatic attempt of a selected attachment, the local preparation of
- * the pages, the request, the review of the candidates and every reason that
- * ends an attempt early. The provenance of the values is the job of
+ * single automatic attempt of a selected attachment, the preparation of the
+ * pages, the request, the review of the candidates and every reason that ends
+ * an attempt early. The provenance of the values is the job of
  * `ExtractionSession`, the rules of the module are the job of the session
- * module, the pages are the job of the preparation and the wire format is the
- * job of the API wrapper.
+ * module, the pages are the job of the preparation and the wire format is
+ * the job of the API wrapper.
  *
  * Every asynchronous boundary of an attempt compares the live options of the
- * form with the identity the attempt started for. A changed account, a changed
- * scope, a changed context, another file object, a closed form and a form that
- * is not ready any more end the attempt, even when React has not rendered the
- * change yet. The values of the form are read and written through the
- * callbacks of the moment, so a form that changed its callbacks is never
- * served with an answer that belongs to an older form.
+ * form with the identity the attempt started for: a changed account, scope,
+ * context or file object, a closed form and a form that is not ready any more
+ * end the attempt, even when React has not rendered the change yet.
  *
- * Nothing here is persisted. The candidates live in the memory of the
- * component until the attachment is replaced or the form is closed.
+ * Nothing here is persisted.
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -27,6 +23,7 @@ import { extractDocument, getExtractionStatus, type ExtractionStatus } from '../
 import { prepareDocument, type PreparedDocument } from '../lib/extraction/prepare';
 import {
   acceptedCandidateValue,
+  approvedErrorCode,
   createRequestId,
   describeFailure,
   eligibleSuggestions,
@@ -105,27 +102,21 @@ interface AttemptRuntime {
 /** The way an attempt ended. */
 type AttemptOutcome =
   | { kind: 'obsolete' }
-  | { kind: 'unavailable' }
+  | { kind: 'unavailable'; code: string }
   | { kind: 'stale' }
   | { kind: 'changed'; code: string }
   | { kind: 'review'; ticket: ExtractionTicket; result: ExtractionResult };
 
 /**
- * The number of every distinct file object a form selected.
- *
- * Two files with the same name, the same size and the same modification time
- * are still two different selections, so the identity of a selection is the
- * identity of the object and never its metadata.
+ * The number of every distinct file object a form selected. Two files with the
+ * same name, the same size and the same modification time are still two
+ * different selections, so the identity of a selection is the identity of the
+ * object and never its metadata.
  */
 const fileTokens = new WeakMap<File, number>();
 let lastFileToken = 0;
 
-/**
- * Reads the number of a selected file.
- *
- * The same file object always carries the same number, so a selection is
- * recognised by the object it handed to the form.
- */
+/** Reads the number of a selected file; the same object always carries it. */
 function tokenOfFile(file: File | null): number {
   if (!file) return 0;
   const known = fileTokens.get(file);
@@ -136,11 +127,9 @@ function tokenOfFile(file: File | null): number {
 }
 
 /**
- * Runs the extraction of one document form.
- *
- * One selection of one attachment causes at most one automatic attempt. Every
- * further attempt is an explicit retry of the administrator, so a failure
- * never becomes a loop and a rate limit is never worked around.
+ * Runs the extraction of one document form. One selection of one attachment
+ * causes at most one automatic attempt; every further attempt is an explicit
+ * retry of the administrator, so a failure never becomes a loop.
  */
 export function useDocumentExtraction(options: DocumentExtractionOptions): DocumentExtractionState {
   const [phase, setPhase] = useState<ExtractionPhase>('idle');
@@ -230,6 +219,7 @@ export function useDocumentExtraction(options: DocumentExtractionOptions): Docum
       if (!runtime.belongs()) return;
       if (outcome.kind === 'obsolete') return;
       if (outcome.kind === 'unavailable') {
+        setErrorCode(outcome.code);
         setPhase('unavailable');
         return;
       }
@@ -265,6 +255,12 @@ export function useDocumentExtraction(options: DocumentExtractionOptions): Docum
     identityRef.current = identity;
     attemptRef.current = null;
     stopAttempt('idle');
+    // The cooldown of the account outlives the attachment it was announced for.
+    if (cooldownUntilRef.current > Date.now()) {
+      setErrorCode('provider_rate_limit');
+      setRetryAfterSeconds(Math.max(0, Math.ceil((cooldownUntilRef.current - Date.now()) / 1000)));
+      setPhase('cooldown');
+    }
   }, [identity, stopAttempt]);
 
   /** Ends the attempt of a closed form. */
@@ -273,6 +269,19 @@ export function useDocumentExtraction(options: DocumentExtractionOptions): Docum
     attemptRef.current = null;
     stopAttempt('idle');
   }, [options.open, stopAttempt]);
+
+  /**
+   * Ends the attempt of a form that is not ready any more.
+   *
+   * The running request is cancelled and the attempt settles, so the phase
+   * never stays in a running phase. A form that becomes ready again is not
+   * extracted on its own: only an explicit retry starts the next attempt.
+   */
+  useEffect(() => {
+    if (options.ready) return;
+    if (phase !== 'preparing' && phase !== 'extracting') return;
+    stopAttempt('cancelled');
+  }, [options.ready, phase, stopAttempt]);
 
   /** Releases the attempt when the form disappears. */
   useEffect(
@@ -290,6 +299,8 @@ export function useDocumentExtraction(options: DocumentExtractionOptions): Docum
     if (!options.open || !options.ready) return;
     if (!options.file || !options.account) return;
     if (attemptRef.current === identity) return;
+    // A rate limit of the account is waited out, never worked around.
+    if (cooldownUntilRef.current > Date.now()) return;
     attemptRef.current = identity;
     void runAttempt();
   }, [identity, options.open, options.ready, options.file, options.account, runAttempt]);
@@ -419,7 +430,11 @@ async function performAttempt(runtime: AttemptRuntime): Promise<AttemptOutcome> 
   const status = await getExtractionStatus(signal);
   if (!belongs()) return { kind: 'obsolete' };
   if (!status.available || !status.processingAuthorized || !status.processingContext) {
-    return { kind: 'unavailable' };
+    // The reason of the server becomes an approved code, never a raw message.
+    const code = !status.processingAuthorized
+      ? 'processing_not_authorized'
+      : approvedErrorCode(status.reason);
+    return { kind: 'unavailable', code: code === 'network_error' ? 'policy_unavailable' : code };
   }
 
   const form = live();

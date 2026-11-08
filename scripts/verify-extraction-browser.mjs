@@ -19,6 +19,7 @@
 
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
+import sharp from 'sharp';
 import fs from 'node:fs';
 import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -77,13 +78,18 @@ function runPreflightCheck() {
  *
  * @param {import('playwright').Page} page
  */
-async function runPreparationTests(page) {
+async function runPreparationTests(page, network) {
   console.log('[PREPARATION SUITE] Executing preparation & rendering contract group...');
 
   // -------------------------------------------------------------------------
   // Case 1: Setup & Asset Contract: Local PDF.js worker & assets allowlist
   // -------------------------------------------------------------------------
   console.log('[CASE 1] Verifying local PDF.js assets and worker availability...');
+  assert.deepEqual(await page.evaluate(() => {
+    const canvas = document.createElement('canvas');
+    canvas.width = 23; canvas.height = 17;
+    return [canvas.width, canvas.height];
+  }), [23, 17], 'Native canvas getters remain intact under the existing setter instrumentation');
   // Successful PDF preparation below must use the actual bundled worker.
   const cmapCheck = await page.evaluate(async (url) => {
     return window.__fixtureControls.testAssetUrl(url);
@@ -212,8 +218,12 @@ async function runPreparationTests(page) {
   const validPng = syntheticPng({ width: 100, height: 100 });
   const pngResult = await page.evaluate(async (bytes) => {
     const file = new File([new Uint8Array(bytes)], 'valid.png', { type: 'image/png' });
-    return window.__fixtureControls.testPrepareDocument(file);
+    let reads = 0;
+    const read = file.arrayBuffer.bind(file);
+    file.arrayBuffer = () => { reads++; return read(); };
+    return { ...await window.__fixtureControls.testPrepareDocument(file), reads };
   }, Array.from(validPng));
+  assert.ok(pngResult.reads > 0, 'Valid source control must read its bytes');
   assert.equal(pngResult.success, true, `Valid PNG preparation failed: ${pngResult.error}`);
   assert.equal(pngResult.result?.pageCount, 1, 'PNG must have pageCount = 1');
   assert.equal(pngResult.result?.images?.[0]?.mime, 'image/png', 'PNG image must preserve image/png MIME');
@@ -273,15 +283,29 @@ async function runPreparationTests(page) {
   const overSourceResult = await page.evaluate(async () => {
     const oversizedBlob = new Blob([new Uint8Array(20 * 1024 * 1024 + 1)], { type: 'application/pdf' });
     const file = new File([oversizedBlob], 'oversized-source.pdf', { type: 'application/pdf' });
-    return window.__fixtureControls.testPrepareDocument(file, undefined, 20 * 1024 * 1024);
+    let reads = 0;
+    const read = file.arrayBuffer.bind(file);
+    file.arrayBuffer = () => { reads++; return read(); };
+    const result = await window.__fixtureControls.testPrepareDocument(file, undefined, 20 * 1024 * 1024);
+    return { ...result, reads };
   });
   assert.equal(overSourceResult.success, false, 'Source file >20 MiB must be rejected immediately');
   assert.equal(overSourceResult.error, 'preparation_limit');
+  assert.equal(overSourceResult.reads, 0, 'Oversized source must be rejected before arrayBuffer reads');
   // -------------------------------------------------------------------------
   // Case 9: Request JSON Payload Size Boundary (10 MiB)
   // Positive control: Standard valid requests pass within 10 MiB limit
   // -------------------------------------------------------------------------
   console.log('[CASE 9] Negative Boundary: Request JSON Payload >10 MiB Rejection...');
+  const postsBeforeControl = network.postAttempts;
+  const payloadControl = await page.evaluate(async base64 => window.__fixtureControls.testExtractDocument({
+    requestId: crypto.randomUUID(), scope: 'test-scope', context: 'kw-docs-context',
+    settingsVersion: 'a'.repeat(64), catalogVersion: 'b'.repeat(64), pageCount: 1,
+    images: [{ page: 1, mime: 'image/png', base64 }],
+  }), Buffer.from(validPng).toString('base64'));
+  assert.equal(payloadControl.success, true, 'Within-budget request must reach the actual HTTP boundary');
+  assert.equal(network.postAttempts, postsBeforeControl + 1);
+  const postsBeforeOversize = network.postAttempts;
   const overPayloadResult = await page.evaluate(async () => {
     const hugePayload = {
       requestId: crypto.randomUUID(),
@@ -302,6 +326,7 @@ async function runPreparationTests(page) {
   });
   assert.equal(overPayloadResult.success, false, 'Payload >10 MiB must be rejected before POST');
   assert.equal(overPayloadResult.error, 'payload_too_large');
+  assert.equal(network.postAttempts, postsBeforeOversize, 'Oversized request must never reach POST transport');
   // -------------------------------------------------------------------------
   // Case 10: Cancellation & Resource Lifecycle at Browser Boundaries
   // -------------------------------------------------------------------------
@@ -319,11 +344,34 @@ async function runPreparationTests(page) {
   const midFlightResult = await page.evaluate(async (bytes) => {
     const file = new File([new Uint8Array(bytes)], 'mid-abort.pdf', { type: 'application/pdf' });
     const controller = new AbortController();
-    const started = new Promise(resolve => window.addEventListener('fixture-worker-started', resolve, { once: true }));
+    let onStart, timer;
+    const started = new Promise(resolve => {
+      onStart = resolve;
+      window.addEventListener('fixture-worker-started', onStart, { once: true });
+    });
     const prepPromise = window.__fixtureControls.testPrepareDocument(file, controller.signal);
-    await started;
-    controller.abort();
-    return prepPromise;
+    const settlePreparation = async () => {
+      let settleTimer;
+      try {
+        return await Promise.race([prepPromise, new Promise((_, reject) => {
+          settleTimer = setTimeout(() => reject(new Error('Aborted preparation did not settle')), 5000);
+        })]);
+      } finally { clearTimeout(settleTimer); }
+    };
+    try {
+      await Promise.race([
+        started,
+        prepPromise.then(() => { throw new Error('Preparation settled before worker started'); }),
+        new Promise((_, reject) => { timer = setTimeout(() => reject(new Error('Worker start timeout')), 5000); }),
+      ]);
+      controller.abort();
+      return await settlePreparation();
+    } finally {
+      clearTimeout(timer);
+      window.removeEventListener('fixture-worker-started', onStart);
+      controller.abort();
+      await settlePreparation();
+    }
   }, Array.from(pdf10));
   assert.equal(midFlightResult.success, false, 'Mid-flight aborted preparation must reject');
   const spiesAfterAbort = await page.evaluate(() => window.__fixtureControls.getSpies());
@@ -418,15 +466,60 @@ async function runPreparationTests(page) {
   });
   assert.equal(spoofedResult.success, false, 'Spoofed HTML file named .pdf must be rejected');
 
-  const passedCount = 11 + (observedRed ? 0 : 1);
-  const observedRedCount = observedRed ? 1 : 0;
-  console.log(`[PREPARATION SUITE] ${passedCount} positive controls passed; ${observedRedCount} observed RED on target 30s deadline.`);
-  return {
-    totalCount: 12,
-    passedCount,
-    observedRedCount,
-    unexpectedFailCount: 0,
-  };
+  // Codex 4504559741: use native JPEG encoding and actual browser decoding.
+  // Keep cases independent so EXIF 6 failing does not hide EXIF 8.
+  await page.clock.resume();
+  let orientationPass = 0;
+  let orientationRed = 0;
+  let orientationSetupFailures = 0;
+  for (const orientation of [1, 6, 8]) {
+    let targetReached = false;
+    try {
+      const bytes = await syntheticJpeg({ width: 96, height: 48, orientation });
+      const metadata = await sharp(bytes).metadata();
+      assert.equal(metadata.orientation, orientation, 'Fixture must contain genuine EXIF orientation');
+      assert.equal(metadata.width, 96);
+      assert.equal(metadata.height, 48);
+      const result = await page.evaluate(async ({ bytes, orientation }) => {
+        const file = new File([new Uint8Array(bytes)], `exif-${orientation}.jpg`, { type: 'image/jpeg' });
+        const bitmap = await createImageBitmap(file);
+        const decoded = [bitmap.width, bitmap.height];
+        bitmap.close();
+        const controller = new AbortController();
+        let timer;
+        try {
+          const prepared = await Promise.race([
+            window.__fixtureControls.testPrepareDocument(file, controller.signal),
+            new Promise((_, reject) => { timer = setTimeout(() => { controller.abort(); reject(new Error('EXIF preparation did not settle in 5s')); }, 5000); }),
+          ]);
+          return { decoded, prepared };
+        } finally {
+          clearTimeout(timer);
+          controller.abort();
+        }
+      }, { bytes: Array.from(bytes), orientation });
+      assert.deepEqual(result.decoded, orientation === 1 ? [96, 48] : [48, 96], 'Real browser must honor EXIF rotation');
+      console.log(`[PR16 EXIF ${orientation}] source=96x48, decoded=${result.decoded.join('x')}, bytes=${bytes.length}`);
+      targetReached = true;
+      assert.equal(result.prepared.success, true, `EXIF ${orientation} valid JPEG must prepare: ${result.prepared.error}`);
+      assert.equal(result.prepared.result.pageCount, 1);
+      assert.deepEqual(result.prepared.result.images, [{ page: 1, mime: 'image/jpeg', base64: bytes.toString('base64') }], 'Preserve exact JPEG bytes, orientation metadata and payload');
+      orientationPass++;
+      console.log(`[PR16 EXIF ${orientation}] PASS: genuine 96x48 JPEG, decoded ${result.decoded.join('x')}, exact payload preserved`);
+    } catch (err) {
+      if (targetReached && err instanceof assert.AssertionError) {
+        orientationRed++;
+        console.log(`[PR16 EXIF ${orientation}] OBSERVED RED: ${err.message}`);
+      } else {
+        orientationSetupFailures++;
+        console.log(`[PR16 EXIF ${orientation}] HARNESS FAILURE: ${err.stack || err}`);
+      }
+    }
+  }
+  const passedCount = 11 + (observedRed ? 0 : 1) + orientationPass;
+  const observedRedCount = (observedRed ? 1 : 0) + orientationRed;
+  console.log(`[PREPARATION SUITE] total=15 pass=${passedCount} RED=${observedRedCount} setup=${orientationSetupFailures}`);
+  return { totalCount: 15, passedCount, observedRedCount, unexpectedFailCount: orientationSetupFailures };
 }
 
 /**
@@ -557,6 +650,7 @@ async function main() {
   }
 
   let browser = null;
+  let preparationSummary = null;
 
   try {
     let playwright;
@@ -595,6 +689,17 @@ async function main() {
     });
     const page = await context.newPage();
     const egressViolations = [];
+    const network = { postAttempts: 0 };
+    const consoleErrors = [];
+    const pageErrors = [];
+    page.on('pageerror', error => pageErrors.push(error.message));
+    page.on('console', message => {
+      if (message.type() !== 'error') return;
+      // Case 1 deliberately requests a denied local PDF.js asset (real server 403).
+      if (message.location().url === `${origin}${PDFJS_ASSET_BASE}unauthorized-executable.exe`
+        && /^Failed to load resource: the server responded with a status of 403\b/.test(message.text())) return;
+      consoleErrors.push(message.text());
+    });
     page.setDefaultTimeout(15000);
 
     // Strict loopback routing & zero fake PDF.js asset stub
@@ -602,7 +707,7 @@ async function main() {
       const req = route.request();
       const url = new URL(req.url());
 
-      if (url.hostname !== '127.0.0.1' && url.hostname !== 'localhost') {
+      if (url.origin !== origin || url.username || url.password) {
         egressViolations.push(req.url());
         console.error(`[SECURITY BLOCKED] Disallowed non-loopback egress: ${req.url()}`);
         return route.abort('blockedbyclient');
@@ -637,6 +742,7 @@ async function main() {
         }
 
         if (url.pathname === '/api/document-extraction') {
+          if (req.method() === 'POST') network.postAttempts++;
           const rawBody = req.postData() || '';
           if (Buffer.byteLength(rawBody, 'utf8') > 10 * 1024 * 1024) {
             return route.fulfill({
@@ -647,7 +753,7 @@ async function main() {
           return route.fulfill({
             json: {
               data: {
-                requestId: crypto.randomUUID(),
+                requestId: JSON.parse(rawBody).requestId,
                 context: 'kw-docs-context',
                 settingsVersion: 'a'.repeat(64),
                 catalogVersion: 'b'.repeat(64),
@@ -673,10 +779,12 @@ async function main() {
     await page.goto((isBuiltMode ? `${origin}/scripts/fixtures/extraction-browser.html` : `${origin}/fixture`) + '?preparation');
     await page.waitForSelector('[data-testid="fixture-controls"]');
 
-    const prepSummary = await runPreparationTests(page);
+    const prepSummary = preparationSummary = await runPreparationTests(page, network);
     assert.deepEqual(egressViolations, [], 'Preparation must not attempt external requests');
-    if (prepSummary.observedRedCount > 0) {
-      console.log(`[PREPARATION SUITE] Nonzero exit code enforced: ${prepSummary.observedRedCount} observed RED on target deadline contract.`);
+    assert.deepEqual(pageErrors, [], 'Preparation must not emit uncaught page errors');
+    assert.deepEqual(consoleErrors, [], 'Preparation must not emit unexpected console errors');
+    if (prepSummary.observedRedCount > 0 || prepSummary.unexpectedFailCount > 0) {
+      console.log(`[PREPARATION SUITE] Nonzero exit code enforced: ${prepSummary.observedRedCount} observed RED; ${prepSummary.unexpectedFailCount} setup failures.`);
       process.exitCode = 1;
     } else {
       console.log('[BROWSER SUITE] Preparation group run completed successfully.');
@@ -687,11 +795,12 @@ async function main() {
   }
 
   if (!isPreparationOnly) {
+    if (process.exitCode && process.exitCode !== 0) return;
     console.log('\n======================================================================');
-    console.log('[BROWSER ORCHESTRATION] Sequentially executing lifecycle group (14 cases)...');
+    console.log('[BROWSER ORCHESTRATION] Sequentially executing lifecycle group...');
     console.log('======================================================================');
     const { main: runLifecycleMain } = await import('./verify-extraction-lifecycle.mjs');
-    await runLifecycleMain();
+    const lifecycleSummary = await runLifecycleMain();
     if (process.exitCode && process.exitCode !== 0) {
       console.error(`\n[BROWSER ORCHESTRATION HALTED] Lifecycle group failed with exit code ${process.exitCode}`);
       return;
@@ -708,10 +817,10 @@ async function main() {
     }
 
     console.log('\n======================================================================');
-    console.log('[BROWSER ORCHESTRATION] Sequentially executing forms group (22 cases)...');
+    console.log('[BROWSER ORCHESTRATION] Sequentially executing forms group...');
     console.log('======================================================================');
     const { main: runFormsMain } = await import('./verify-extraction-forms.mjs');
-    await runFormsMain();
+    const formsSummary = await runFormsMain();
     if (process.exitCode && process.exitCode !== 0) {
       console.error(`\n[BROWSER ORCHESTRATION HALTED] Forms group failed with exit code ${process.exitCode}. No success banner displayed.`);
       return;
@@ -719,13 +828,14 @@ async function main() {
 
     console.log('\n======================================================================');
     console.log('[BROWSER ORCHESTRATION SUMMARY]');
-    console.log('  Group 1: Preparation & Rendering: 12 cases');
-    console.log('  Group 2: Document Lifecycle:      14 cases');
+    console.log(`  Group 1: Preparation & Rendering: ${preparationSummary.totalCount} cases`);
+    console.log(`  Group 2: Document Lifecycle:      ${lifecycleSummary.totalCount} cases`);
     console.log('  Group 3: Settings & Approvals:    12 cases');
-    console.log('  Group 4: Forms & CAS Integration: 22 cases');
-    console.log('  Total Executed Cases:             60 group cases (12 + 14 + 12 + 22)');
+    console.log(`  Group 4: Forms & CAS Integration: ${formsSummary.totalCount} cases`);
+    const total = preparationSummary.totalCount + lifecycleSummary.totalCount + 12 + formsSummary.totalCount;
+    console.log(`  Total Executed Cases:             ${total} group cases`);
     console.log('======================================================================');
-    console.log('[BROWSER ORCHESTRATION] All 60 browser group cases completed successfully with exit code 0.');
+    console.log(`[BROWSER ORCHESTRATION] All ${total} browser group cases completed successfully with exit code 0.`);
     console.log('======================================================================\n');
   }
 }

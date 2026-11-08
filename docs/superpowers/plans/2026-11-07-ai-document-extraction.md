@@ -1,5 +1,7 @@
 # AI Document Extraction Implementation Plan
 
+Historical plan: the approved [bootstrap contract amendment](2026-11-07-ai-document-extraction-bootstrap-amendment.md) supersedes Task 15's original live-model listing step. The implemented settings UI loads the offline `/api/document-extraction/candidates?provider=...` catalogue. `/models` remains disabled with HTTP 403 while extraction is off; enabling performs fresh server-side validation. The original steps below remain as provenance, not competing endpoint guidance or execution authority.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Let administrators extract reviewable metadata from a locally selected PDF/JPG/PNG in either document form, preserve their input, and save an optional document number through the existing explicit-save transaction.

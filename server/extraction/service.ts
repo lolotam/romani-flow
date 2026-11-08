@@ -175,12 +175,17 @@ export function createExtractionService(
    * The listing needs a management key. A workspace without that access stays
    * unavailable: it is never read as an empty inventory, so a missing access
    * can never prove that no private key is attached.
+   *
+   * A rate limited account keeps its identity through this wrapper: the delay
+   * of the provider survives, so the refusal stays a rate limit and not an
+   * outage of the provider.
    */
   const fetchByok = async (key: string, signal: AbortSignal): Promise<unknown> => {
     try {
       return await fetchMetadata(PROVIDER_URLS.openRouterByok, key, signal);
     } catch (error) {
       if (signal.aborted) throw error;
+      if (error instanceof ExtractionError && error.code === 'provider_rate_limit') throw error;
       throw providerError('provider_unavailable');
     }
   };
@@ -311,10 +316,14 @@ export function createExtractionService(
     const pages: RawPage[] = [];
     for (const batch of batches) {
       recheck();
-      await assertEligible(selection, approval, signal, recheck);
-      recheck();
       let batchPages: RawPage[];
       try {
+        // The eligibility proof and the inference share one rate limit
+        // handling: a provider that limits the account while its metadata is
+        // read limits it exactly like a provider that limits it while the
+        // batch is sent.
+        await assertEligible(selection, approval, signal, recheck);
+        recheck();
         batchPages = await extractBatch(selection, batch, signal, transport);
       } catch (error) {
         if (error instanceof ExtractionError && error.code === 'provider_rate_limit') {
@@ -365,8 +374,12 @@ export function createExtractionService(
       if (!model) {
         throw failure('extraction_disabled', 403, 'No extraction model is selected.');
       }
+      // An expired approval is no approval: the record is checked against the
+      // current clock here, before the body is decoded and before a single
+      // image reaches the provider, so an expired selection never costs a
+      // native decode and never leaves the process.
       const approval = config.extraction.approvals.find(
-        item => item.provider === provider && item.model === model,
+        item => item.provider === provider && item.model === model && isUnexpired(item, now()),
       );
       if (!approval) {
         throw failure('provider_policy', 403, 'The selected model is not approved.');

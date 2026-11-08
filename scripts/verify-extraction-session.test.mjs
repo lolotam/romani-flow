@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { ExtractionSession } from '../src/lib/extraction/session.ts';
+import { ExtractionSession, describeFailure, approvedErrorCode } from '../src/lib/extraction/session.ts';
+import { ApiRequestError } from '../src/lib/api/http.ts';
 import { fieldNames } from '../server/contracts/documentExtraction.ts';
 
 // Helper to construct blank values dictionary matching the shared contract
@@ -404,25 +405,25 @@ test('pure-class ExtractionSession: manual field protection prevents ticket sugg
 
   const currentValues = { ...initial, ...patch1 };
 
-  // User manually edits notes and issue_date; marks them manual
-  session.manual('notes');
+  // Deliberately empty supported fields require manual protection, not a nonempty-value guard.
   session.manual('issue_date');
+  session.manual('expiry_date');
   const userEditedValues = {
     ...currentValues,
-    notes: 'Manually verified document notes',
-    issue_date: '2024-06-01',
+    issue_date: '',
+    expiry_date: '',
   };
 
-  // A late second suggestion arrives trying to overwrite notes, issue_date, and document_number
+  // A late second suggestion attempts to fill both protected empty dates.
   const secondPatch = session.apply(ticket, {
     issue_date: '2024-01-01',
-    notes: 'AI suggested note',
+    expiry_date: '2026-01-01',
     document_number: '290010112345',
   }, userEditedValues);
 
   // User-edited manual fields are rejected; unchanged document_number is not re-applied
-  assert.equal(secondPatch.notes, undefined);
   assert.equal(secondPatch.issue_date, undefined);
+  assert.equal(secondPatch.expiry_date, undefined);
   assert.equal(secondPatch.document_number, undefined);
   assert.deepEqual(secondPatch, {});
 });
@@ -447,3 +448,24 @@ test('pure-class ExtractionSession: session invalidation marks ticket not curren
 
   assert.deepEqual(latePatch, {}, 'Invalidated session must produce empty patch on late arrival');
 });
+
+// CodeRabbit 4504592822: 403 policy failures must retain the approved UI reason.
+for (const [wireCode, approved, forbiddenCode] of [
+  ['processing_not_authorized', 'processing_not_authorized', 'processing_not_authorized'],
+  ['extraction_disabled', 'extraction_disabled', 'extraction_disabled'],
+  ['provider_not_configured', 'unconfigured', 'unconfigured'],
+  ['provider_policy', 'provider_policy', 'provider_policy'],
+  ['invalid_origin', 'origin_forbidden', 'origin_forbidden'],
+  ['forbidden', 'forbidden', 'forbidden'],
+  ['unrecognized-private-reason', 'network_error', 'forbidden'],
+  ['constructor', 'network_error', 'forbidden'],
+  ['toString', 'network_error', 'forbidden'],
+  ['__proto__', 'network_error', 'forbidden'],
+]) {
+  test(`PR16 403 mapping: ${wireCode}`, () => {
+    const outcome = describeFailure(new ApiRequestError('Never display raw server message', wireCode, 403));
+    assert.deepEqual({ outcome, approved: approvedErrorCode(wireCode) }, {
+      outcome: { phase: 'unavailable', errorCode: forbiddenCode, retryAfterSeconds: null }, approved,
+    });
+  });
+}

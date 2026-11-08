@@ -16,7 +16,16 @@ import {
 } from './fixtures/extraction-data.mjs';
 import { DocumentDraftSession } from '../src/lib/documentDraftSession.ts';
 import { ApiRequestError } from '../src/lib/api/http.ts';
+import sharp from 'sharp';
+import { extractionRequest } from '../server/contracts/documentExtraction.ts';
 
+
+function boundedBarrier(promise, label, timeoutMs = 5000) {
+  let timer;
+  return Promise.race([promise, new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`Timeout waiting for ${label}`)), timeoutMs);
+  })]).finally(() => clearTimeout(timer));
+}
 
 // ---------------------------------------------------------------------------
 // 1. Authorization & Processing Permission Gates
@@ -438,11 +447,11 @@ test('diagnostics and error responses never leak keys, account IDs, document num
     const responseText = JSON.stringify(res.json);
     assert.equal(responseText.includes('mock-openrouter-key'), false);
     assert.equal(responseText.includes('290010112345'), false);
-    assert.equal(responseText.includes(VALID_PNG_BASE64), false);
+    assert.equal(responseText.includes(OVERSIZED_PIXELS_PNG_BASE64), false);
 
     const logsText = JSON.stringify(f.logs);
     assert.equal(logsText.includes('mock-openrouter-key'), false);
-    assert.equal(logsText.includes(VALID_PNG_BASE64), false);
+    assert.equal(logsText.includes(OVERSIZED_PIXELS_PNG_BASE64), false);
   }, { enabled: true, authorized: true }));
 
 // ---------------------------------------------------------------------------
@@ -723,7 +732,8 @@ test('stalled body 15s timeout via real loopback partial HTTP closes connection 
     socket.on('close', () => { socketClosed = true; responded(); });
     socket.on('error', error => { if (error.code !== 'ECONNRESET') throw error; });
 
-    await new Promise((resolve) => socket.once('connect', resolve));
+    try {
+    await boundedBarrier(new Promise((resolve, reject) => { socket.once('connect', resolve); socket.once('error', reject); }), 'socket connect');
 
     const partialHeaders = [
       'POST /api/document-extraction HTTP/1.1',
@@ -739,14 +749,14 @@ test('stalled body 15s timeout via real loopback partial HTTP closes connection 
 
     socket.write(partialHeaders);
 
-    const bodyTimer = await bodyScheduled;
+    const bodyTimer = await boundedBarrier(bodyScheduled, 'bodyScheduled');
     assert.ok(bodyTimer, '15-second body deadline must be scheduled upon request admission');
 
     timers.delete(bodyTimer[0]);
     now += 15000;
     bodyTimer[1].callback();
 
-    await responseArrived;
+    await boundedBarrier(responseArrived, 'responseArrived');
 
     assert.ok(
       responseData.includes('504') || responseData.includes('extraction_timeout') || socketClosed,
@@ -763,6 +773,7 @@ test('stalled body 15s timeout via real loopback partial HTTP closes connection 
     });
     assert.equal(r2.status, 200, 'Admission slot must be settled and released after stalled body timeout');
     assert.equal(r2.json.error, null);
+    } finally { socket.destroy(); }
   }, { enabled: true, authorized: true, clock });
 });
 
@@ -798,11 +809,14 @@ test('aborted native pending retains request slot until underlying native settle
       signal: clientController.signal,
     });
 
-    await entered;
+    // Retain the request settlement before fixture teardown even if a barrier fails.
+    void p1.catch(() => {});
+    try {
+    await boundedBarrier(entered, 'entered');
 
     clientController.abort();
     await assert.rejects(p1, (err) => err.name === 'AbortError');
-    await destroyed;
+    await boundedBarrier(destroyed, 'destroyed');
 
     const r2 = await f.request('/api/document-extraction', {
       method: 'POST',
@@ -821,6 +835,11 @@ test('aborted native pending retains request slot until underlying native settle
       headers: { 'x-draft-account': 'admin' },
     });
     assert.equal(r3.status, 200, 'Slot must be released only when underlying native decode truly settles');
+    } finally {
+      resolveNative();
+      clientController.abort();
+      await Promise.allSettled([p1, nativePending]);
+    }
   }, { enabled: true, authorized: true, decoderFactory: customDecoderFactory });
   } finally { resolveNative(); }
 });
@@ -932,6 +951,7 @@ test('document save transaction rejects stale draft revision with 409 and succee
     assert.equal(putRes2.status, 200);
     const rev2 = putRes2.json.data.revision;
 
+    const beforeStale = f.db.prepare('SELECT id FROM documents ORDER BY id').all();
     // Stale save attempt using rev1
     const staleDocSave = await f.request('/api/documents', {
       method: 'POST',
@@ -945,6 +965,7 @@ test('document save transaction rejects stale draft revision with 409 and succee
     });
     assert.equal(staleDocSave.status, 409);
     assert.equal(staleDocSave.json.error.code, 'draft_conflict');
+    assert.deepEqual(f.db.prepare('SELECT id FROM documents ORDER BY id').all(), beforeStale);
 
     // Retry with fresh revision rev2 succeeds
     const freshDocSave = await f.request('/api/documents', {
@@ -987,6 +1008,7 @@ test('repeated save attempt with committed draft reference rejects replay withou
     });
     assert.equal(save1.status, 201);
 
+    const beforeReplay = f.db.prepare('SELECT id FROM documents ORDER BY id').all();
     const save2 = await f.request('/api/documents', {
       method: 'POST',
       body: {
@@ -999,6 +1021,7 @@ test('repeated save attempt with committed draft reference rejects replay withou
     });
     assert.equal(save2.status, 409);
     assert.equal(save2.json.error.code, 'draft_conflict');
+    assert.deepEqual(f.db.prepare('SELECT id FROM documents ORDER BY id').all(), beforeReplay);
   }, { enabled: true, authorized: true }));
 
 
@@ -1045,7 +1068,7 @@ test('pure-class DocumentDraftSession: retiring session held PUT characterizatio
 
       // 3. Session 1 unmounts: dispose(true) initiates unawaited flush()
       s1.dispose(true);
-      await enteredPut;
+      await boundedBarrier(enteredPut, 'enteredPut');
 
       // 4. Session 2 mounts in the same scope and same account ('admin') while s1's PUT is held
       s2 = new DocumentDraftSession(f.validScope, () => {}, () => {}, session2Transport);
@@ -1053,7 +1076,7 @@ test('pure-class DocumentDraftSession: retiring session held PUT characterizatio
 
       // 5. Release Session 1's held PUT so it commits to the server
       releasePut();
-      await settledPut;
+      await boundedBarrier(settledPut, 'settledPut');
 
       const dbRow = f.db
         .prepare('SELECT user_id, revision, values_json FROM document_drafts WHERE user_id=? AND scope=?')
@@ -1087,3 +1110,163 @@ test('pure-class DocumentDraftSession: retiring session held PUT characterizatio
       }
     }
   }, { enabled: true, authorized: true }));
+
+// ---------------------------------------------------------------------------
+// 12. Top-Level Shape & Cardinality Allocation Guard (PR16 Pre-Zod Rejection)
+// ---------------------------------------------------------------------------
+
+function createTrackingDecoderFactory() {
+  let decodersCreated = 0;
+  let nativeCalls = 0;
+
+  const decoderFactory = (bytes, options) => {
+    decodersCreated += 1;
+    const real = sharp(bytes, options);
+    const wrapper = {
+      metadata: async () => {
+        nativeCalls += 1;
+        return real.metadata();
+      },
+      timeout: (settings) => {
+        real.timeout(settings);
+        return wrapper;
+      },
+      raw: () => {
+        real.raw();
+        return wrapper;
+      },
+      toBuffer: async (settings) => {
+        nativeCalls += 1;
+        return real.toBuffer(settings);
+      },
+      destroy: () => {
+        real.destroy();
+      },
+    };
+    return wrapper;
+  };
+
+  return {
+    decoderFactory,
+    get decodersCreated() {
+      return decodersCreated;
+    },
+    get nativeCalls() {
+      return nativeCalls;
+    },
+    reset() {
+      decodersCreated = 0;
+      nativeCalls = 0;
+    },
+  };
+}
+
+// Each case owns a real HTTP fixture, so one RED cannot suppress later cases.
+const requestGuardCases = [
+  ['images string', f => ({ ...f.validRequest, images: 'raw-payload-marker' }), true],
+  ['images number', f => ({ ...f.validRequest, images: 12345 }), true],
+  ['images null', f => ({ ...f.validRequest, images: null }), true],
+  ['images object', f => ({ ...f.validRequest, images: { 0: f.validRequest.images[0] } }), true],
+  ['zero images', f => ({ ...f.validRequest, pageCount: 0, images: [] }), true],
+  ['11 images', f => ({ ...f.validRequest, pageCount: 11, images: Array.from({ length: 11 }, (_, i) => ({ ...f.validRequest.images[0], page: i + 1 })) }), true],
+  ['1000 null images', f => ({ ...f.validRequest, pageCount: 1000, images: Array(1000).fill(null) }), true],
+  ['1000 valid-looking images', f => ({ ...f.validRequest, pageCount: 1000, images: Array.from({ length: 1000 }, (_, i) => ({ ...f.validRequest.images[0], page: i + 1 })) }), true],
+  ['top-level array', () => [], true],
+  ['top-level null', () => null, true],
+  ['top-level string', () => JSON.stringify('raw-payload-marker'), true],
+  ['top-level number', () => 12345, true],
+  ['null requestId strict schema control', f => ({ ...f.validRequest, requestId: null }), false],
+  ['object pageCount strict schema control', f => ({ ...f.validRequest, pageCount: { value: 1 } }), false],
+  ['unknown key strict schema control', f => ({ ...f.validRequest, unexpectedKey: 'raw-payload-marker' }), false],
+];
+
+for (const [name, bodyOf, guarded] of requestGuardCases) {
+  test(`PR16 HTTP pre-Zod: ${name}`, { timeout: 15000 }, async () => {
+    const tracker = createTrackingDecoderFactory();
+    const originalParse = extractionRequest.parse;
+    let parseCalls = 0;
+    // Call-through observation only: the real schema, route and service still run.
+    extractionRequest.parse = function (...args) {
+      parseCalls++;
+      return originalParse.apply(this, args);
+    };
+    try {
+      await extractionApi(async f => {
+        const send = body => f.request('/api/document-extraction', {
+          method: 'POST', body, headers: { 'x-draft-account': 'admin' },
+          signal: AbortSignal.timeout(5000),
+        });
+        const valid = await send(f.validRequest);
+        assert.equal(valid.status, 200);
+        assert.equal(valid.json.data.requestId, f.validRequest.requestId);
+        assert.equal(parseCalls, 1);
+        assert.ok(tracker.nativeCalls > 0 && tracker.decodersCreated > 0);
+        assert.ok(f.calls.length > 0);
+
+        tracker.reset();
+        f.calls.length = 0;
+        f.logs.length = 0;
+        parseCalls = 0;
+        const rejected = await send(bodyOf(f));
+        const rejectedParseCalls = parseCalls;
+        const rejectedObservations = {
+          decoders: tracker.decodersCreated, native: tracker.nativeCalls,
+          transport: f.calls.length, logs: JSON.stringify(f.logs),
+        };
+        // Recovery executes even if either public error vocabulary or allocation
+        // guard assertions below are currently RED.
+        parseCalls = 0;
+        const recovery = await send(f.validRequest);
+        assert.equal(recovery.status, 200);
+        assert.equal(recovery.json.error, null);
+        assert.equal(parseCalls, 1);
+        assert.equal(rejected.status, 400);
+        assert.deepEqual(rejected.json, { data: null, error: {
+          code: 'invalid_request', message: 'The extraction request is not valid.',
+          requestId: rejected.json.error.requestId,
+        } });
+        assert.equal(typeof rejected.json.error.requestId, 'string');
+        assert.equal(rejectedObservations.decoders, 0);
+        assert.equal(rejectedObservations.native, 0);
+        assert.equal(rejectedObservations.transport, 0);
+        assert.doesNotMatch(JSON.stringify(rejected.json) + rejectedObservations.logs, /raw-payload-marker|"issues"|"base64"/);
+        assert.equal(rejectedParseCalls, guarded ? 0 : 1,
+          guarded ? 'Shape/cardinality rejection must precede extractionRequest.parse' : 'Bounded strict-schema control must still enter the real parser');
+      }, { enabled: true, authorized: true, decoderFactory: tracker.decoderFactory });
+    } finally {
+      extractionRequest.parse = originalParse;
+    }
+  });
+}
+
+// MergePilot fixture regressions: exercise real status and extraction, not just defaults.
+for (const [provider, expectedModel] of [['groq', MOCK_GROQ_MODEL_ID], ['openrouter', MOCK_MODEL_ID]]) {
+  test(`${provider} fixture isolates keys and preserves the complete default extraction path`, () =>
+    extractionApi(async f => {
+      const status = await f.request('/api/document-extraction/status');
+      assert.equal(status.status, 200);
+      assert.equal(status.json.data.available, true);
+      assert.equal(status.json.data.model, expectedModel);
+      assert.deepEqual(status.json.data.configured, { groq: provider === 'groq', openrouter: provider === 'openrouter' });
+      const result = await f.request('/api/document-extraction', {
+        method: 'POST', body: f.validRequest, headers: { 'x-draft-account': 'admin' },
+      });
+      assert.equal(result.status, 200);
+      assert.equal(result.json.data.fields.document_number.value, '290010112345');
+      const inference = f.calls.find(call => call.url.endsWith('/chat/completions'));
+      assert.equal(JSON.parse(inference.init.body).model, expectedModel);
+      assert.ok(f.calls.every(call => new URL(call.url).hostname === (provider === 'groq' ? 'api.groq.com' : 'openrouter.ai')));
+    }, { enabled: true, authorized: true, provider }));
+}
+
+test('fixture blocks userinfo and unrelated loopback origins before transport, permits its owned origin', () =>
+  extractionApi(async f => {
+    for (const target of [
+      'http://localhost:80@example.invalid/', 'http://127.0.0.1:80@example.invalid/',
+      'http://127.0.0.1:1/', 'http://localhost:' + new URL(f.base).port + '/',
+      f.base.replace('http:', 'https:'), f.base.replace('http://', 'http://user:pass@'),
+    ]) await assert.rejects(fetch(target), /external_inference_forbidden/);
+    const response = await fetch(f.base + '/api/health');
+    assert.ok(response instanceof Response, 'Owned-origin control reaches the fixture server');
+    assert.equal(f.calls.length, 0);
+  }));

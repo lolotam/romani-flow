@@ -18,7 +18,9 @@ import type { ExtractionService } from '../extraction/service.js';
  * The route accepts one administrator request, one prepared document and
  * nothing else. It refuses a foreign origin, a foreign account, a body that
  * is not JSON, an encoded body and an oversized body before the document is
- * decoded, and it never logs the body, the account or the document.
+ * decoded, it refuses a body that does not have the shape of an extraction
+ * request before the schema reads it, and it never logs the body, the account
+ * or the document.
  */
 
 /** The origin of the production deployment. */
@@ -118,6 +120,22 @@ interface PublicFailure {
   code: string;
   message: string;
   retryAfterSeconds?: number;
+}
+
+/**
+ * Reports whether a request body has the shape the extraction contract needs.
+ *
+ * The check costs the same for every body: it looks at the top level of the
+ * body and at the length of the images array, and it never walks the body.
+ * A body that is not an object, or that carries no images, too few images or
+ * more images than the contract allows, is therefore refused before the
+ * schema reads a single element of it.
+ */
+function hasBoundedRequestShape(body: unknown): boolean {
+  if (typeof body !== 'object' || body === null || Array.isArray(body)) return false;
+  const images = (body as { images?: unknown }).images;
+  if (!Array.isArray(images)) return false;
+  return images.length >= 1 && images.length <= limits.pages;
 }
 
 /**
@@ -365,7 +383,7 @@ export function createDocumentExtractionRouter(
     lifecycle,
     service.acquire,
     trackerMiddleware,
-    express.json({ limit: limits.body, inflate: false }),
+    express.json({ limit: limits.body, inflate: false, strict: false }),
     asyncHandler(async (req, res) => {
       const controller = res.locals.extractionAbort as AbortController;
       const settle = res.locals.extractionSettled as (() => Promise<void>) | undefined;
@@ -376,6 +394,11 @@ export function createDocumentExtractionRouter(
       req.once('aborted', cancel);
       res.once('close', cancel);
       try {
+        if (!hasBoundedRequestShape(req.body)) {
+          // The body is refused on its shape alone, so the answer never
+          // carries a key, an element or an upstream sentence.
+          throw new ExtractionError('invalid_request', 400, 'The extraction request is not valid.');
+        }
         const input = extractionRequest.parse(req.body);
         await validateImages(
           input.images,

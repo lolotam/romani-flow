@@ -329,6 +329,40 @@ export function createDefaultTransport(env: string): ExtractionTransport {
   };
 }
 
+/** The smallest accepted retry delay of a rate limited provider. */
+const MIN_RETRY_AFTER_SECONDS = 1;
+
+/** The largest accepted retry delay of a rate limited provider. */
+const MAX_RETRY_AFTER_SECONDS = 300;
+
+/** The retry delay of a rate limited provider that names no delay. */
+const DEFAULT_RETRY_AFTER_SECONDS = 30;
+
+/** Clamps a retry delay into the accepted range. */
+function clampRetryAfter(seconds: number): number {
+  if (!Number.isFinite(seconds)) return DEFAULT_RETRY_AFTER_SECONDS;
+  return Math.min(MAX_RETRY_AFTER_SECONDS, Math.max(MIN_RETRY_AFTER_SECONDS, Math.round(seconds)));
+}
+
+/**
+ * Reads the retry delay of a rate limited provider.
+ *
+ * The header may carry seconds or a date. An unusable value falls back to the
+ * default delay and every delay is clamped, so a provider can neither hide
+ * behind a week nor push the client into an immediate retry. The rules are the
+ * ones of the inference path, so a refused metadata request and a refused
+ * inference answer with the same delay.
+ */
+export function retryAfterSeconds(response: Response): number {
+  const header = response.headers.get('retry-after');
+  if (!header) return DEFAULT_RETRY_AFTER_SECONDS;
+  const trimmed = header.trim();
+  if (/^\d+$/.test(trimmed)) return clampRetryAfter(Number.parseInt(trimmed, 10));
+  const date = Date.parse(trimmed);
+  if (Number.isFinite(date)) return clampRetryAfter((date - Date.now()) / 1000);
+  return DEFAULT_RETRY_AFTER_SECONDS;
+}
+
 /**
  * Reads one metadata document of a provider.
  *
@@ -336,6 +370,10 @@ export function createDefaultTransport(env: string): ExtractionTransport {
  * redirect, and it is bounded twice: by its own deadline and by a byte
  * limit. The body of a refused answer is dropped instead of being read, and
  * a cancellation of the caller stops the request promptly.
+ *
+ * A rate limited account is answered with the sanitized rate limit failure
+ * and its bounded delay, exactly like the inference path, so a metadata
+ * refusal never leaks an upstream body and never looks like an outage.
  */
 export async function fetchProviderJson(
   url: string,
@@ -365,6 +403,9 @@ export async function fetchProviderJson(
     const response = await transport(url, init);
     if (!response.ok) {
       await discardBody(response);
+      if (response.status === 429) {
+        throw providerError('provider_rate_limit', retryAfterSeconds(response));
+      }
       throw providerError(response.status === 401 ? 'provider_auth' : 'provider_unavailable');
     }
     return await readBoundedJson(response, maxBytes, controller.signal);

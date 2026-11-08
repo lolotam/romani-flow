@@ -26,6 +26,8 @@ import { syntheticPng } from './fixtures/extraction-pdf.mjs';
 const { extractionRequest: extractionRequestSchema, resultSchema } = await tsImport(
   '../server/contracts/documentExtraction.ts', import.meta.url,
 );
+const { extraction: arabicCopy } = await tsImport('../src/translations/ar/extraction.ts', import.meta.url);
+const { extraction: englishCopy } = await tsImport('../src/translations/en/extraction.ts', import.meta.url);
 
 // Required production modules from Task 11 (must exist)
 const REQUIRED_TASK11_MODULES = [
@@ -76,6 +78,13 @@ function runPreflightCheck() {
 /**
  * Stateful Mock API Controller managing loopback HTTP routes and per-request barriers.
  */
+function boundedGate(promise, label, timeoutMs = 5000) {
+  let timer;
+  return Promise.race([promise, new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`Timeout: ${label}`)), timeoutMs);
+  })]).finally(() => clearTimeout(timer));
+}
+
 class ExtractionMockApi {
   constructor() {
     this.status = {
@@ -244,6 +253,7 @@ async function runLifecycleTests(page, api) {
   });
 
   const state1 = await page.evaluate(() => window.__lifecycleControls.getState());
+  await boundedGate(page.evaluate(() => window.__extractionProbe.drain()), 'client task/decode settlement');
   assert.equal(api.postCalls, 1, 'Exactly one POST request sent');
   assert.equal(state1.formValues.document_number, '290010112345', 'Untouched clear document_number applied');
   assert.equal(state1.formValues.document_type_id, 'type-civil-id', 'Untouched clear document_type_id applied');
@@ -509,6 +519,7 @@ async function runLifecycleTests(page, api) {
   });
   await page.clock.runFor(200);
   await page.clock.resume();
+  await boundedGate(page.evaluate(() => window.__extractionProbe.drain()), 'client task/decode settlement');
   assert.equal(api.postCalls, 0, 'retry() while open=false must make ZERO requests (catches child bug)');
 
   // Variant 6.2: ready is false
@@ -526,6 +537,7 @@ async function runLifecycleTests(page, api) {
   });
   await page.clock.runFor(200);
   await page.clock.resume();
+  await boundedGate(page.evaluate(() => window.__extractionProbe.drain()), 'client task/decode settlement');
   assert.equal(api.postCalls, 0, 'retry() while ready=false must make ZERO requests (catches child bug)');
 
   // -------------------------------------------------------------------------
@@ -674,6 +686,20 @@ async function runLifecycleTests(page, api) {
   const state8 = await page.evaluate(() => window.__lifecycleControls.getState());
   assert.equal(state8.formValues.document_number, '', 'Late response rejected after account change');
 
+  // Same stale-result assertion across the other real hook invalidation inputs.
+  for (const invalidation of ['context', 'close']) {
+    await api.reset();
+    await remountFixture(page);
+    await page.evaluate(bytes => window.__lifecycleControls.setFile(new File([new Uint8Array(bytes)], 'cancel-path.png', { type: 'image/png' })), Array.from(validPng));
+    const held = await api.waitForRequest(0);
+    await page.evaluate(kind => {
+      if (kind === 'context') window.__lifecycleControls.setContext('replacement-context');
+      else window.__lifecycleControls.setOpen(false);
+    }, invalidation);
+    await held.fulfillSuccess({ document_number: { value: 'STALE-INVALIDATED', state: 'clear', alternatives: [], reason: 'none' } });
+    assert.equal((await page.evaluate(() => window.__lifecycleControls.getState())).formValues.document_number, '', `${invalidation} must reject its late response`);
+  }
+
   // -------------------------------------------------------------------------
   // Case 9: No automatic re-run on typing render or callback updates.
   // -------------------------------------------------------------------------
@@ -700,6 +726,7 @@ async function runLifecycleTests(page, api) {
     return s.formValues.document_number === 'TYPE-NUM';
   });
 
+  await boundedGate(page.evaluate(() => window.__extractionProbe.drain()), 'client task/decode settlement');
   assert.equal(api.postCalls, 1, 'Initial extraction made exactly 1 POST');
 
   // Simulate repeated typing
@@ -709,6 +736,7 @@ async function runLifecycleTests(page, api) {
     }, i);
   }
 
+  await boundedGate(page.evaluate(() => window.__extractionProbe.drain()), 'client task/decode settlement');
   assert.equal(api.postCalls, 1, 'Typing renders must never trigger duplicate extraction calls');
 
   // -------------------------------------------------------------------------
@@ -779,6 +807,7 @@ async function runLifecycleTests(page, api) {
     const s = window.__lifecycleControls.getState();
     return s.phase === 'unavailable' || s.phase === 'failed';
   });
+  await boundedGate(page.evaluate(() => window.__extractionProbe.drain()), 'client task/decode settlement');
   assert.equal(api.postCalls, 0, 'Zero POST calls when available=false');
   const state11A = await page.evaluate(() => window.__lifecycleControls.getState());
   assert.equal(state11A.formValues.document_number, 'MANUAL-KEEP-1', 'Manual field preserved');
@@ -802,6 +831,7 @@ async function runLifecycleTests(page, api) {
     const s = window.__lifecycleControls.getState();
     return s.phase === 'failed' || s.phase === 'unavailable';
   });
+  await boundedGate(page.evaluate(() => window.__extractionProbe.drain()), 'client task/decode settlement');
   assert.equal(api.postCalls, 0, 'Zero POST calls on status HTTP 503');
   const state11B = await page.evaluate(() => window.__lifecycleControls.getState());
   assert.equal(state11B.formValues.document_number, 'MANUAL-KEEP-2', 'Manual field preserved');
@@ -840,6 +870,7 @@ async function runLifecycleTests(page, api) {
   await retryBtn.waitFor({ state: 'attached', timeout: 5000 });
   const isDisabledInitially = await retryBtn.isDisabled();
   assert.ok(isDisabledInitially, 'Retry button must be disabled during active cooldown');
+  await boundedGate(page.evaluate(() => window.__extractionProbe.drain()), 'client task/decode settlement');
   assert.equal(api.postCalls, 1, 'Zero automatic retry requests initiated');
 
   // Fast-forward fake browser clock past cooldown expiry (26 seconds)
@@ -853,6 +884,7 @@ async function runLifecycleTests(page, api) {
 
   const isEnabledAfterExpiry = await retryBtn.isEnabled();
   assert.ok(isEnabledAfterExpiry, 'Retry button becomes enabled after controlled cooldown expiry');
+  await boundedGate(page.evaluate(() => window.__extractionProbe.drain()), 'client task/decode settlement');
   assert.equal(api.postCalls, 1, 'No automatic retry request made upon expiry');
 
   // -------------------------------------------------------------------------
@@ -964,6 +996,243 @@ async function runLifecycleTests(page, api) {
   assert.equal(panelAttributes.invalidButtonTypeCount, 0, 'Every button in DocumentExtractionPanel must have type="button"');
 
   console.log('[LIFECYCLE SUITE] All 14 hook & panel lifecycle contract cases verified.');
+}
+
+/** MergePilot client regressions: real hook instances, HTTP barriers and public UI. */
+async function runClientReviewRegressions(page, api) {
+  const bytes = Array.from(syntheticPng({ width: 100, height: 100 }));
+  const results = [];
+  const clearNumber = value => ({ document_number: { value, state: 'clear', alternatives: [], reason: 'none' } });
+  const state = () => page.evaluate(() => window.__lifecycleControls.getState());
+  const panel = page.getByTestId('lifecycle-mount-container');
+  const retry = () => panel.getByRole('button', { name: /Retry extraction|إعادة الاستخراج/ });
+  const select = (name, second = false) => page.evaluate(({ bytes, name, second }) => {
+    const controls = second ? window.__secondLifecycleControls : window.__lifecycleControls;
+    controls.setFile(new File([new Uint8Array(bytes)], name, { type: 'image/png' }));
+  }, { bytes, name, second });
+  const terminal = () => page.waitForFunction(() =>
+    !['idle', 'preparing', 'extracting'].includes(window.__lifecycleControls.getState().phase),
+  null, { timeout: 5000 });
+  const run = async (name, body) => {
+    console.log(`[CLIENT REVIEW RUN] ${name}`);
+    await api.reset();
+    try {
+      await body();
+      results.push({ name, outcome: 'PASS' });
+      console.log(`[CLIENT REVIEW PASS] ${name}`);
+    } catch (error) {
+      const outcome = error.code === 'ERR_ASSERTION' ? 'RED' : 'HARNESS_ERROR';
+      results.push({ name, outcome, error: error.message });
+      console.error(`[CLIENT REVIEW ${outcome}] ${name}: ${error.stack}`);
+    } finally {
+      // Cancel mounted hooks before releasing any route left by a failed assertion.
+      await remountFixture(page);
+      await api.settleAllHeld();
+    }
+  };
+
+  await run('independent hooks both succeed with reverse-order HTTP responses', async () => {
+    await remountFixture(page, { secondForm: true });
+    await page.waitForFunction(() => Boolean(window.__secondLifecycleControls));
+    await select('independent-a.png');
+    const a = await api.waitForRequest(0);
+    await select('independent-b.png', true);
+    const b = await api.waitForRequest(1);
+    assert.notEqual(a.payload.requestId, b.payload.requestId);
+    assert.notEqual(a.payload.scope, b.payload.scope);
+    await b.fulfillSuccess(clearNumber('INDEPENDENT-B'));
+    await page.waitForFunction(() => window.__secondLifecycleControls.getState().phase === 'review');
+    await a.fulfillSuccess(clearNumber('INDEPENDENT-A'));
+    await terminal();
+    const observed = await page.evaluate(() => ({
+      a: window.__lifecycleControls.getState().formValues.document_number,
+      b: window.__secondLifecycleControls.getState().formValues.document_number,
+      aPhase: window.__lifecycleControls.getState().phase,
+    }));
+    console.log('[CLIENT REVIEW EVIDENCE] independent hooks', JSON.stringify(observed));
+    assert.deepEqual(observed, { a: 'INDEPENDENT-A', b: 'INDEPENDENT-B', aPhase: 'review' });
+  });
+
+  await run('readiness false before selection blocks POST, restoration allows the same file', async () => {
+    await remountFixture(page, { initialReady: false });
+    await select('initially-not-ready.png');
+    await page.waitForFunction(() => window.__lifecycleControls.getState().selectedFileName === 'initially-not-ready.png');
+    await boundedGate(page.evaluate(() => window.__extractionProbe.drain()), 'client task/decode settlement');
+    assert.equal(api.postCalls, 0);
+    await page.evaluate(() => window.__lifecycleControls.setReady(true));
+    const request = await api.waitForRequest(0);
+    await request.fulfillSuccess(clearNumber('READY-CONTROL'));
+    await terminal();
+    assert.equal((await state()).formValues.document_number, 'READY-CONTROL');
+    await boundedGate(page.evaluate(() => window.__extractionProbe.drain()), 'client task/decode settlement');
+    assert.equal(api.postCalls, 1);
+  });
+
+  await run('readiness loss settles held attempt and permits deliberate same-file retry', async () => {
+    await remountFixture(page);
+    await select('readiness-loss.png');
+    const obsolete = await api.waitForRequest(0);
+    const abortedWhileHeldPromise = page.waitForEvent('requestfailed', {
+      predicate: request => request === obsolete.route.request(), timeout: 1500,
+    }).then(() => true, error => {
+      if (error.name !== 'TimeoutError') throw error;
+      return false;
+    });
+    await page.evaluate(() => {
+      window.__lifecycleControls.manual('document_number');
+      window.__lifecycleControls.updateFieldValue('document_number', 'MANUAL-READY');
+      window.__lifecycleControls.setReady(false);
+    });
+    await page.waitForFunction(() => window.__lifecycleControls.getState().ready === false);
+    // Bounded observable cancellation deadline, not a sleep or a transport timeout.
+    let settledWhileHeld = true;
+    try {
+      await page.waitForFunction(() => !['preparing', 'extracting'].includes(window.__lifecycleControls.getState().phase),
+        null, { timeout: 1500 });
+    } catch (error) {
+      if (error.name !== 'TimeoutError') throw error;
+      settledWhileHeld = false;
+    }
+    const abortedWhileHeld = await abortedWhileHeldPromise;
+    await obsolete.fulfillSuccess(clearNumber('OBSOLETE-READY'));
+    await page.evaluate(() => window.__lifecycleControls.setReady(true));
+    await page.waitForFunction(() => window.__lifecycleControls.getState().ready === true);
+    await page.evaluate(() => window.__lifecycleControls.retry());
+    const fresh = await api.waitForRequest(1);
+    await fresh.fulfillSuccess(clearNumber('NEW-READY'));
+    await terminal();
+    const final = await state();
+    const observed = { settledWhileHeld, abortedWhileHeld, phase: final.phase, manual: final.formValues.document_number,
+      ministry: final.formValues.ministry_id, posts: api.postCalls, applyCount: final.applyCallCount };
+    console.log('[CLIENT REVIEW EVIDENCE] readiness', JSON.stringify(observed));
+    assert.deepEqual(observed, { settledWhileHeld: true, abortedWhileHeld: true, phase: 'review', manual: 'MANUAL-READY', ministry: 'min-moi', posts: 2, applyCount: 1 });
+  });
+
+  await run('file replacement preserves account cooldown until explicit clock expiry', async () => {
+    await remountFixture(page);
+    // Freeze Date but leave browser timers running for React and locator polling.
+    const cooldownStart = await page.evaluate(() => Date.now());
+    await page.clock.setFixedTime(cooldownStart);
+    try {
+      await select('cooldown-a.png');
+      const first = await api.waitForRequest(0);
+      await first.fulfillRateLimit(25);
+      await page.waitForFunction(() => window.__lifecycleControls.getState().phase === 'cooldown');
+      assert.equal(await retry().isDisabled(), true, 'Control: original cooldown disables Retry');
+      await page.evaluate(() => {
+        window.__lifecycleControls.manual('document_number');
+        window.__lifecycleControls.updateFieldValue('document_number', 'MANUAL-COOLDOWN');
+        window.__lifecycleControls.replace();
+      });
+      await select('cooldown-b.png');
+      await page.waitForFunction(() => !['idle', 'preparing'].includes(window.__lifecycleControls.getState().phase));
+      const during = await state();
+      const postsBeforeExpiry = api.postCalls;
+      const disabledBeforeExpiry = await retry().count() === 1 && await retry().isDisabled();
+      // If the bug sent B, settle it before advancing time; do not mask its recorded POST.
+      if (postsBeforeExpiry > 1) await api.capturedRequests[1].fulfillRateLimit(25);
+      await page.waitForFunction(() => window.__lifecycleControls.getState().phase === 'cooldown');
+      await page.clock.setFixedTime(cooldownStart + 26000);
+      await page.clock.runFor(1000);
+      await page.waitForFunction(() => window.__lifecycleControls.getState().phase === 'failed');
+      const postsAtExpiry = api.postCalls;
+      assert.equal(await retry().isEnabled(), true, 'Control: Retry enables after expiry');
+      await retry().click();
+      const after = await api.waitForRequest(postsBeforeExpiry);
+      await after.fulfillSuccess(clearNumber('NEW-AFTER-COOLDOWN'));
+      await terminal();
+      await page.evaluate(() => window.__lifecycleControls.replace());
+      await select('cooldown-c-after-expiry.png');
+      const newFile = await api.waitForRequest(postsBeforeExpiry + 1);
+      assert.notEqual(newFile.payload.requestId, after.payload.requestId, 'New file after expiry has its own request');
+      await newFile.fulfillSuccess(clearNumber('NEW-FILE-AFTER-EXPIRY'));
+      await terminal();
+      const final = await state();
+      const observed = { phaseBeforeExpiry: during.phase, postsBeforeExpiry, disabledBeforeExpiry,
+        postsAtExpiry, manual: final.formValues.document_number, phaseAfterRetry: final.phase,
+        newFileAfterExpiry: final.selectedFileName };
+      console.log('[CLIENT REVIEW EVIDENCE] replacement cooldown', JSON.stringify(observed));
+      assert.deepEqual(observed, { phaseBeforeExpiry: 'cooldown', postsBeforeExpiry: 1, disabledBeforeExpiry: true,
+        postsAtExpiry: 1, manual: 'MANUAL-COOLDOWN', phaseAfterRetry: 'review', newFileAfterExpiry: 'cooldown-c-after-expiry.png' });
+    } finally {
+      await page.clock.setSystemTime(cooldownStart + 27000);
+      await page.clock.resume();
+    }
+  });
+
+  await run('initial unconfigured status retains approved reason and manual path', async () => {
+    api.status.available = false;
+    api.status.configured.groq = false;
+    api.status.reason = 'provider_not_configured';
+    await remountFixture(page);
+    await select('unconfigured.png');
+    await terminal();
+    await page.evaluate(() => {
+      window.__lifecycleControls.manual('document_number');
+      window.__lifecycleControls.updateFieldValue('document_number', 'MANUAL-UNAVAILABLE');
+    });
+    const final = await state();
+    const text = await panel.innerText();
+    await boundedGate(page.evaluate(() => window.__extractionProbe.drain()), 'client task/decode settlement');
+    assert.equal(api.postCalls, 0);
+    assert.equal(final.formValues.document_number, 'MANUAL-UNAVAILABLE');
+    console.log('[CLIENT REVIEW EVIDENCE] unavailable', JSON.stringify({ errorCode: final.errorCode, text }));
+    assert.equal(final.errorCode, 'unconfigured');
+    assert.ok([arabicCopy, englishCopy].some(copy => text.includes(copy.errors.unconfigured)), 'Approved refusal reason is visible');
+    assert.ok([arabicCopy, englishCopy].some(copy => text.includes(copy.unavailable)), 'Approved manual-entry path is visible');
+  });
+
+  await run('availability recovery exposes deliberate UI Retry without an automatic loop', async () => {
+    api.status.available = false;
+    api.status.reason = 'provider_not_configured';
+    api.status.configured.groq = false;
+    await remountFixture(page);
+    await select('availability-recovery.png');
+    await terminal();
+    const statusCalls = api.statusCalls;
+    api.status.available = true;
+    api.status.reason = '';
+    api.status.configured.groq = true;
+    await page.evaluate(() => window.__lifecycleControls.updateFieldValue('title', 'Manual title during recovery'));
+    await boundedGate(page.evaluate(() => window.__extractionProbe.drain()), 'client task/decode settlement');
+    assert.equal(api.postCalls, 0, 'Availability recovery never auto-posts');
+    assert.equal(api.statusCalls, statusCalls, 'A render never polls status');
+    assert.equal(await retry().count(), 1, 'Unavailable panel must offer deliberate Retry');
+    await retry().click();
+    const request = await api.waitForRequest(0);
+    await request.fulfillSuccess(clearNumber('RECOVERED'));
+    await terminal();
+    assert.equal((await state()).formValues.document_number, 'RECOVERED');
+    await boundedGate(page.evaluate(() => window.__extractionProbe.drain()), 'client task/decode settlement');
+    assert.equal(api.postCalls, 1);
+  });
+
+  await run('recovered availability accepts deliberate hook retry without automatic POST', async () => {
+    api.status.available = false;
+    api.status.reason = 'unconfigured';
+    api.status.configured.groq = false;
+    await remountFixture(page);
+    await select('available-control.png');
+    await terminal();
+    await boundedGate(page.evaluate(() => window.__extractionProbe.drain()), 'client task/decode settlement');
+    assert.equal(api.postCalls, 0);
+    api.status.available = true;
+    api.status.reason = '';
+    api.status.configured.groq = true;
+    await page.evaluate(() => window.__lifecycleControls.retry());
+    const request = await api.waitForRequest(0);
+    await request.fulfillSuccess(clearNumber('AVAILABLE-CONTROL'));
+    await terminal();
+    const final = await state();
+    assert.equal(final.phase, 'review');
+    assert.equal(final.errorCode, null);
+    assert.equal(final.formValues.document_number, 'AVAILABLE-CONTROL');
+  });
+
+  const counts = results.reduce((all, result) => ({ ...all, [result.outcome]: (all[result.outcome] || 0) + 1 }), {});
+  console.log('[CLIENT REVIEW SUMMARY]', JSON.stringify({ total: results.length, ...counts }));
+  if (results.some(result => result.outcome !== 'PASS')) process.exitCode = 1;
+  return results;
 }
 
 export async function main() {
@@ -1110,6 +1379,8 @@ export async function main() {
     const page = await context.newPage();
     const egressViolations = [];
     const pageErrors = [];
+    const consoleErrors = [];
+    const expectedHttpErrors = new Set();
     const unexpectedApiRequests = [];
 
     page.setDefaultTimeout(15000);
@@ -1117,10 +1388,13 @@ export async function main() {
     // Install fake browser clock for precise timer testing (e.g. cooldown)
     await page.clock.install();
 
-    page.on('console', (msg) => {
-      if (msg.type() === 'error') {
-        console.error('[PAGE CONSOLE ERROR]', msg.text());
-      }
+    page.on('console', msg => {
+      if (msg.type() !== 'error') return;
+      const match = /^Failed to load resource: the server responded with a status of (\d{3})\b/.exec(msg.text());
+      // Negative HTTP cases deliberately render Chromium's standard resource diagnostic.
+      if (match && expectedHttpErrors.has(`${msg.location().url}|${match[1]}`)) return;
+      consoleErrors.push(msg.text());
+      console.error('[UNEXPECTED PAGE CONSOLE ERROR]', msg.text());
     });
 
     page.on('pageerror', (err) => {
@@ -1132,8 +1406,13 @@ export async function main() {
     await page.route('**/*', async (route) => {
       const req = route.request();
       const url = new URL(req.url());
+      const fulfill = route.fulfill.bind(route);
+      route.fulfill = options => {
+        if (options.status >= 400) expectedHttpErrors.add(`${url.href}|${options.status}`);
+        return fulfill(options);
+      };
 
-      if (url.hostname !== '127.0.0.1' && url.hostname !== 'localhost') {
+      if (url.origin !== origin || url.username || url.password) {
         egressViolations.push(req.url());
         console.error(`[SECURITY BLOCKED] Disallowed non-loopback egress: ${req.url()}`);
         return route.abort('blockedbyclient');
@@ -1171,6 +1450,7 @@ export async function main() {
 
         if (url.pathname === '/api/document-extraction') {
           if (req.method() === 'POST') {
+            const attemptIndex = api.postCalls++;
             const rawBody = req.postData() || '';
             if (Buffer.byteLength(rawBody, 'utf8') > 10 * 1024 * 1024) {
               return route.fulfill({
@@ -1200,11 +1480,11 @@ export async function main() {
 
             const captured = {
               id: payload.requestId,
-              index: api.postCalls++,
+              index: attemptIndex,
               payload,
               route,
               settled: false,
-              fulfillSuccess: (fieldsOverride = {}) => {
+              fulfillSuccess: async (fieldsOverride = {}) => {
                 if (captured.settled) return;
                 captured.settled = true;
                 const defaultFields = {
@@ -1225,10 +1505,9 @@ export async function main() {
                 };
                 const parseRes = resultSchema.safeParse(responseData);
                 assert.ok(parseRes.success, `Mock response must satisfy resultSchema: ${JSON.stringify(parseRes.error?.issues)}`);
-                return route.fulfill({
-                  status: 200,
-                  json: { data: responseData, error: null },
-                });
+                await route.fulfill({ status: 200, json: { data: responseData, error: null } });
+                await page.waitForFunction(id => window.__extractionProbe.reads.get(id)?.settled, payload.requestId);
+                await boundedGate(page.evaluate(() => window.__extractionProbe.drain()), 'client task/decode settlement');
               },
               fulfillRateLimit: (retryAfterSeconds = 25) => {
                 if (captured.settled) return;
@@ -1276,13 +1555,27 @@ export async function main() {
 
     await page.goto(fixtureUrl);
     await page.waitForSelector('[data-testid="lifecycle-mount-container"]', { timeout: 10000 });
+    // The counter must see malformed attempts before the mock parser rejects them.
+    const malformedStatus = await page.evaluate(async () => {
+      const response = await fetch('/api/document-extraction', { method: 'POST', body: '{' });
+      await response.text();
+      return response.status;
+    });
+    assert.equal(malformedStatus, 400);
+    assert.equal(api.postCalls, 1, 'Malformed extraction POST is still an HTTP attempt');
+    console.log('[HARNESS CONTROL] Malformed extraction POST counted before parsing');
+    await api.reset();
+
 
     try {
       await runLifecycleTests(page, api);
+      const reviewResults = await runClientReviewRegressions(page, api);
       assert.deepEqual(egressViolations, [], 'Lifecycle must not attempt external requests');
+      assert.deepEqual(consoleErrors, [], 'Lifecycle must not emit unexpected console errors');
       assert.deepEqual(pageErrors, [], 'Lifecycle must not produce uncaught page errors');
       assert.deepEqual(unexpectedApiRequests, [], 'Lifecycle must not invoke unexpected APIs');
-      console.log('[BROWSER SUITE] Lifecycle group run completed successfully.');
+      console.log(`[BROWSER SUITE] Lifecycle baseline 14/14; client review exit ${process.exitCode || 0}.`);
+      return { totalCount: 14 + reviewResults.length };
     } finally {
       await api.settleAllHeld();
     }

@@ -29,8 +29,9 @@ What it is **not**:
   measured accuracy and any separate OCR engine remain future work.
 * it does not deliver the deferred work of this page. The reviewed
   suggestion flow of the original request — read the document, propose the
-  fields, let the administrator review them before anything is persisted — is
-  implemented. What is **not** implemented is:
+  fields, let the administrator review them before the final document save — is
+  implemented. Clear candidates may automatically fill untouched fields and
+  enter the metadata draft before that review. What is **not** implemented is:
   * any measured accuracy on real employee or company documents;
   * an external evaluation of the provider answers (no accuracy, no
     acceptance-rate, no OCR benchmark has been run);

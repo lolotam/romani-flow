@@ -52,6 +52,24 @@ function stripControlCharacters(value: string): string {
 }
 
 /**
+ * Reports whether a raw value carries a character that must never be shown.
+ *
+ * A control character is invisible in a text field, so a value that carries
+ * one cannot be read, checked or copied by the administrator. The check runs
+ * on the raw value of a page, before the trimming: a leading newline or a
+ * trailing tab is erased by the trimming and would hide the evidence of the
+ * control character completely. The set is the one the alternatives are
+ * stripped of, so a refused value and its sanitized alternative agree about
+ * what a control character is.
+ */
+function carriesForbiddenCharacter(value: string): boolean {
+  return [...value].some(character => {
+    const code = character.codePointAt(0) ?? 0;
+    return code <= 0x1f || code === 0x7f;
+  });
+}
+
+/**
  * Resolves a label to an existing catalog entry.
  *
  * The match is exact after normalization, in English or in Arabic, and it
@@ -144,12 +162,23 @@ export function normalizePages(
   const fields: ExtractionResult['fields'] = {
     title: decide(
       ordered.map(page => page.title),
-      value => (value.length <= MAX_TITLE_LENGTH ? value : null),
+      (value, index) => {
+        // A control character is invisible in a text field, so such a value is
+        // never applied automatically. The raw value is examined, because the
+        // trimming would erase the evidence of a leading or trailing control.
+        if (carriesForbiddenCharacter(ordered[index].title.value ?? '')) return null;
+        return value.length <= MAX_TITLE_LENGTH ? value : null;
+      },
     ),
-    document_number: decide(ordered.map(page => page.document_number), value => {
-      const result = documentNumber.safeParse(value);
-      return result.success ? result.data : null;
-    }),
+    document_number: decide(
+      ordered.map(page => page.document_number),
+      (value, index) => {
+        // The number is free text as well, so the same rule applies to it.
+        if (carriesForbiddenCharacter(ordered[index].document_number.value ?? '')) return null;
+        const result = documentNumber.safeParse(value);
+        return result.success ? result.data : null;
+      },
+    ),
     document_type_id: decide(
       ordered.map(page => page.document_type_label),
       value => matchCatalog(value, catalogs.types),

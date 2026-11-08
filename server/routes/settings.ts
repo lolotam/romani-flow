@@ -145,6 +145,32 @@ const EDITABLE: Record<string, Rule> = {
 };
 
 /**
+ * The preferences of the extraction a validated selection is bound to.
+ *
+ * The enabled flag, the provider and the model are the three settings that
+ * decide what an extraction would do. A validation proves them against the
+ * live provider, so the values the validation saw have to be the values that
+ * are written.
+ */
+const EXTRACTION_PREFERENCES = [
+  'ai_extraction.enabled',
+  'ai_extraction.provider',
+  'ai_extraction.model',
+] as const;
+
+/**
+ * Reads the persisted preferences of the extraction.
+ *
+ * The values are read as they are stored and compared by value, never by the
+ * moment of the write: a request that repeats the current selection writes
+ * the same values and is therefore not a change, while a request that meets
+ * different values was validated against another selection.
+ */
+function extractionPreferences(settings: Record<string, SettingValue>): string {
+  return JSON.stringify(EXTRACTION_PREFERENCES.map(key => settings[key] ?? null));
+}
+
+/**
  * Checks the effective extraction selection before anything is written.
  *
  * The combination of the current settings and the requested ones has to be
@@ -275,8 +301,13 @@ export function createSettingsRouter(
 
       // The effective combination is checked before the first write, so a
       // rejected request changes neither a setting nor a notification.
-      const effective = { ...readAllSettings(db), ...accepted };
+      const persisted = readAllSettings(db);
+      const effective = { ...persisted, ...accepted };
       const changesExtraction = Object.keys(accepted).some(key => key.startsWith('ai_extraction.'));
+      // The persisted preferences are observed before the validation and the
+      // validated selection is bound to exactly these values. A write that
+      // finds different values was proved against another selection.
+      const boundPreferences = extractionPreferences(persisted);
       const validation = changesExtraction
         ? await validateExtractionSelection(config, effective, extraction, req.user!.id)
         : { problem: null, authority: null };
@@ -312,17 +343,28 @@ export function createSettingsRouter(
         }
       }
 
-      // The same authority is proved again at the real write boundary. The
-      // assertion runs inside the coordinator of the reminders, after every
-      // await and directly before the settings are applied, so a role, a
-      // context or an approval that changed while the write was queued or
-      // while the enable check was pending refuses the whole request before
-      // a single setting, notification or job changes.
-      const beforeWrite = authority
+      // The same authority is proved again at the real write boundary, and the
+      // persisted preferences are read again with it. The assertion runs inside
+      // the coordinator of the reminders, after every await and directly
+      // before the settings are applied, so a role, a context or an approval
+      // that changed while the write was queued or while the enable check was
+      // pending refuses the whole request before a single setting, notification
+      // or job changes.
+      //
+      // The preferences are compared by value, so a queued request that
+      // repeats the current selection still succeeds, and a request that was
+      // validated against another selection — including a partial write that
+      // changed only the enabled flag — is refused as a whole.
+      const beforeWrite = changesExtraction
         ? () => {
-          const refused = extraction.assertCandidateAuthority(authority);
-          if (refused) throw new SettingsWriteRefused(refused);
-        }
+            const changed = extractionPreferences(readAllSettings(db)) !== boundPreferences;
+            const refused = changed
+              ? 'The extraction selection changed while it was validated.'
+              : authority
+                ? extraction.assertCandidateAuthority(authority)
+                : null;
+            if (refused) throw new SettingsWriteRefused(refused);
+          }
         : undefined;
 
       try {

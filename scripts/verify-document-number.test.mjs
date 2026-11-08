@@ -5,6 +5,7 @@ import { reminderApi } from './fixtures/whatsapp-api.mjs';
 import { readSubmission, rememberSubmission } from '../server/repositories/formDefaults.ts';
 import { newDocumentDefaults, employeeDocumentDraft } from '../src/lib/documentFormDrafts.ts';
 import { createDocumentSchema } from '../src/components/documents/documentFormSchema.ts';
+import { saveDocument } from '../src/components/documents/saveDocument.ts';
 
 test('document number preserves representation and rejects coercion', () => {
   for (const value of ['000123', 'AB-001/٧', '٠٠١٢']) assert.equal(documentNumber.parse(` ${value} `), value);
@@ -13,6 +14,49 @@ test('document number preserves representation and rejects coercion', () => {
   assert.equal(documentNumber.safeParse('x'.repeat(129)).success, false);
   assert.equal(documentNumber.parse('x'.repeat(128)).length, 128);
 });
+
+// MergePilot: the actual save helper must preserve PATCH omission semantics.
+// Forward its real fetch through the existing authenticated loopback API fixture,
+// capturing the serialized wire body and checking the persisted server value.
+for (const scenario of [
+  { name: 'omitted', fields: {}, expected: 'KEEP-001', hasNumber: false },
+  { name: 'explicit null', fields: { document_number: null }, expected: null, hasNumber: true },
+  { name: 'explicit empty', fields: { document_number: '' }, expected: null, hasNumber: true },
+  { name: 'leading zeroes', fields: { document_number: '000042' }, expected: '000042', hasNumber: true },
+]) {
+  test(`saveDocument existing-document ${scenario.name} preserves HTTP PATCH semantics`, async t => reminderApi(async f => {
+    const created = await f.request('/api/documents', {
+      method: 'POST',
+      body: { title: 'Original', employee_id: f.employee.id, document_type_id: f.type.id,
+        expiry_date: '2028-12-31', document_number: 'KEEP-001' },
+    });
+    assert.equal(created.status, 201);
+    const id = created.json.data[0].id;
+    const originalFetch = globalThis.fetch;
+    const captured = [];
+    t.mock.method(globalThis, 'fetch', async (url, options = {}) => {
+      if (typeof url !== 'string' || !url.startsWith('/api/')) return originalFetch(url, options);
+      assert.equal(url, `/api/documents/${id}`);
+      assert.equal(options.method, 'PATCH');
+      const body = JSON.parse(options.body);
+      captured.push(body);
+      const response = await f.request(url, { method: options.method, body });
+      return new Response(JSON.stringify(response.json), {
+        status: response.status, headers: { 'Content-Type': 'application/json' },
+      });
+    });
+    await saveDocument({
+      title: 'Updated through real helper', beneficiary_type: 'employee', employee_id: f.employee.id,
+      document_type_id: f.type.id, expiry_date: new Date(2028, 11, 31), ...scenario.fields,
+    }, id, undefined, key => key);
+    assert.equal(captured.length, 1);
+    const persisted = f.db.prepare('SELECT title, document_number FROM documents WHERE id = ?').get(id);
+    assert.equal(persisted.title, 'Updated through real helper', 'Positive control: actual PATCH reached storage');
+    assert.deepEqual({ hasNumber: Object.hasOwn(captured[0], 'document_number'), number: persisted.document_number },
+      { hasNumber: scenario.hasNumber, number: scenario.expected });
+    if (scenario.hasNumber) assert.equal(captured[0].document_number, scenario.expected);
+  }));
+}
 
 test('POST /api/documents trims whitespace, preserves digits/zeros, allows duplicates, and rejects invalid inputs', () => reminderApi(async f => {
   const baseDoc = {

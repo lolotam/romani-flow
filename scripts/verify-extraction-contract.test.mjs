@@ -277,3 +277,26 @@ test('contract regression: describeExtractionStatus maxSourceBytes is min(20MiB,
     db.close();
   }
 });
+
+// MergePilot 4504619722 / 4504621965 / 4504622314: invisible provider text is review-only.
+for (const field of ['title', 'document_number']) {
+  test(`normalizePages keeps normal ${field} clear but sends control-bearing values to review`, async t => {
+    const normal = field === 'title' ? 'Civil ID Card' : 'AB-12345';
+    const control = normalizePages([makeRawPage(1, { [field]: { value: `  ${normal}  `, certainty: 'clear' } })], 1, SAMPLE_CATALOGS)[field];
+    assert.equal(control.state, 'clear');
+    assert.equal(control.value, normal);
+    const invalidValues = ['\u0000', '\n', '\t', '\u007f'].map(character => [
+      `embedded ${JSON.stringify(character)}`, normal.slice(0, 2) + character + normal.slice(2),
+    ]);
+    // Detect forbidden controls before trim can erase evidence of their presence.
+    invalidValues.push(['leading newline', '\n' + normal], ['trailing tab', normal + '\t']);
+    for (const [label, raw] of invalidValues) {
+      await t.test(label, () => {
+        const actual = normalizePages([makeRawPage(1, { [field]: { value: raw, certainty: 'clear' } })], 1, SAMPLE_CATALOGS)[field];
+        assert.equal(actual.state, 'review');
+        assert.equal(actual.value, null);
+        assert.ok(actual.alternatives.every(value => !/[\u0000-\u001f\u007f]/.test(value)));
+      });
+    }
+  });
+}

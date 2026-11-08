@@ -46,7 +46,8 @@ export function DocumentExtractionPanel({ state, disabled }: DocumentExtractionP
   const busy = phase === 'preparing' || phase === 'extracting';
   const showCandidates = phase === 'review' && fields !== null;
   const failure = phase === 'failed' || phase === 'cooldown';
-  const refusal = phase === 'unavailable' && errorCode !== null;
+  const unavailable = phase === 'unavailable';
+  const refusal = unavailable && errorCode !== null;
 
   return (
     <div className="min-w-0 space-y-2">
@@ -90,7 +91,7 @@ export function DocumentExtractionPanel({ state, disabled }: DocumentExtractionP
               {t('extraction.cancel')}
             </Button>
           )}
-          {failure && (
+          {(failure || unavailable) && (
             <Button
               type="button"
               variant="outline"

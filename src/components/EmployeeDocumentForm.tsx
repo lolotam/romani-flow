@@ -142,10 +142,12 @@ function EmployeeDocumentFormContent({
     const restored = employeeDocumentDraft(saved, selectedFile?.name);
     if (saved === null) generatedTitle.current = selectedFile ? restored.title : null;
     setFormData(restored);
-    // The draft of the form is usable now, so an extraction may start.
-    setDraftReady(true);
   }, isOpen);
   draftSessionRef.current = draft.session;
+  // The draft is usable once the session loaded it, even without a restore.
+  useEffect(() => {
+    if (['saved', 'saving'].includes(draft.status)) setDraftReady(true);
+  }, [draft.status]);
   // The form starts empty once per open, before the draft of the scope is
   // restored, and the options that arrive later never erase the form again.
   useEffect(() => { if (isOpen) { dirty.current = false; allowLastSubmission.current = true; setFormData(emptyForm); } }, [isOpen, employeeId, setFormData]);
@@ -207,10 +209,13 @@ function EmployeeDocumentFormContent({
     if (submitting.current) return;
     submitting.current = true; setIsSubmitting(true);
     try {
-      // The replacement happens before the upload is abandoned, so the machine
-      // provenance of the old file is dropped in the same tick.
-      extractionRef.current?.replace();
+      // The attempt ends right away, so a late answer can never write into the
+      // form. The provenance of the old file is dropped only after the server
+      // confirmed the removal of the attachment, so a failed cleanup keeps the
+      // old attachment and its machine values together.
+      extractionRef.current?.invalidate();
       const cleanupPending = await abandonUpload(draft.reference);
+      extractionRef.current?.replace();
       setSelectedFile(null);
       if (cleanupPending) toast.warning(t('documents.form.fileCleanupPending'));
     } catch (error) { toast.error(error instanceof Error ? error.message : t('documents.employeeDocumentForm.saveError')); }
@@ -223,11 +228,8 @@ function EmployeeDocumentFormContent({
     if (!selectedFile) { toast.error(t('documents.employeeDocumentForm.requiredFieldsError')); return; }
     if (selectedFile.size > 20 * 1024 * 1024) { toast.error(t('documents.messages.fileSizeError')); return; }
     if (!['application/pdf', 'image/jpeg', 'image/png'].includes(selectedFile.type)) { toast.error(t('documents.messages.fileTypeError')); return; }
-    
-    if (!formData.title || !formData.document_type_id) {
-      toast.error(t('documents.employeeDocumentForm.requiredFieldsError'));
-      return;
-    }
+
+    if (!formData.title || !formData.document_type_id) { toast.error(t('documents.employeeDocumentForm.requiredFieldsError')); return; }
 
     if (formData.title.length > 120) { toast.error(t('documents.form.validation.titleMaxLength')); return; }
     if (formData.notes.length > 5000) { toast.error(t('documents.form.validation.notesTooLong')); return; }
@@ -240,8 +242,7 @@ function EmployeeDocumentFormContent({
       toast.error(t('documents.form.validation.invalidDateRange'));
       return;
     }
-    submitting.current = true;
-    setIsSubmitting(true);
+    submitting.current = true; setIsSubmitting(true);
 
     try {
       // The extraction stops before the save transaction starts, so a late
@@ -279,10 +280,7 @@ function EmployeeDocumentFormContent({
       draft.session.current?.resume(error);
       console.error('Error saving document:', error);
       toast.error(error instanceof Error ? error.message : t('documents.employeeDocumentForm.saveError'));
-    } finally {
-      submitting.current = false;
-      setIsSubmitting(false);
-    }
+    } finally { submitting.current = false; setIsSubmitting(false); }
   };
 
   const handleClose = async () => {

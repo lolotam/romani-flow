@@ -20,6 +20,51 @@ import type { DocumentFormProps } from '../../src/components/documents/documentF
 import { useDocumentDraft } from '../../src/hooks/useDocumentDraft';
 import { DocumentDraftSession, type DraftReference, type DraftStatus, type DraftValues } from '../../src/lib/documentDraftSession';
 
+// Tracks actual extraction HTTP/body settlement without changing hook or form behavior.
+const nativeFetch = window.fetch.bind(window);
+const extractionReads = new Map<string, { settled: boolean; outcome: string }>();
+const bitmapWork = new Set<Promise<ImageBitmap>>();
+const nativeBitmap = window.createImageBitmap.bind(window);
+window.createImageBitmap = ((...args: Parameters<typeof createImageBitmap>) => {
+  const work = nativeBitmap(...args);
+  bitmapWork.add(work);
+  void work.finally(() => bitmapWork.delete(work)).catch(() => {});
+  return work;
+}) as typeof createImageBitmap;
+const taskTurn = () => new Promise<void>(resolve => {
+  const channel = new MessageChannel();
+  channel.port1.onmessage = () => { channel.port1.close(); channel.port2.close(); resolve(); };
+  channel.port2.postMessage(null);
+});
+window.__extractionProbe = {
+  reads: extractionReads,
+  drain: async () => {
+    // React passive effects and continuations use browser tasks; native image decode is awaited too.
+    for (let i = 0; i < 3; i++) { await taskTurn(); await Promise.allSettled([...bitmapWork]); }
+  },
+};
+window.fetch = async (input, init) => {
+  const url = new URL(typeof input === 'string' ? input : input instanceof URL ? input.href : input.url, location.href);
+  if (url.pathname !== '/api/document-extraction' || init?.method !== 'POST') return nativeFetch(input, init);
+  let id = `malformed-${extractionReads.size}`;
+  try { id = JSON.parse(String(init.body)).requestId ?? id; } catch { /* Observe malformed POSTs too; never prevent transport. */ }
+  const record = { settled: false, outcome: 'pending' };
+  extractionReads.set(id, record);
+  try {
+    const response = await nativeFetch(input, init);
+    const text = response.text.bind(response);
+    response.text = async () => {
+      try { return await text(); }
+      finally { record.settled = true; record.outcome = 'response'; }
+    };
+    return response;
+  } catch (error) {
+    record.settled = true;
+    record.outcome = init.signal?.aborted ? 'abort' : 'error';
+    throw error;
+  }
+};
+
 const DEFAULT_DOCUMENT_TYPES = [
   { id: 'type-civil-id', name: 'Civil ID', name_ar: 'البطاقة المدنية' },
   { id: 'type-passport', name: 'Passport', name_ar: 'جواز السفر' },
@@ -90,6 +135,7 @@ export interface FormsControls {
   mountDraftProbe: (opts: DraftProbeMountOptions) => number;
   unmount: () => number;
   setFile: (file: File | null) => void;
+  refreshBeneficiaries: (empty: boolean) => void;
   setAccount: (accountId: string) => number;
   getEventLog: () => EventLogEntry[];
   clearEventLog: () => void;
@@ -108,6 +154,10 @@ export interface FormsControls {
 
 declare global {
   interface Window {
+    __extractionProbe: {
+      reads: Map<string, { settled: boolean; outcome: string }>;
+      drain: () => Promise<void>;
+    };
     __formsControls?: FormsControls;
     __draftProbeSession?: DraftProbeSessionHandle | null;
   }
@@ -423,6 +473,7 @@ export function ExtractionFormsFixture() {
         setMountEpoch(next);
         return next;
       },
+      refreshBeneficiaries: empty => setGeneralProps(prev => ({ ...prev, companies: empty ? [] : DEFAULT_COMPANIES, employees: empty ? [] : DEFAULT_EMPLOYEES })),
       setFile: (file: File | null) => {
         if (mode === 'general') {
           setGeneralProps((prev) => ({

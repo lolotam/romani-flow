@@ -58,8 +58,9 @@ accounts and scopes remain independent. A waiting session that is unmounted
 does not send a late GET. Real competing-writer conflicts still require explicit
 recovery; there is no blind conflict retry or overwrite.
 
-The optional extraction adds nothing to the draft except metadata that the
-administrator applied. The suggestion panel of a document form shows the
+The optional extraction adds only form metadata to the draft, including clear
+candidates automatically applied to untouched fields before administrator
+review. Review precedes the final document save. The suggestion panel shows the
 candidates of one attempt as plain text, with the reason a candidate was not
 applied. A candidate the server marked `clear` may fill an empty field that no
 administrator touched since the attempt started; the title always needs an

@@ -160,10 +160,15 @@ function DocumentFormContent({
       ...(preselectedEmployeeId ? { beneficiary_type: 'employee' as const, employee_id: preselectedEmployeeId, company_id: '' } : {}),
       ...(preselectedCompanyId && !preselectedEmployeeId ? { beneficiary_type: 'company' as const, company_id: preselectedCompanyId, employee_id: '' } : {}) } : empty;
     form.reset(values as DocumentFormData);
-    // The draft of the form is usable now, so an extraction may start.
-    setDraftReady(true);
   });
   draftSessionRef.current = draft.session;
+  // The draft of the form is usable as soon as the session loaded it. The
+  // restore above is rightly skipped when the administrator edited the form
+  // before the load arrived, so the readiness of the draft is read from the
+  // status of the session and not from the restore alone.
+  React.useEffect(() => {
+    if (['saved', 'saving'].includes(draft.status)) setDraftReady(true);
+  }, [draft.status]);
   // A stored document owns every one of its fields, and the filename title of a
   // new document is never a machine value.
   React.useEffect(() => {
@@ -201,10 +206,13 @@ function DocumentFormContent({
     if (submitting.current) return;
     submitting.current = true; setIsSubmitting(true);
     try {
-      // The replacement happens before the upload is abandoned, so the machine
-      // provenance of the old file is dropped in the same tick.
-      extractionRef.current?.replace();
+      // The attempt ends right away, so a late answer can never write into the
+      // form. The provenance of the old file is dropped only after the server
+      // confirmed the removal of the attachment, so a failed cleanup keeps the
+      // old attachment and its machine values together.
+      extractionRef.current?.invalidate();
       const cleanupPending = await abandonUpload(draft.reference);
+      extractionRef.current?.replace();
       setSelectedFile(null);
       if (cleanupPending) toast.warning(t('documents.form.fileCleanupPending'));
     } catch (error) { toast.error(error instanceof Error ? error.message : t('documents.messages.saveError')); }

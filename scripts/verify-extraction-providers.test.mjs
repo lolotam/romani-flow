@@ -828,3 +828,66 @@ test('extractBatch pins endpoint in request body while documenting endpoint iden
     max_price: { prompt: 0, completion: 0, image: 0, request: 0 },
   });
 });
+
+// PR16: bounded provider JSON must be rejected before per-page Zod traversal.
+const providerGuardCases = [
+  ['top-level null', null, true],
+  ['top-level array', [], true],
+  ['pages non-array', { pages: { 0: makeRawPage(1) } }, true],
+  ['pages empty', { pages: [] }, true],
+  ['11 pages', { pages: Array.from({ length: 11 }, (_, i) => makeRawPage(i + 1)) }, true],
+  ['1000 null pages', { pages: Array(1000).fill(null) }, true],
+  ['count mismatch', { pages: [makeRawPage(1), makeRawPage(2)] }, true],
+  ['unknown batch key', { pages: [makeRawPage(1)], unexpected: 'raw-payload-marker' }, false],
+  ['unknown page key', { pages: [{ ...makeRawPage(1), unexpected: 'raw-payload-marker' }] }, false],
+  ['wrong page ID', { pages: [makeRawPage(2)] }, false],
+  ['invalid bounded page', { pages: [null] }, false],
+];
+for (const [name, payload, guarded] of providerGuardCases) {
+  test(`PR16 provider pre-Zod: ${name}`, { timeout: 5000 }, async () => {
+    const { rawBatch } = await import('../server/contracts/documentExtraction.ts');
+    const original = rawBatch.safeParse;
+    let parseCalls = 0;
+    rawBatch.safeParse = function (...args) {
+      parseCalls++;
+      return original.apply(this, args);
+    };
+    const selection = { provider: 'groq', model: MOCK_GROQ_MODEL_ID, endpoint: MOCK_GROQ_ENDPOINT, maxImages: 3, key: 'synthetic-test-key' };
+    const images = count => Array.from({ length: count }, (_, i) => ({ page: i + 1, mime: 'image/png', base64: VALID_PNG_BASE64 }));
+    let responsePayload;
+    let calls = 0;
+    const transport = async () => {
+      calls++;
+      const content = JSON.stringify(responsePayload);
+      const envelope = JSON.stringify({ model: MOCK_GROQ_MODEL_ID, choices: [{ message: { content }, finish_reason: 'stop' }] });
+      assert.ok(Buffer.byteLength(content) < 16 * 1024, 'Negative must reach shape guard, not content limit');
+      assert.ok(Buffer.byteLength(envelope) < 64 * 1024, 'Negative must reach shape guard, not envelope limit');
+      return new Response(envelope, { headers: { 'content-type': 'application/json' } });
+    };
+    const run = batch => extractBatch(selection, batch, AbortSignal.timeout(2000), transport);
+    try {
+      responsePayload = { pages: Array.from({ length: 3 }, (_, i) => makeRawPage(i + 1)) };
+      const valid = await run(images(3));
+      assert.deepEqual(valid.map(page => page.page), [1,2,3]);
+      assert.equal(parseCalls, 1, 'Valid maximum-size batch still uses the strict schema');
+      parseCalls = 0;
+      calls = 0;
+      responsePayload = payload;
+      await assert.rejects(() => run(images(1)), err => {
+        assert.equal(err.code, 'provider_malformed_response');
+        assert.doesNotMatch(err.message, /raw-payload-marker|issues|base64/);
+        return true;
+      });
+      const rejectedParseCalls = parseCalls;
+      assert.equal(calls, 1, 'Refusal must not retry or fall back');
+      responsePayload = { pages: [makeRawPage(1)] };
+      parseCalls = 0;
+      assert.equal((await run(images(1)))[0].page, 1, 'Next valid batch succeeds');
+      assert.equal(parseCalls, 1);
+      assert.equal(rejectedParseCalls, guarded ? 0 : 1,
+        guarded ? 'Shape/count refusal must precede rawBatch.safeParse' : 'Bounded input must still receive strict schema / exact page-ID validation');
+    } finally {
+      rawBatch.safeParse = original;
+    }
+  });
+}
