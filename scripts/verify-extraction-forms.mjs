@@ -2176,9 +2176,19 @@ async function runFormsTests(page, api, draftDb, draftsPort) {
     };
     await page.waitForFunction(discardIsUsable, null, { timeout: 15000 });
 
+    // The discard is waited for by its own effect and not by the state of the
+    // control, which is usable again before the discard has finished.
+    const deletion = page.waitForResponse(response =>
+      response.request().method() === 'DELETE' && response.url().includes('/api/document-drafts/'), { timeout: 15000 });
     await page.getByRole('button', { name: /تجاهل المسودة|Discard draft/ }).click();
-    // The discard settles back into the saved state.
-    await page.waitForFunction(discardIsUsable, null, { timeout: 15000 });
+    const deleted = await deletion;
+    assert.equal(deleted.status(), 200, 'The discard must be answered by the server');
+    const discardedDraft = api.getDraft('edit:doc-edit-2');
+    assert.equal(discardedDraft?.values ?? null, null, 'The discard must remove the draft values');
+    assert.ok(
+      api.draftRequestsLog.some((entry) => entry.method === 'DELETE' && entry.scope === 'edit:doc-edit-2'),
+      'The discard must really reach the draft store',
+    );
 
     // A new attachment chosen through the real picker starts an attempt that
     // proposes the stored fields.
@@ -2199,6 +2209,28 @@ async function runFormsTests(page, api, draftDb, draftsPort) {
     assert.equal(await number.inputValue(), '', 'A stored document number must stay protected after a discarded draft');
     assert.ok(selects.includes('min-moi'), 'The stored ministry must stay untouched after a discarded draft');
     assert.equal(await form.locator('input[name="title"]').inputValue(), 'Civil ID Card Edit', 'The stored title must not change');
+
+    // Positive control: the very same proposal does fill the number of a new
+    // document, so the refusal above is the protection and not an inapplicable
+    // proposal.
+    api.seedDraft('new', null);
+    const controlEpoch = await page.evaluate(({ bytes }) => window.__formsControls.mountGeneral({
+      uploadedFile: new File([new Uint8Array(bytes)], 'new-document.png', { type: 'image/png' }),
+    }), { bytes: Array.from(validPng) });
+    await waitForFormReady(page, controlEpoch);
+    const controlRequest = await api.waitForRequest(1);
+    await controlRequest.fulfillSuccess();
+    await page.waitForFunction(
+      () => document.querySelector('input[name="document_number"]')?.value === '290010112345',
+      null,
+      { timeout: 15000 },
+    );
+    console.log('[DISCARD PROTECTION CONTROL]', JSON.stringify({
+      number: await page.locator('input[name="document_number"]').inputValue(),
+    }));
+    // The form is unmounted, so no draft request of this case is still in
+    // flight when the suite tears its servers down.
+    await page.evaluate(() => window.__formsControls.unmount());
   });
 
   return {
