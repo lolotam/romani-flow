@@ -300,7 +300,12 @@ function DocumentFormContent({
               extractionRef.current?.invalidate();
               const session = draft.session.current;
               if (!session) return;
-              void session.discard().then(() => { extractionRef.current?.reset(); }).catch(() => toast.error(t('documents.messages.saveError')));
+              void session.discard().then(() => {
+                extractionRef.current?.reset();
+                // The reset clears the protected fields, so a stored document
+                // has to own its fields again for the rest of the form session.
+                extractionRef.current?.protect(editingDocument ? [...extractionFieldNames] : ['title']);
+              }).catch(() => toast.error(t('documents.messages.saveError')));
             }} />
             {(form.watch('title')?.length ?? 0) > 120 && <p role="alert" className="text-destructive">{t('documents.form.validation.titleMaxLength')}</p>}
             {(form.watch('notes')?.length ?? 0) > 5000 && <p role="alert" className="text-destructive">{t('documents.form.validation.notesTooLong')}</p>}

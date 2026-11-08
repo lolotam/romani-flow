@@ -2137,6 +2137,63 @@ async function runFormsTests(page, api, draftDb, draftsPort) {
     }
   }
 
+  // CodeRabbit review 5817854348: a stored document keeps owning its fields after a
+  // discarded draft. The discard clears the protected fields, so the form has to
+  // protect them again. Without that, a later extraction attempt could fill the
+  // empty stored fields of the document that is being edited.
+  await testCase('General: A discarded draft keeps the stored document fields protected', true, async () => {
+    const epoch = await page.evaluate(() => window.__formsControls.mountGeneral({
+      editingDocument: {
+        id: 'doc-edit-2',
+        title: 'Civil ID Card Edit',
+        document_number: '',
+        ministry_id: 'min-moi',
+        document_type_id: 'type-civil-id',
+        company_id: 'comp-1',
+        employee_id: null,
+        file_name: 'civil-id.png',
+        status: 'valid',
+        issue_date: '2024-01-15',
+        expiry_date: '2026-01-15',
+        notes: '',
+      },
+    }));
+    await waitForFormReady(page, epoch);
+    const form = page.locator('form');
+
+    // The draft settles as saved, so the discard control becomes usable.
+    const discardIsUsable = () => {
+      const button = [...document.querySelectorAll('button')]
+        .find((candidate) => /تجاهل المسودة|Discard draft/.test(candidate.textContent ?? ''));
+      return Boolean(button && !button.disabled);
+    };
+    await page.waitForFunction(discardIsUsable, null, { timeout: 15000 });
+
+    await page.getByRole('button', { name: /تجاهل المسودة|Discard draft/ }).click();
+    // The discard settles back into the saved state.
+    await page.waitForFunction(discardIsUsable, null, { timeout: 15000 });
+
+    // A new attachment chosen through the real picker starts an attempt that
+    // proposes the stored fields.
+    await page.locator('input[type="file"]').setInputFiles({
+      name: 'new-attachment.png',
+      mimeType: 'image/png',
+      buffer: Buffer.from(validPng),
+    });
+    const request = await api.waitForRequest(0);
+    await request.fulfillSuccess();
+
+    // Positive control: the machine really proposed the stored document number.
+    assert.equal(request.responseFields.document_number.state, 'clear', 'The machine must actually propose the stored number');
+    assert.equal(request.responseFields.document_number.value, '290010112345');
+    const number = form.locator('input[name="document_number"]');
+    const selects = await form.locator('select').evaluateAll(elements => elements.map(element => element.value));
+    console.log('[DISCARD PROTECTION EVIDENCE]', JSON.stringify({ number: await number.inputValue(), selects }));
+    assert.equal(await number.inputValue(), '', 'A stored document number must stay protected after a discarded draft');
+    assert.ok(selects.includes('min-moi'), 'The stored ministry must stay untouched after a discarded draft');
+    assert.equal(await form.locator('input[name="title"]').inputValue(), 'Civil ID Card Edit', 'The stored title must not change');
+  });
+
   return {
     totalCount,
     passedCount,
@@ -2464,7 +2521,7 @@ export async function main() {
             const forwardRes = await fetch(`http://127.0.0.1:${draftsPort}${url.pathname}`, {
               method,
               headers: forwardHeaders,
-              body: ['POST', 'PUT', 'PATCH'].includes(method) ? postData : undefined,
+              body: ['POST', 'PUT', 'PATCH', 'DELETE'].includes(method) ? postData : undefined,
             });
             const resText = await forwardRes.text();
             if (method === 'PUT' && forwardRes.status === 200) {
