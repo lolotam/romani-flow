@@ -32,7 +32,7 @@ import {
   type Values,
 } from '../../../server/contracts/documentExtraction';
 import { ApiRequestError } from '../api/http';
-import { isPreparationFailure } from './pdfAssets';
+import { approvedErrorCode, failureCodeOf, isApprovedErrorCode } from './errorCodes';
 
 /** One attempt at one document. */
 export interface ExtractionTicket {
@@ -408,16 +408,6 @@ export function describeFailure(error: unknown): FailureOutcome {
 }
 
 /**
- * Reads the sanitized code of a failure. The code of a preparation failure is
- * the message of its error, because the preparation raises bounded codes.
- */
-export function failureCodeOf(error: unknown): string {
-  if (error instanceof ApiRequestError) return approvedErrorCode(error.code);
-  if (error instanceof Error && isPreparationFailure(error)) return approvedErrorCode(error.message);
-  return 'network_error';
-}
-
-/**
  * Reads the approved code of a refused request.
  *
  * A refusal that carries a reason the dictionary knows keeps that reason, a
@@ -425,7 +415,7 @@ export function failureCodeOf(error: unknown): string {
  * server sent.
  */
 function forbiddenErrorCode(code: string): string {
-  return approvedErrorCodes.has(code) || Object.prototype.hasOwnProperty.call(approvedErrorFallbacks, code) ? approvedErrorCode(code) : 'forbidden';
+  return isApprovedErrorCode(code) ? approvedErrorCode(code) : 'forbidden';
 }
 
 /**
@@ -448,40 +438,13 @@ function isAbortError(error: unknown): boolean {
   return error instanceof Error && error.name === 'AbortError';
 }
 
-/** The codes the approved dictionary of the extraction knows. */
-const approvedErrorCodes = new Set<string>([
-  'processing_not_authorized', 'extraction_disabled', 'unconfigured', 'policy_unavailable',
-  'provider_auth', 'provider_balance', 'provider_policy', 'provider_rate_limit',
-  'provider_unavailable', 'extraction_timeout', 'invalid_image', 'preparation_limit',
-  'preparation_unavailable', 'unsupported_file', 'incomplete_pages', 'invalid_result',
-  'extraction_conflict', 'busy', 'network_error', 'unauthenticated', 'forbidden',
-  'origin_forbidden', 'invalid_request', 'request_too_large', 'unsupported_encoding',
-]);
-/** The codes of the server and of the preparation that lead to another code. */
-const approvedErrorFallbacks: Record<string, string> = {
-  payload_too_large: 'request_too_large', bad_request: 'invalid_request',
-  extraction_invalid_request: 'invalid_request', extraction_invalid_response: 'invalid_result',
-  provider_malformed_response: 'invalid_result', invalid_model: 'provider_unavailable',
-  service_unavailable: 'provider_unavailable', preparation_encrypted: 'unsupported_file',
-  preparation_invalid: 'invalid_image', preparation_timeout: 'extraction_timeout',
-  extraction_rate_limit: 'provider_rate_limit', http_error: 'network_error',
-  upload_failed: 'network_error', provider_not_configured: 'unconfigured',
-  not_configured: 'unconfigured', disabled: 'extraction_disabled',
-  not_authorized: 'processing_not_authorized', not_approved: 'processing_not_authorized',
-  invalid_origin: 'origin_forbidden',
-};
-
 /**
- * Maps a code of the server or of the preparation to an approved code.
+ * The codes of a failure and the way they are read.
  *
- * Only the codes of the approved dictionary reach a form, so the panel always
- * finds a string for the failure it shows and never a raw message.
+ * The mapping lives in its own module, so the session of an attempt stays a
+ * session and the codes stay a list of codes.
  */
-export function approvedErrorCode(code: string): string {
-  if (approvedErrorCodes.has(code)) return code;
-  return Object.prototype.hasOwnProperty.call(approvedErrorFallbacks, code) ? approvedErrorFallbacks[code] : 'network_error';
-}
-
+export { approvedErrorCode, failureCodeOf } from './errorCodes';
 /**
  * Creates the identity of one request. The identity has to be a version 4
  * UUID, because the shared contract refuses anything else.

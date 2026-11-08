@@ -469,3 +469,22 @@ for (const [wireCode, approved, forbiddenCode] of [
     });
   });
 }
+
+// The server refuses a changed setting, a changed catalogue and a changed
+// account with its own codes. They must reach the form as the conflict they
+// are, never as a connection failure that hides the reason.
+for (const [wireCode, status, expected] of [
+  ['stale_settings', 409, 'extraction_conflict'],
+  ['stale_catalog', 409, 'extraction_conflict'],
+  ['account_mismatch', 409, 'extraction_conflict'],
+  ['unsupported_media_type', 415, 'invalid_request'],
+  ['invalid_provider', 400, 'invalid_provider'],
+]) {
+  test(`refusal mapping keeps the reason of the server: ${wireCode}`, () => {
+    const outcome = describeFailure(new ApiRequestError('Never display raw server message', wireCode, status));
+    assert.deepEqual({ outcome, approved: approvedErrorCode(wireCode) }, {
+      outcome: { phase: 'failed', errorCode: expected, retryAfterSeconds: null },
+      approved: expected,
+    });
+  });
+}
