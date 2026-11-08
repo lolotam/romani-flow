@@ -1697,6 +1697,11 @@ async function runFormsTests(page, api, draftDb, draftsPort) {
     for (const variant of ['company', 'beneficiary', 'employee', 'filter']) {
       console.log(`    [Case 18] Running variant: ${variant}`);
       await api.reset();
+      // Every variant starts from an empty draft. A draft that leaked from the
+      // previous variant would restore its keys, and a restored key belongs to
+      // the administrator, so the machine proposal would be refused and the
+      // case would fail on the proposal instead of on the context change.
+      api.seedDraft('new', null);
       const epoch = await page.evaluate(() => window.__formsControls.mountGeneral());
       await waitForFormReady(page, epoch);
       const employeeMode = variant === 'employee' || variant === 'filter';
@@ -2142,6 +2147,8 @@ async function runFormsTests(page, api, draftDb, draftsPort) {
   // protect them again. Without that, a later extraction attempt could fill the
   // empty stored fields of the document that is being edited.
   await testCase('General: A discarded draft keeps the stored document fields protected', true, async () => {
+    // The case starts from an empty draft, so the discard is a real discard.
+    api.seedDraft('edit:doc-edit-2', null);
     const epoch = await page.evaluate(() => window.__formsControls.mountGeneral({
       editingDocument: {
         id: 'doc-edit-2',
