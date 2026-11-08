@@ -190,6 +190,10 @@ class FormsMockApi {
 
     this.draftPuts = [];
     this.draftPutListeners = [];
+    // Scopes whose draft writes are dropped. A case that needs a scope without
+    // a draft blocks it, so a debounced write of an earlier step can never
+    // leave a draft behind that protects the fields of a later step.
+    this.blockedDraftScopes = new Set();
 
     this.drafts = new Map();
     this.formDefaults = null;
@@ -1694,34 +1698,41 @@ async function runFormsTests(page, api, draftDb, draftsPort) {
   );
 
   await testCase('Case 18: Context changes clear machine values and preserve manual values', false, async () => {
-    for (const variant of ['company', 'beneficiary', 'employee', 'filter']) {
-      console.log(`    [Case 18] Running variant: ${variant}`);
-      await api.reset();
-      // Every variant starts from an empty draft. A draft that leaked from the
-      // previous variant would restore its keys, and a restored key belongs to
-      // the administrator, so the machine proposal would be refused and the
-      // case would fail on the proposal instead of on the context change.
-      api.seedDraft('new', null);
-      const epoch = await page.evaluate(() => window.__formsControls.mountGeneral());
-      await waitForFormReady(page, epoch);
-      const employeeMode = variant === 'employee' || variant === 'filter';
-      await selectComboboxOption(page, 'نوع المستفيد', employeeMode ? 'الموظف' : 'الشركة');
-      if (employeeMode) await selectComboboxOption(page, 'الموظف *', 'Ahmed Al-Sabah');
-      else await selectComboboxOption(page, 'الشركة', 'شركة روماني للتجارة');
-      await page.locator('input[type="file"]').setInputFiles({ name: 'context.png', mimeType: 'image/png', buffer: Buffer.from(validPng) });
-      const request = await api.waitForRequest(0, 5000);
-      await request.fulfillSuccess();
-      await page.waitForFunction(() => document.querySelector('input[name="document_number"]')?.value === '290010112345', null, { timeout: 5000 });
-      const form = page.locator('form');
-      await form.locator('input[name="document_number"]').fill('MANUAL-CONTEXT');
-      if (variant === 'company') await selectComboboxOption(page, 'الشركة', 'شركة الخليج للخدمات');
-      if (variant === 'beneficiary') await selectComboboxOption(page, 'نوع المستفيد', 'الموظف');
-      if (variant === 'employee') await selectComboboxOption(page, 'الموظف *', 'Fatima Al-Mansoor');
-      if (variant === 'filter') await selectComboboxOption(page, 'تصفية حسب الشركة (اختياري)', 'Romani Trading Co');
-      assert.equal(await form.locator('input[name="document_number"]').inputValue(), 'MANUAL-CONTEXT', `${variant}: manual number survives`);
-      assert.equal(await form.locator('button[role="combobox"]').filter({ hasText: 'البطاقة المدنية' }).count(), 0, `${variant}: machine type cleared`);
-      assert.equal(api.uploadCalls, 0, `${variant}: context changes do not stage files`);
-      await api.settleAllHeld();
+    // The draft of this scope never persists. A draft that leaked from a
+    // previous variant would restore its keys, and a restored key belongs to
+    // the administrator, so the machine proposal would be refused and the case
+    // would fail on the proposal instead of on the context change. Blocking
+    // the writes removes the leak, whatever the debounce of a save does.
+    api.blockedDraftScopes.add('new');
+    try {
+      for (const variant of ['company', 'beneficiary', 'employee', 'filter']) {
+        console.log(`    [Case 18] Running variant: ${variant}`);
+        await api.reset();
+        api.seedDraft('new', null);
+        const epoch = await page.evaluate(() => window.__formsControls.mountGeneral());
+        await waitForFormReady(page, epoch);
+        const employeeMode = variant === 'employee' || variant === 'filter';
+        await selectComboboxOption(page, 'نوع المستفيد', employeeMode ? 'الموظف' : 'الشركة');
+        if (employeeMode) await selectComboboxOption(page, 'الموظف *', 'Ahmed Al-Sabah');
+        else await selectComboboxOption(page, 'الشركة', 'شركة روماني للتجارة');
+        await page.locator('input[type="file"]').setInputFiles({ name: 'context.png', mimeType: 'image/png', buffer: Buffer.from(validPng) });
+        const request = await api.waitForRequest(0, 5000);
+        await request.fulfillSuccess();
+        await page.waitForFunction(() => document.querySelector('input[name="document_number"]')?.value === '290010112345', null, { timeout: 5000 });
+        const form = page.locator('form');
+        await form.locator('input[name="document_number"]').fill('MANUAL-CONTEXT');
+        if (variant === 'company') await selectComboboxOption(page, 'الشركة', 'شركة الخليج للخدمات');
+        if (variant === 'beneficiary') await selectComboboxOption(page, 'نوع المستفيد', 'الموظف');
+        if (variant === 'employee') await selectComboboxOption(page, 'الموظف *', 'Fatima Al-Mansoor');
+        if (variant === 'filter') await selectComboboxOption(page, 'تصفية حسب الشركة (اختياري)', 'Romani Trading Co');
+        assert.equal(await form.locator('input[name="document_number"]').inputValue(), 'MANUAL-CONTEXT', `${variant}: manual number survives`);
+        assert.equal(await form.locator('button[role="combobox"]').filter({ hasText: 'البطاقة المدنية' }).count(), 0, `${variant}: machine type cleared`);
+        assert.equal(api.uploadCalls, 0, `${variant}: context changes do not stage files`);
+        await api.settleAllHeld();
+      }
+      assert.equal(api.getDraft('new')?.values ?? null, null, 'The blocked scope must not keep a draft of any variant');
+    } finally {
+      api.blockedDraftScopes.delete('new');
     }
   });
 
@@ -2540,6 +2551,17 @@ export async function main() {
 
           if (method === 'GET') {
             api.getOrCreateDraft(scope, draftAccount);
+          }
+
+          // A blocked scope never stores a draft. The client is answered with
+          // the revision it already knows, so the write looks successful and
+          // nothing is left behind for the next step.
+          if (method === 'PUT' && api.blockedDraftScopes.has(scope)) {
+            const current = api.getDraft(scope, draftAccount);
+            return await route.fulfill({
+              status: 200,
+              json: { data: { revision: current?.revision ?? 'none' }, error: null },
+            });
           }
 
           if (method === 'PUT' && api.retiringPutHeld) {
