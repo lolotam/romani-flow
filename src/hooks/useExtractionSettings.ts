@@ -23,37 +23,23 @@ import { z } from 'zod';
 import {
   getExtractionStatus,
   type ExtractionStatus,
+  type ModelCatalogEntry,
   type ModelChoice,
 } from '@/lib/api/documentExtraction';
+import {
+  loadCandidates,
+  loadCatalog,
+  settingsError,
+  type CandidateReason,
+  type ExtractionProvider,
+} from '@/lib/api/extractionSettings';
 import { request } from '@/lib/api/http';
 
-/** The providers the extraction may use. */
-export type ExtractionProvider = 'groq' | 'openrouter';
-
-/** The reasons a catalogue may answer with. */
-const CANDIDATE_REASONS = [
-  'locally_approved',
-  'processing_not_authorized',
-  'unconfigured',
-  'policy_unavailable',
-  'no_candidates',
-] as const;
-
-/** Why the catalogue of a provider is empty. */
-export type CandidateReason = (typeof CANDIDATE_REASONS)[number];
-
-/**
- * The codes of a failure that have their own copy in the dictionary. Every
- * other failure keeps the generic copy, so no text of the server and no text
- * of an exception ever reaches the interface.
- */
-export const EXTRACTION_ERROR_CODES = [
-  'invalid_settings',
-  'invalid_provider',
-  'catalog_unavailable',
-  'status_unavailable',
-  'invalid_response',
-] as const;
+export {
+  EXTRACTION_ERROR_CODES,
+  type CandidateReason,
+  type ExtractionProvider,
+} from '@/lib/api/extractionSettings';
 
 /** The values the administrator edits. */
 export interface ExtractionSettingsEditor {
@@ -70,6 +56,10 @@ export interface ExtractionSettingsState {
   editor: ExtractionSettingsEditor;
   candidates: ModelChoice[];
   candidateReason: CandidateReason | null;
+  /** The full catalog of the selected provider, approved first. */
+  catalog: ModelCatalogEntry[];
+  /** `live` when the catalog came from the provider, `local` otherwise. */
+  catalogSource: 'live' | 'local' | null;
   loading: boolean;
   saving: boolean;
   error: Error | null;
@@ -85,74 +75,11 @@ export interface ExtractionSettingsState {
 /** The empty editor, before the status of the extraction is known. */
 const EMPTY_EDITOR: ExtractionSettingsEditor = { enabled: false, provider: '', model: '' };
 
-/**
- * The number of images one provider accepts. The bound belongs to the
- * provider: Groq accepts three images per request and OpenRouter accepts one.
- * A candidate that claims more than its provider accepts is a broken answer.
- */
-const PROVIDER_MAX_IMAGES: Record<ExtractionProvider, number> = {
-  groq: 3,
-  openrouter: 1,
-};
-
-/** One model of the offline catalogue. */
-const modelChoiceSchema = z.object({
-  id: z.string().min(1).max(128),
-  label: z.string().min(1).max(128),
-  provider: z.enum(['groq', 'openrouter']),
-  maxImages: z.number().int().min(1),
-}).strict().refine(
-  (value) => value.maxImages <= PROVIDER_MAX_IMAGES[value.provider],
-  'the model claims more images than its provider accepts',
-);
-
-/** The answer of the offline catalogue of one provider. */
-const candidateListingSchema = z.object({
-  verification: z.literal('offline'),
-  candidates: z.array(modelChoiceSchema).max(50),
-  reason: z.enum(CANDIDATE_REASONS),
-}).strict().refine(
-  (value) => value.candidates.length === 0 ? value.reason !== 'locally_approved' : value.reason === 'locally_approved',
-  'the reason must agree with the list of the candidates',
-);
-
 /** The answer of a settings write. */
 const settingsUpdateSchema = z.object({
   updated: z.array(z.string().max(128)).max(10),
   rejected: z.array(z.object({ key: z.string().max(128), reason: z.string().max(512) }).strict()).max(10),
 }).strict();
-
-/** Creates the failure of the settings with a code the copy knows. */
-function settingsError(code: (typeof EXTRACTION_ERROR_CODES)[number], cause?: unknown): Error {
-  const error = new Error(code);
-  error.name = 'ExtractionSettingsError';
-  (error as Error & { code: string }).code = code;
-  if (cause !== undefined) (error as Error & { cause?: unknown }).cause = cause;
-  return error;
-}
-
-/**
- * Reads the offline catalogue of one provider. The answer is validated before
- * it is used: a broken answer never becomes a list of models, and a model of
- * another provider is refused.
- */
-async function loadCandidates(
-  provider: ExtractionProvider,
-  signal: AbortSignal,
-): Promise<{ candidates: ModelChoice[]; reason: CandidateReason }> {
-  const envelope = await request<unknown>(
-    `/api/document-extraction/candidates?provider=${encodeURIComponent(provider)}`,
-    { signal },
-  );
-  if (signal.aborted) throw settingsError('invalid_response');
-  if (envelope.error) throw envelope.error;
-  const parsed = candidateListingSchema.safeParse(envelope.data);
-  if (!parsed.success) throw settingsError('invalid_response', parsed.error);
-  if (parsed.data.candidates.some((candidate) => candidate.provider !== provider)) {
-    throw settingsError('invalid_response');
-  }
-  return { candidates: parsed.data.candidates, reason: parsed.data.reason };
-}
 
 /** Reports whether the provider of the editor is configured. */
 function isConfigured(status: ExtractionStatus | null, provider: ExtractionProvider | ''): boolean {
@@ -188,6 +115,8 @@ export function useExtractionSettings(accountId: string | null, refreshKey = 0):
   const [editor, setEditor] = useState<ExtractionSettingsEditor>(EMPTY_EDITOR);
   const [candidates, setCandidates] = useState<ModelChoice[]>([]);
   const [candidateReason, setCandidateReason] = useState<CandidateReason | null>(null);
+  const [catalog, setCatalog] = useState<ModelCatalogEntry[]>([]);
+  const [catalogSource, setCatalogSource] = useState<'live' | 'local' | null>(null);
   const [loading, setLoading] = useState(accountId !== null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<Error | null>(null);
@@ -237,6 +166,8 @@ export function useExtractionSettings(accountId: string | null, refreshKey = 0):
     setEditor(EMPTY_EDITOR);
     setCandidates([]);
     setCandidateReason(null);
+    setCatalog([]);
+    setCatalogSource(null);
     setError(null);
     setSaving(false);
     setLoading(accountId !== null);
@@ -278,13 +209,15 @@ export function useExtractionSettings(accountId: string | null, refreshKey = 0):
     };
   }, [accountId, refreshKey, statusTick]);
 
-  // The offline catalogue of the selected provider. A catalogue of another
-  // provider never replaces the current one.
+  // The offline catalogue and the full model catalog of the selected provider.
+  // A catalogue of another provider never replaces the current one.
   useEffect(() => {
     const provider = editor.provider;
     if (!provider) {
       setCandidates([]);
       setCandidateReason(null);
+      setCatalog([]);
+      setCatalogSource(null);
       return;
     }
 
@@ -293,6 +226,8 @@ export function useExtractionSettings(accountId: string | null, refreshKey = 0):
     let active = true;
     setCandidates([]);
     setCandidateReason(null);
+    setCatalog([]);
+    setCatalogSource(null);
 
     void loadCandidates(provider, controller.signal)
       .then((listing) => {
@@ -306,6 +241,22 @@ export function useExtractionSettings(accountId: string | null, refreshKey = 0):
         // advertises an approved choice.
         setCandidates([]);
         setCandidateReason(null);
+        setError(settingsError('catalog_unavailable', cause));
+      });
+
+    void loadCatalog(provider, controller.signal)
+      .then((listing) => {
+        if (!active || epoch !== epochRef.current) return;
+        setCatalog(listing.entries);
+        setCatalogSource(listing.verification);
+      })
+      .catch((cause) => {
+        if (!active || epoch !== epochRef.current) return;
+        // The full catalog fails soft: the approved candidates stay, so a
+        // broken listing never erases a selection.
+        setCatalog([]);
+        setCatalogSource(null);
+        if (epoch !== epochRef.current) return;
         setError(settingsError('catalog_unavailable', cause));
       });
 
@@ -354,6 +305,8 @@ export function useExtractionSettings(accountId: string | null, refreshKey = 0):
     setEditor((current) => ({ ...current, provider, model: '' }));
     setCandidates([]);
     setCandidateReason(null);
+    setCatalog([]);
+    setCatalogSource(null);
     setError(null);
   }, []);
 
@@ -396,7 +349,7 @@ export function useExtractionSettings(accountId: string | null, refreshKey = 0):
         // was never chosen has no catalogue.
         const provider = selected || (seeded ? '' : (next.provider as ExtractionProvider | ''));
         if (!provider) return;
-        return loadCandidates(provider, controller.signal)
+        const candidatesPromise = loadCandidates(provider, controller.signal)
           .then((listing) => {
             if (epoch !== epochRef.current || controller.signal.aborted) return;
             setCandidates(listing.candidates);
@@ -408,6 +361,21 @@ export function useExtractionSettings(accountId: string | null, refreshKey = 0):
             setCandidateReason(null);
             setError(settingsError('catalog_unavailable', cause));
           });
+        // The full catalog is refreshed next to the candidates: a broken
+        // catalog never blocks the approved candidates of the editor.
+        const catalogPromise = loadCatalog(provider, controller.signal)
+          .then((listing) => {
+            if (epoch !== epochRef.current || controller.signal.aborted) return;
+            setCatalog(listing.entries);
+            setCatalogSource(listing.verification);
+          })
+          .catch((cause) => {
+            if (epoch !== epochRef.current || controller.signal.aborted) return;
+            setCatalog([]);
+            setCatalogSource(null);
+            setError(settingsError('catalog_unavailable', cause));
+          });
+        return Promise.all([candidatesPromise, catalogPromise]);
       })
       .catch((cause) => {
         if (epoch !== epochRef.current || controller.signal.aborted) return;
@@ -482,6 +450,8 @@ export function useExtractionSettings(accountId: string | null, refreshKey = 0):
     editor,
     candidates,
     candidateReason,
+    catalog,
+    catalogSource,
     loading,
     saving,
     error,

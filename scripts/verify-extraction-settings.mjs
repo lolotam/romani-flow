@@ -27,6 +27,7 @@
  * - Case 10: Explicit Refresh A held race -> change provider B / select B, then resolve A; exact B provider/model and B candidate options stay unchanged.
  * - Case 11: Retained persisted model not in current offline catalog (reason no_candidates/policy_unavailable or failed refresh) -> display preserved but cannot enable; positive valid catalog enables.
  * - Case 12: Malformed provider candidate (maxImages: 10) -> fails closed as no-list via runtime validation; never prove pricing from offline.
+ * - Case 13: Searchable full catalog -> approved selectable, approvable greyed out with copyable approval record, unavailable refused, search narrows.
  */
 
 import assert from 'node:assert/strict';
@@ -141,6 +142,54 @@ class SettingsMockApi {
     this.onCandidatesEntry = null;
     this.onCandidatesRequest = null;
     this.holdCandidates = null;
+
+    // Live catalog fixtures: entries the reviewed rules accept but no current
+    // approval names, served next to the approved candidates.
+    this.catalogHttpStatus = 200;
+    this.catalogExtras = {
+      groq: [
+        {
+          id: 'meta-llama/llama-4-scout-17b-16e-instruct',
+          label: 'Llama 4 Scout 17B (free)',
+          provider: 'groq',
+          status: 'approvable',
+          maxImages: 3,
+          approval: JSON.stringify({
+            provider: 'groq',
+            model: 'meta-llama/llama-4-scout-17b-16e-instruct',
+            endpoint: 'groq',
+            maxImages: 3,
+            expiresAt: '2027-05-08T00:00:00.000Z',
+            policyVersion: '2026-11-08',
+          }),
+        },
+        {
+          id: 'openai/gpt-oss-120b',
+          label: 'GPT-OSS 120B',
+          provider: 'groq',
+          status: 'unavailable',
+          maxImages: null,
+          approval: null,
+        },
+      ],
+      openrouter: [
+        {
+          id: 'qwen/qwen3-30b-a3b:free',
+          label: 'Qwen3 30B A3B (free)',
+          provider: 'openrouter',
+          status: 'approvable',
+          maxImages: 1,
+          approval: JSON.stringify({
+            provider: 'openrouter',
+            model: 'qwen/qwen3-30b-a3b:free',
+            endpoint: 'PROVIDER_TAG',
+            maxImages: 1,
+            expiresAt: '2027-05-08T00:00:00.000Z',
+            policyVersion: '2026-11-08',
+          }),
+        },
+      ],
+    };
 
     this.putSettingsCalls = 0;
     this.putSettingsHttpStatus = 200;
@@ -272,6 +321,14 @@ async function getModelOptions(page) {
       options.map((opt) => ({ value: opt.value, text: (opt.textContent || '').trim() }))
     );
   }
+  // A custom combobox only renders its options while it is open: open it and
+  // read every option. The dropdown stays open on purpose: closing it from
+  // the outside raced with the popover dismissal in CI chromium, and both
+  // callers use this helper as the last assertion of their case — the next
+  // remount clears the open portal with the whole fixture tree.
+  await trigger.click();
+  const searchBox = page.locator('[data-testid="extraction-model-search"]');
+  await searchBox.waitFor({ state: 'visible', timeout: 5000 });
   const options = page.locator('[role="option"]');
   const count = await options.count();
   const result = [];
@@ -1279,6 +1336,95 @@ async function runSettingsTests(page, api, origin, fixtureUrl) {
     api.offlineCandidates.groq = [...FIXTURE_APPROVED_MODELS.groq];
   });
 
+  // -------------------------------------------------------------------------
+  // Case 13: Searchable full catalog — approved selectable, approvable greyed
+  // out with a copyable approval record, unavailable refused, search filters.
+  // -------------------------------------------------------------------------
+  await runCase(13, 'Searchable catalog picker: statuses, search, copy approval, refuse ineligible', async () => {
+    console.log('[CASE 13] Searchable catalog picker: statuses, search, copy, refuse...');
+    const controls = getSettingsControls(page);
+    api.currentUser = { id: 'account-admin-1', email: 'admin@romani.test', name: 'Administrator', role: 'admin' };
+    api.authHttpStatus = 200;
+    api.candidatesHttpStatus = 200;
+    api.catalogHttpStatus = 200;
+    api.offlineCandidates.groq = [...FIXTURE_APPROVED_MODELS.groq];
+    api.offlineCandidates.openrouter = [...FIXTURE_APPROVED_MODELS.openrouter];
+    api.candidatesReason = 'locally_approved';
+    api.status = {
+      enabled: false,
+      provider: '',
+      model: '',
+      configured: { groq: true, openrouter: true },
+      processingAuthorized: true,
+      processingContext: 'kw-docs-context',
+      available: false,
+      reason: 'disabled',
+      settingsVersion: 'a'.repeat(64),
+      catalogVersion: 'b'.repeat(64),
+      maxSourceBytes: limits.source,
+    };
+    await remountFixture(page, { role: 'admin' });
+    await controls.card.waitFor({ state: 'visible', timeout: 5000 });
+
+    const groqCandidatesPromise = page.waitForResponse(
+      (resp) => resp.url().includes('/candidates?provider=groq') && resp.status() === 200
+    );
+    await selectProvider(page, 'groq');
+    await groqCandidatesPromise;
+
+    // Open the combobox explicitly.
+    const trigger = page.locator('[data-testid="extraction-model-select"]');
+    await trigger.click();
+    const searchBox = page.locator('[data-testid="extraction-model-search"]');
+    await searchBox.waitFor({ state: 'visible', timeout: 5000 });
+
+    const visibleOptions = page.locator('[role="option"]').locator('visible=true');
+    const approvedOption = visibleOptions.filter({ hasText: 'qwen/qwen3.8-27b' }).first();
+    const approvableOption = visibleOptions.filter({ hasText: 'meta-llama/llama-4-scout' }).first();
+    const unavailableOption = visibleOptions.filter({ hasText: 'openai/gpt-oss-120b' }).first();
+    await approvedOption.waitFor({ state: 'visible', timeout: 5000 });
+    await approvableOption.waitFor({ state: 'visible', timeout: 5000 });
+    await unavailableOption.waitFor({ state: 'visible', timeout: 5000 });
+
+    // Approved is selectable; the other two are greyed out and refused.
+    assert.notEqual(await approvedOption.getAttribute('aria-disabled'), 'true', 'Approved model must be selectable');
+    assert.ok(
+      ((await approvableOption.getAttribute('class')) || '').includes('opacity-60'),
+      'Approvable model must be greyed out',
+    );
+    assert.ok(
+      ((await unavailableOption.getAttribute('class')) || '').includes('opacity-60'),
+      'Unavailable model must be greyed out',
+    );
+    const approvableText = (await approvableOption.innerText()).trim();
+    assert.match(approvableText, /Needs approval|يحتاج اعتماد/i, 'Approvable row must state it needs approval');
+    const unavailableText = (await unavailableOption.innerText()).trim();
+    assert.match(unavailableText, /Not eligible|غير مؤهل/i, 'Unavailable row must state it is not eligible');
+
+    // Search narrows the list to matching models only.
+    await searchBox.fill('llama');
+    const searchMatches = await page.locator('[role="option"]').locator('visible=true').count();
+    assert.equal(searchMatches, 1, 'Search must narrow the catalog to the matching model');
+    await searchBox.fill('');
+    await approvedOption.waitFor({ state: 'visible', timeout: 5000 });
+
+    // The approval record of an approvable model can be copied.
+    const copyButton = approvableOption.locator('[data-testid="extraction-copy-approval"]').first();
+    await copyButton.click();
+    const copyStatus = page.locator('[data-testid="extraction-copy-status"]');
+    await copyStatus.waitFor({ state: 'visible', timeout: 5000 });
+    const copyText = (await copyStatus.innerText()).trim();
+    assert.match(copyText, /copied|failed|تم النسخ|تعذر/i, 'Copy feedback must be shown');
+
+    // A greyed-out model can never be chosen.
+    await approvableOption.click();
+    assert.equal(await getSelectedModel(page), '', 'Ineligible model click must not change the selection');
+
+    // The approved model is chosen normally.
+    await approvedOption.click();
+    assert.equal(await getSelectedModel(page), 'qwen/qwen3.8-27b', 'Approved model click must select it');
+  });
+
   const passedCount = results.filter((r) => r.passed).length;
   const failedCount = results.filter((r) => !r.passed).length;
 
@@ -1571,6 +1717,43 @@ export async function main() {
               },
               error: null,
             },
+          });
+        }
+
+        // Live model catalog: approved entries from the candidates plus the
+        // approvable extras. A malformed candidate is dropped here as well,
+        // so a broken fixture can never become a catalog entry.
+        if (url.pathname === '/api/document-extraction/catalog' && req.method() === 'GET') {
+          if (api.catalogHttpStatus !== 200) {
+            return route.fulfill({
+              status: api.catalogHttpStatus,
+              json: {
+                data: null,
+                error: { code: 'catalog_unavailable', message: 'The model catalog is unavailable.' },
+              },
+            });
+          }
+          const provider = url.searchParams.get('provider');
+          const bounds = { groq: 3, openrouter: 1 };
+          const approved = (api.offlineCandidates[provider] || [])
+            .filter(
+              (candidate) =>
+                Number.isInteger(candidate.maxImages)
+                && candidate.maxImages >= 1
+                && candidate.maxImages <= bounds[provider],
+            )
+            .map((candidate) => ({
+              id: candidate.id,
+              label: candidate.label,
+              provider,
+              status: 'approved',
+              maxImages: candidate.maxImages,
+              approval: null,
+            }));
+          const extras = (api.catalogExtras[provider] || []).map((entry) => ({ ...entry, provider }));
+          return route.fulfill({
+            status: 200,
+            json: { data: { verification: 'live', entries: [...approved, ...extras] }, error: null },
           });
         }
 

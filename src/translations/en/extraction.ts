@@ -100,5 +100,14 @@ export const extraction = {
     savedSelection: 'Saved selection',
     savedSelectionUnavailable:
       'The saved model is not part of the current approved list. It is kept for display only and cannot be enabled.',
+    searchPlaceholder: 'Search models…',
+    noResults: 'No model matches the search.',
+    statusApproved: 'Approved',
+    statusApprovable: 'Needs approval',
+    statusUnavailable: 'Not eligible',
+    imagesAllowed: '{{count}} image(s) per request',
+    copyApproval: 'Copy approval record',
+    copied: 'Approval record copied.',
+    copyFailed: 'Copying failed. Copy the approval record manually.',
   },
 };

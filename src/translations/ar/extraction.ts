@@ -90,5 +90,14 @@ export const extraction = {
     savedSelection: 'الاختيار المحفوظ',
     savedSelectionUnavailable:
       'النموذج المحفوظ ليس جزءًا من القائمة المعتمدة الحالية. يتم الاحتفاظ به للعرض فقط ولا يمكن تفعيله.',
+    searchPlaceholder: 'ابحث في النماذج…',
+    noResults: 'لا يوجد نموذج مطابق للبحث.',
+    statusApproved: 'معتمد',
+    statusApprovable: 'يحتاج اعتمادًا',
+    statusUnavailable: 'غير مؤهل',
+    imagesAllowed: '{{count}} صورة لكل طلب',
+    copyApproval: 'انسخ سجل الاعتماد',
+    copied: 'تم نسخ سجل الاعتماد.',
+    copyFailed: 'تعذر النسخ. انسخ سجل الاعتماد يدويًا.',
   },
 };

@@ -5,6 +5,7 @@ import {
   type ExtractionRequest,
   type ExtractionResult,
   type ExtractionStatus,
+  type ModelCatalogListing,
   type ModelChoice,
   type RawPage,
 } from '../contracts/documentExtraction.js';
@@ -22,6 +23,7 @@ import {
 import { extractBatch, type Selection } from './provider.js';
 import { createCandidateCatalogue } from './candidates.js';
 import type { CandidateListing, CandidateRequest, CandidateValidation, SelectionAuthority } from './candidates.js';
+import { createModelCatalog } from './modelCatalog.js';
 import {
   ExtractionError,
   PROVIDER_URLS,
@@ -63,6 +65,7 @@ export interface ExtractionServiceConfig {
 export interface ExtractionService {
   status(): ExtractionStatus;
   models(provider: 'groq' | 'openrouter', signal: AbortSignal): Promise<ModelChoice[]>;
+  catalog(provider: 'groq' | 'openrouter', signal: AbortSignal): Promise<ModelCatalogListing>;
   candidates(provider: 'groq' | 'openrouter'): CandidateListing;
   run(request: ExtractionRequest, userId: string, signal: AbortSignal): Promise<ExtractionResult>;
   preflight(req: Request, res: Response, next: NextFunction): void;
@@ -464,9 +467,27 @@ export function createExtractionService(
    */
   const catalogue = createCandidateCatalogue({ db, config, now, assertEligible });
 
+  /**
+   * The live model catalog of one provider.
+   *
+   * The list is read-only and it sends no document, so it works before the
+   * extraction is enabled: the administrator needs it to choose a model.
+   */
+  const catalog = createModelCatalog({
+    config: config.extraction,
+    now,
+    fetchModels: (provider, key, signal) =>
+      fetchMetadata(
+        provider === 'groq' ? PROVIDER_URLS.groqModels : PROVIDER_URLS.openRouterModels,
+        key,
+        signal,
+      ),
+  });
+
   return {
     status,
     models,
+    catalog,
     candidates: catalogue.candidates,
     run,
     preflight,

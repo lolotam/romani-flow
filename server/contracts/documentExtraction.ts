@@ -192,6 +192,46 @@ export interface ModelChoice {
 }
 
 /**
+ * The reviewed state of one model of a provider catalog.
+ *
+ * `approved` means the local approvals and the reviewed rules make the model
+ * selectable now. `approvable` means the reviewed rules accept the model but
+ * no current approval names it, so the administrator can add one. `unavailable`
+ * means the reviewed rules refuse the model, so no approval can select it.
+ */
+export type ModelCatalogStatus = 'approved' | 'approvable' | 'unavailable';
+
+/** One entry of the live model catalog of one provider. */
+export interface ModelCatalogEntry {
+  id: string;
+  label: string;
+  provider: 'groq' | 'openrouter';
+  status: ModelCatalogStatus;
+  /** The number of images a request may send, when the model is reviewed. */
+  maxImages: number | null;
+  /**
+   * A ready-to-edit approval record for an approvable model.
+   *
+   * The record is a template, never an activation: it still has to be added to
+   * the environment by the owner, and the pipeline still proves the live
+   * eligibility before it sends a document.
+   */
+  approval: string | null;
+}
+
+/**
+ * The model catalog of one provider.
+ *
+ * `live` means the list came from the provider itself. `local` means the
+ * provider could not be listed (no key, no authorization or no context), so
+ * the answer carries only the locally known models.
+ */
+export interface ModelCatalogListing {
+  verification: 'live' | 'local';
+  entries: ModelCatalogEntry[];
+}
+
+/**
  * Accepts only an explicit ISO Gregorian date and validates the real calendar
  * day, so an impossible or ambiguous date is rejected instead of guessed.
  *
