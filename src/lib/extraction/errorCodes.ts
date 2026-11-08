@@ -19,7 +19,7 @@ const approvedErrorCodes = new Set<string>([
   'preparation_unavailable', 'unsupported_file', 'incomplete_pages', 'invalid_result',
   'extraction_conflict', 'busy', 'network_error', 'unauthenticated', 'forbidden',
   'origin_forbidden', 'invalid_request', 'request_too_large', 'unsupported_encoding',
-  'invalid_provider',
+  'invalid_provider', 'internal_error',
 ]);
 
 /** The codes of the server and of the preparation that lead to another code. */
@@ -41,6 +41,21 @@ const approvedErrorFallbacks: Record<string, string> = {
   account_mismatch: 'extraction_conflict',
   // A body that is not plain JSON is a refused request, not a broken network.
   unsupported_media_type: 'invalid_request',
+  // A context that the server no longer accepts is a changed environment, and
+  // a scope that is gone is a refused request. Neither is a broken network.
+  context_mismatch: 'extraction_conflict', invalid_scope: 'invalid_request',
+  invalid_json: 'invalid_request', not_found: 'invalid_request',
+  // Another extraction of the account is already running.
+  concurrency_limit: 'busy',
+  // The provider answered for another model or cut its answer short: the
+  // answer is not usable, so it never reaches the form as a value.
+  provider_identity_mismatch: 'invalid_result', truncated_output: 'invalid_result',
+  // An environment that forbids the external call is an environment that did
+  // not authorize the processing.
+  external_inference_forbidden: 'processing_not_authorized',
+  // The request of the page ran into its own deadline: the answer says so
+  // instead of pretending that the connection broke.
+  request_timeout: 'extraction_timeout',
 };
 
 /**

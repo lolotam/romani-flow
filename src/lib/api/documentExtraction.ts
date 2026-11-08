@@ -37,8 +37,14 @@ const PROVIDER_MAX_IMAGES: Record<ExtractionProvider, number> = {
   openrouter: 1,
 };
 
-/** The time an extraction request may take. */
-const REQUEST_TIMEOUT_MS = 50_000;
+/**
+ * The time an extraction request may take.
+ *
+ * The server answers a refused request by 45 seconds, so the page waits
+ * longer than the server needs: it always receives the reason of a refusal
+ * instead of giving up first and calling it a broken connection.
+ */
+const REQUEST_TIMEOUT_MS = 90_000;
 
 /** The public status of the extraction. */
 const statusSchema = z

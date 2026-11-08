@@ -67,8 +67,12 @@ export async function request<T>(
   options: RequestOptions = {},
 ): Promise<ApiEnvelope<T>> {
   const controller = new AbortController();
+  let timedOut = false;
   const timeout = setTimeout(
-    () => controller.abort(),
+    () => {
+      timedOut = true;
+      controller.abort();
+    },
     options.timeoutMs ?? DEFAULT_TIMEOUT_MS,
   );
 
@@ -114,9 +118,18 @@ export async function request<T>(
       return { data: null, error };
     }
 
+    // A request that ran into its own deadline is not a broken connection: it
+    // carries its own code, so the form can say what happened.
+    if (timedOut) {
+      return {
+        data: null,
+        error: new ApiRequestError('The request timed out. Please try again.', 'request_timeout', 0),
+      };
+    }
+
     const message =
       error instanceof Error && error.name === 'AbortError'
-        ? 'The request timed out. Please try again.'
+        ? 'The request was cancelled.'
         : 'The server could not be reached. Please check your connection.';
 
     return { data: null, error: new ApiRequestError(message, 'network_error', 0) };
