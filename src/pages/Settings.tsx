@@ -13,7 +13,7 @@ import { useLanguage } from '@/contexts/LanguageContext';
 import { api, endpoints } from '@/lib/api';
 import { Layout } from '@/components/Layout';
 import { useAuth } from '@/hooks/useAuth';
-import { Mail, Moon, Building2, FileText, UserCog, Shield, Database, QrCode } from 'lucide-react';
+import { Mail, Moon, Building2, FileText, UserCog, Shield, Database, QrCode, FileScan } from 'lucide-react';
 
 import type { Company, DocumentType, Ministry, Position } from '@/components/settings/types';
 import EmailSettingsComponent from '@/components/settings/EmailSettings';
@@ -25,6 +25,7 @@ import MinistriesSettings from '@/components/settings/MinistriesSettings';
 import BackupSettings from '@/components/settings/BackupSettings';
 import WhatsAppPairingSettings from '@/components/settings/WhatsAppPairingSettings';
 import WhatsAppSettings from '@/components/settings/WhatsAppSettings';
+import { DocumentExtractionSettings } from '@/components/settings/DocumentExtractionSettings';
 
 export default function Settings() {
   const { t, isRTL } = useLanguage();
@@ -230,6 +231,7 @@ export default function Settings() {
             <TabsList className="grid h-auto w-full grid-cols-2 sm:grid-cols-3 xl:grid-cols-4 gap-1">
               <TabsTrigger value="email" className="flex items-center gap-2"><Mail className="h-4 w-4" /><span>{t('settings.tabs.email')}</span></TabsTrigger>
               {user?.role === 'admin' && <TabsTrigger value="whatsapp" className="flex items-center gap-2"><QrCode className="h-4 w-4" /><span>{t('settings.tabs.whatsapp')}</span></TabsTrigger>}
+              {user?.role === 'admin' && <TabsTrigger value="extraction" className="flex items-center gap-2"><FileScan className="h-4 w-4" /><span>{t('extraction.title')}</span></TabsTrigger>}
               <TabsTrigger value="appearance" className="flex items-center gap-2"><Moon className="h-4 w-4" /><span>{t('settings.tabs.appearance')}</span></TabsTrigger>
               <TabsTrigger value="companies" className="flex items-center gap-2"><Building2 className="h-4 w-4" /><span>{t('settings.tabs.companies')}</span></TabsTrigger>
               <TabsTrigger value="positions" className="flex items-center gap-2"><UserCog className="h-4 w-4" /><span>{t('settings.tabs.positions')}</span></TabsTrigger>
@@ -242,6 +244,8 @@ export default function Settings() {
               <EmailSettingsComponent />
             </TabsContent>
             {user?.role === 'admin' && <TabsContent value="whatsapp" className="space-y-5"><WhatsAppPairingSettings onDisconnectSettled={refreshWhatsAppSettings} /><WhatsAppSettings refreshKey={whatsappRefreshKey} /></TabsContent>}
+
+            {user?.role === 'admin' && <TabsContent value="extraction"><DocumentExtractionSettings /></TabsContent>}
 
             <TabsContent value="appearance">
               <AppearanceSettings darkMode={theme === 'dark'} onToggleDarkMode={toggleDarkMode} />

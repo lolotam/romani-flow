@@ -72,6 +72,8 @@ export interface Employee {
 export interface Document {
   id: string;
   title: string;
+  /** Optional free-text document number; empty means the document has none. */
+  document_number?: string | null;
   file_name?: string | null;
   file_path?: string | null;
   file_size?: number | null;

@@ -30,7 +30,7 @@ export function readSubmission(db: Db, userId: string, formKey: string): Row {
   const stored = db.prepare('SELECT values_json FROM form_defaults WHERE user_id=? AND form_key=?')
     .get(userId, formKey) as { values_json: string } | undefined;
   const values: Row = stored ? JSON.parse(stored.values_json) as Row : {};
-  if (formKey === 'documents') { delete values.issue_date; delete values.expiry_date; }
+  if (formKey === 'documents') { delete values.issue_date; delete values.expiry_date; delete values.document_number; }
   if (formKey === 'employees') {
     delete values.mobile_no;
     delete values.whatsapp_notifications_enabled;

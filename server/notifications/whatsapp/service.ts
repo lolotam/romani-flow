@@ -70,9 +70,24 @@ export class WhatsAppReminders {
     await this.saveSettings({ 'whatsapp.enabled': enabled });
   }
 
-  async saveSettings(settings: Record<string, SettingValue>): Promise<void> {
+  /**
+   * Saves settings under the shared coordinator.
+   *
+   * The optional beforeWrite assertion is the last authority a caller may
+   * prove before its settings reach the database. It runs inside the acquired
+   * coordinator callback, after every await — including the enable check of
+   * the transport — and directly before the settings are applied, so nothing
+   * can change between the assertion and the write. A caller that omits the
+   * callback keeps its former behaviour, and a callback that throws refuses
+   * the whole write before a single setting, notification or job changes.
+   */
+  async saveSettings(
+    settings: Record<string, SettingValue>,
+    beforeWrite?: () => void,
+  ): Promise<void> {
     await this.aroundWrite(async () => {
       if (settings['whatsapp.enabled'] === true && !getBoolean(this.db, 'whatsapp.enabled')) await this.assertCanEnable();
+      beforeWrite?.();
       this.applySettings(settings);
     });
   }

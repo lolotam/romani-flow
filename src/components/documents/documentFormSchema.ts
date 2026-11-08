@@ -10,6 +10,7 @@ export const createDocumentSchema = (t: (key: string) => string) => z.object({
   ministry_id: z.string().optional(),
   entity_name: z.string().max(100, t('documents.form.validation.entityNameTooLong')).optional(),
   notes: z.string().max(5000, t('documents.form.validation.notesTooLong')).optional(),
+  document_number: z.string().trim().max(128, t('extraction.numberTooLong')).optional(),
 }).superRefine((data, ctx) => {
   // Attach required-field errors to rendered controls, never an invisible root error.
   const required = data.beneficiary_type === 'company'
@@ -60,6 +61,7 @@ export interface DocumentFormProps {
   editingDocument?: {
     id: string;
     title: string;
+    document_number?: string | null;
     document_type_id: string;
     ministry_id?: string;
     employee_id?: string;

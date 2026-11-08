@@ -15,7 +15,7 @@ export function newDocumentDefaults(context: { employeeId?: string; companyId?: 
     beneficiary_type: (context.employeeId ? 'employee' : context.companyId ? 'company' : 'employee') as 'employee' | 'company',
     employee_id: context.employeeId || (context.companyId ? '' : context.fallbackEmployeeId || ''),
     company_id: context.companyId || '', document_type_id: '', ministry_id: '', entity_name: '',
-    issue_date: undefined, expiry_date: undefined, notes: '',
+    issue_date: undefined, expiry_date: undefined, notes: '', document_number: '',
   };
 }
 
@@ -24,6 +24,7 @@ export function employeeDocumentDraft(saved: DraftValues | null, fileName?: stri
   return {
     title: saved?.title ?? fileName?.replace(/\.[^/.]+$/, '').slice(0, 120) ?? '',
     document_type_id: saved?.document_type_id ?? '', ministry_id: saved?.ministry_id ?? '', notes: saved?.notes ?? '',
+    document_number: saved?.document_number ?? '',
     issue_date: restoreFormDate(saved?.issue_date) ?? null, expiry_date: restoreFormDate(saved?.expiry_date) ?? null,
   };
 }

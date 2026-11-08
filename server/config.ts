@@ -1,5 +1,6 @@
 import path from 'node:path';
 import { readPairingConfig, type PairingConfig } from './whatsapp/config.js';
+import { readExtractionConfig, type ExtractionConfig } from './extraction/config.js';
 
 /**
  * Central configuration for the API server.
@@ -41,6 +42,8 @@ export interface AppConfig {
   adminSeedPassword: string | null;
   cronEnabled: boolean;
   cronSchedule: string;
+  /** Backend-only AI extraction settings. Disabled and unconfigured by default. */
+  extraction: ExtractionConfig;
 }
 
 const MIN_ADMIN_PASSWORD_LENGTH = 12;
@@ -194,6 +197,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     adminSeedPassword: readOptionalString(env, 'ADMIN_SEED_PASSWORD'),
     cronEnabled: readBool(env, 'CRON_ENABLED', true),
     cronSchedule: readString(env, 'CRON_SCHEDULE', '0 8 * * *'),
+    extraction: readExtractionConfig(env),
   };
 }
 

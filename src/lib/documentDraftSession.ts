@@ -40,7 +40,15 @@ export class DocumentDraftSession {
 
   private async load(): Promise<void> {
     this.status('loading');
-    const result = await this.transport<{ revision: string; values: DraftValues | null }>(this.url);
+    let result: ApiEnvelope<{ revision: string; values: DraftValues | null }>;
+    try {
+      result = await this.transport<{ revision: string; values: DraftValues | null }>(this.url);
+    } catch (error) {
+      // A load that fails is a failure of the session, never an unhandled
+      // rejection: the promise of the load always settles.
+      this.fail(error instanceof Error ? error : new Error('Draft unavailable'));
+      return;
+    }
     if (result.error || !result.data) { this.fail(result.error ?? new Error('Draft unavailable')); return; }
     this.revision = result.data.revision;
     this.ready = true;
@@ -171,9 +179,37 @@ export class DocumentDraftSession {
     if (this.pending) await this.flush();
   }
 
-  dispose(flush = false): void {
+  /**
+   * The settlement of the work that has already started.
+   *
+   * The promise settles when the load, the writes and the deletion of this
+   * session have settled. It never rejects: the settlement is an observation
+   * of the retirement, not a failure of whoever waits for it.
+   */
+  private settlement(): Promise<void> {
+    return Promise.all([
+      this.loaded.catch(() => undefined),
+      this.serial.catch(() => undefined),
+      this.discarding?.catch(() => undefined) ?? Promise.resolve(),
+    ]).then(() => undefined);
+  }
+
+  /**
+   * Retires the session and reports the settlement of its started work.
+   *
+   * The returned promise settles when the work that has already started has
+   * settled, on every path: a session that is retired without a flush still
+   * reports the settlement of its load and of its writes. A pending write is
+   * only started when the retirement is allowed to flush, so a retired
+   * session never retries a failed write and never overwrites a failed or
+   * conflicting draft.
+   */
+  dispose(flush = false): Promise<void> {
     clearTimeout(this.timer);
-    if (flush && !this.paused && !this.failure) void this.flush().catch(() => undefined);
+    if (flush && !this.paused && !this.failure) {
+      void this.flush().catch(() => undefined);
+    }
     this.disposed = true;
+    return this.settlement();
   }
 }

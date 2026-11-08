@@ -8,6 +8,8 @@ import {
   readAllSettings,
   type SettingValue,
 } from '../repositories/settings.js';
+import type { ExtractionService } from '../extraction/service.js';
+import type { CandidateValidation } from '../extraction/candidates.js';
 import { NOTIFICATION_INTERVALS } from '../services/intervals.js';
 import type { CronService } from '../services/cronService.js';
 import type { WhatsAppReminders } from '../notifications/whatsapp/service.js';
@@ -89,6 +91,27 @@ function languageRule(): Rule {
   };
 }
 
+/** The provider of an extraction is one of the two supported ones, or none. */
+function providerRule(): Rule {
+  return {
+    validate: (value) => (value === '' || value === 'groq' || value === 'openrouter' ? value : null),
+    message: "must be '', 'groq' or 'openrouter'",
+  };
+}
+
+/** The model of an extraction is an empty value or one model identifier. */
+function modelRule(): Rule {
+  return {
+    validate: (value) =>
+      typeof value === 'string' &&
+      value.length <= 128 &&
+      (value === '' || /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.:-]+$/.test(value))
+        ? value
+        : null,
+    message: 'must be empty or a model identifier of at most 128 characters',
+  };
+}
+
 function cronRule(): Rule {
   return {
     validate: (value) => {
@@ -116,9 +139,103 @@ const EDITABLE: Record<string, Rule> = {
   'cron.days': numberRule(1, 365),
   'cron.include_employees': boolRule(),
   'cron.include_documents': boolRule(),
+  'ai_extraction.enabled': boolRule(),
+  'ai_extraction.provider': providerRule(),
+  'ai_extraction.model': modelRule(),
 };
 
-export function createSettingsRouter(config: AppConfig, db: Db, cron: CronService, reminders: WhatsAppReminders): Router {
+/**
+ * The preferences of the extraction a validated selection is bound to.
+ *
+ * The enabled flag, the provider and the model are the three settings that
+ * decide what an extraction would do. A validation proves them against the
+ * live provider, so the values the validation saw have to be the values that
+ * are written.
+ */
+const EXTRACTION_PREFERENCES = [
+  'ai_extraction.enabled',
+  'ai_extraction.provider',
+  'ai_extraction.model',
+] as const;
+
+/**
+ * Reads the persisted preferences of the extraction.
+ *
+ * The values are read as they are stored and compared by value, never by the
+ * moment of the write: a request that repeats the current selection writes
+ * the same values and is therefore not a change, while a request that meets
+ * different values was validated against another selection.
+ */
+function extractionPreferences(settings: Record<string, SettingValue>): string {
+  return JSON.stringify(EXTRACTION_PREFERENCES.map(key => settings[key] ?? null));
+}
+
+/**
+ * Checks the effective extraction selection before anything is written.
+ *
+ * The combination of the current settings and the requested ones has to be
+ * usable: a disabled selection is always allowed, but an enabled selection
+ * needs a provider, a model the server offers, a configured key and the
+ * processing approval of the environment. The enabled selection is proved
+ * against the fresh metadata of the provider as well, so a revoked or a paid
+ * candidate is refused before a single setting is written. The check never
+ * changes a setting and never activates anything on its own.
+ *
+ * The request keeps the requested candidate immutable and hands the authority
+ * of that candidate back, so the caller can read the authority again right
+ * before it writes.
+ */
+async function validateExtractionSelection(
+  config: AppConfig,
+  effective: Record<string, SettingValue>,
+  extraction: ExtractionService,
+  userId: string,
+): Promise<CandidateValidation> {
+  if (effective['ai_extraction.enabled'] !== true) {
+    return { problem: null, authority: null };
+  }
+
+  const provider = String(effective['ai_extraction.provider'] ?? '');
+  const model = String(effective['ai_extraction.model'] ?? '');
+  if (!provider || !model) {
+    return { problem: 'Enabling the extraction needs a provider and a model.', authority: null };
+  }
+  if (provider !== 'groq' && provider !== 'openrouter') {
+    return { problem: 'The selected provider is not known.', authority: null };
+  }
+  if (!config.extraction.authorized) {
+    return { problem: 'External document processing is not authorized.', authority: null };
+  }
+  return extraction.validateCandidate({
+    userId,
+    provider,
+    model,
+    context: config.extraction.context,
+  });
+}
+
+/**
+ * A refusal of the settings write at its real boundary.
+ *
+ * The write of the reminders is the moment the database changes, so the
+ * authority of a selection has to hold there. The refusal carries the reason
+ * the caller reports, and it never leaves a partially written configuration
+ * behind.
+ */
+class SettingsWriteRefused extends Error {
+  constructor(readonly reason: string) {
+    super(reason);
+    this.name = 'SettingsWriteRefused';
+  }
+}
+
+export function createSettingsRouter(
+  config: AppConfig,
+  db: Db,
+  cron: CronService,
+  reminders: WhatsAppReminders,
+  extraction: ExtractionService,
+): Router {
   const router = Router();
 
   router.get('/', (_req, res) => {
@@ -182,7 +299,88 @@ export function createSettingsRouter(config: AppConfig, db: Db, cron: CronServic
         return;
       }
 
-      await reminders.saveSettings(accepted);
+      // The effective combination is checked before the first write, so a
+      // rejected request changes neither a setting nor a notification.
+      const persisted = readAllSettings(db);
+      const effective = { ...persisted, ...accepted };
+      const changesExtraction = Object.keys(accepted).some(key => key.startsWith('ai_extraction.'));
+      // The persisted preferences are observed before the validation and the
+      // validated selection is bound to exactly these values. A write that
+      // finds different values was proved against another selection.
+      const boundPreferences = extractionPreferences(persisted);
+      const validation = changesExtraction
+        ? await validateExtractionSelection(config, effective, extraction, req.user!.id)
+        : { problem: null, authority: null };
+      if (validation.problem) {
+        res.status(400).json({
+          data: null,
+          error: {
+            message: 'The settings were not saved because the extraction selection is not valid.',
+            code: 'invalid_settings',
+            rejected: [{ key: 'ai_extraction.enabled', reason: validation.problem }],
+          },
+        });
+        return;
+      }
+
+      // The authority of the selection is read again before the first write.
+      // A role, a context or an approval that changed while the remote proof
+      // was pending refuses the whole request, so a mixed request never
+      // writes half of its settings.
+      const authority = validation.authority;
+      if (authority) {
+        const refused = extraction.assertCandidateAuthority(authority);
+        if (refused) {
+          res.status(400).json({
+            data: null,
+            error: {
+              message: 'The settings were not saved because the extraction selection is not valid.',
+              code: 'invalid_settings',
+              rejected: [{ key: 'ai_extraction.enabled', reason: refused }],
+            },
+          });
+          return;
+        }
+      }
+
+      // The same authority is proved again at the real write boundary, and the
+      // persisted preferences are read again with it. The assertion runs inside
+      // the coordinator of the reminders, after every await and directly
+      // before the settings are applied, so a role, a context or an approval
+      // that changed while the write was queued or while the enable check was
+      // pending refuses the whole request before a single setting, notification
+      // or job changes.
+      //
+      // The preferences are compared by value, so a queued request that
+      // repeats the current selection still succeeds, and a request that was
+      // validated against another selection — including a partial write that
+      // changed only the enabled flag — is refused as a whole.
+      const beforeWrite = changesExtraction
+        ? () => {
+            const changed = extractionPreferences(readAllSettings(db)) !== boundPreferences;
+            const refused = changed
+              ? 'The extraction selection changed while it was validated.'
+              : authority
+                ? extraction.assertCandidateAuthority(authority)
+                : null;
+            if (refused) throw new SettingsWriteRefused(refused);
+          }
+        : undefined;
+
+      try {
+        await reminders.saveSettings(accepted, beforeWrite);
+      } catch (error) {
+        if (!(error instanceof SettingsWriteRefused)) throw error;
+        res.status(400).json({
+          data: null,
+          error: {
+            message: 'The settings were not saved because the extraction selection is not valid.',
+            code: 'invalid_settings',
+            rejected: [{ key: 'ai_extraction.enabled', reason: error.reason }],
+          },
+        });
+        return;
+      }
       cron.reschedule();
 
       res.json({ data: { updated: Object.keys(accepted), rejected: [] }, error: null });
