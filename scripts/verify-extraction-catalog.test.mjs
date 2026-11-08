@@ -218,6 +218,33 @@ test('OpenRouter catalog marks approved, approvable and unavailable models and t
       ),
   }));
 
+test('live entries outside the client bounds are dropped or truncated, never the whole listing', () =>
+  extractionApi(async (f) => {
+    const res = await f.request('/api/document-extraction/catalog?provider=groq');
+    assertCatalogEnvelope(res, 'live');
+    const byId = new Map(res.json.data.entries.map((entry) => [entry.id, entry]));
+    assert.ok(!byId.has('x'.repeat(129)), 'An oversized id must not enter the listing');
+    assert.ok(!byId.has('y'.repeat(129)), 'An oversized id is dropped, not truncated');
+    assert.ok(byId.has(MOCK_GROQ_MODEL_ID), 'The well-formed model stays listed');
+    const labeled = byId.get(MOCK_GROQ_MODEL_ID);
+    assertEntryShape(labeled, 'groq');
+    assert.equal(labeled.label.length, 128, 'An oversized label is truncated, not refused');
+  }, {
+    enabled: false, authorized: true, provider: 'groq',
+    groqKey: 'mock-groq-key', approvals: [makeMockGroqApproval()],
+    transport: async () =>
+      new Response(
+        JSON.stringify({
+          data: [
+            groqModel('x'.repeat(129)),
+            { ...groqModel('y'.repeat(129)), name: 'n'.repeat(300) },
+            { ...groqModel(MOCK_GROQ_MODEL_ID), name: 'Q'.repeat(300) },
+          ],
+        }),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      ),
+  }));
+
 // ---------------------------------------------------------------------------
 // 4. Local fallback
 // ---------------------------------------------------------------------------
@@ -226,19 +253,35 @@ test('a routed provider without a key answers the local catalog with zero calls'
   extractionApi(async (f) => {
     const res = await f.request('/api/document-extraction/catalog?provider=openrouter');
     assertCatalogEnvelope(res, 'local');
-    assert.equal(res.json.data.entries.length, 1);
-    const [entry] = res.json.data.entries;
+    const byId = new Map(res.json.data.entries.map((entry) => [entry.id, entry]));
+
+    assert.equal(res.json.data.entries.length, 3);
+    const [entry] = [byId.get(MOCK_MODEL_ID)];
     assertEntryShape(entry, 'openrouter');
     assert.equal(entry.id, MOCK_MODEL_ID);
     // Without a key nothing is selectable, so the model is offered as
     // approvable with its template instead of pretending it is approved.
     assert.equal(entry.status, 'approvable');
     assert.ok(entry.approval?.includes('PROVIDER_TAG'), 'The local template names the tag to replace');
+
+    // A paid or router approval is a dead record: the locally checkable ID
+    // rules refuse it even before the provider is ever contacted.
+    const router = byId.get('openrouter/auto:free');
+    assertEntryShape(router, 'openrouter');
+    assert.equal(router.status, 'unavailable');
+    const notFree = byId.get('vendor/paid-vision');
+    assertEntryShape(notFree, 'openrouter');
+    assert.equal(notFree.status, 'unavailable');
     assertNoSecrets(JSON.stringify(res.json), f);
     assert.equal(f.calls.length, 0, 'A provider without a key is never contacted');
   }, {
     enabled: false, authorized: true, provider: 'openrouter',
-    openRouterKey: null, approvals: [makeMockApproval({ endpoint: MOCK_ENDPOINT_TAG })],
+    openRouterKey: null,
+    approvals: [
+      makeMockApproval({ endpoint: MOCK_ENDPOINT_TAG }),
+      makeMockApproval({ model: 'openrouter/auto:free', endpoint: MOCK_ENDPOINT_TAG }),
+      makeMockApproval({ model: 'vendor/paid-vision', endpoint: MOCK_ENDPOINT_TAG }),
+    ],
   }));
 
 test('an unauthorized environment answers the local Groq catalog with zero calls', () =>

@@ -141,8 +141,16 @@ export function createModelCatalog(deps: ModelCatalogDeps) {
         verification: 'local',
         entries: order(
           local.map(id => {
+            // Locally only the record shape can be judged: pricing and
+            // modality are unknown without the provider. A routed model that
+            // does not follow the free, non-routing family can never be used,
+            // so an approval for it is a dead record and is refused here.
             const maxImages =
-              provider === 'groq' ? (GROQ_CAPABILITIES[id]?.maxImages ?? null) : 1;
+              provider === 'groq'
+                ? (GROQ_CAPABILITIES[id]?.maxImages ?? null)
+                : id.endsWith(':free') && !isRouterModel(id)
+                  ? 1
+                  : null;
             return describeEntry(provider, id, id, approved, maxImages !== null, maxImages, now);
           }),
         ),
@@ -153,8 +161,11 @@ export function createModelCatalog(deps: ModelCatalogDeps) {
     const entries: ModelCatalogEntry[] = [];
     for (const model of parseModelList(payload)) {
       const id = typeof model.id === 'string' ? model.id : '';
-      if (!id) continue;
-      const label = typeof model.name === 'string' && model.name ? model.name : id;
+      // The client contract refuses the whole listing over one oversized
+      // field, so an entry outside the bounds is dropped instead of being
+      // allowed to erase the catalog of every other model.
+      if (!id || id.length > 128) continue;
+      const label = (typeof model.name === 'string' && model.name ? model.name : id).slice(0, 128);
       if (provider === 'groq') {
         const maxImages = GROQ_CAPABILITIES[id]?.maxImages ?? null;
         entries.push(describeEntry(provider, id, label, approved, maxImages !== null, maxImages, now));

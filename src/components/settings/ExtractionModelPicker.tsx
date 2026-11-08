@@ -118,7 +118,13 @@ export function ExtractionModelPicker({
         setCopied((current) => (current?.id === row.id ? null : current));
       }, 2000);
     };
-    navigator.clipboard?.writeText(row.approval).then(
+    // A page without the Clipboard API can never copy: the handler reports
+    // the failure instead of silently doing nothing.
+    if (!navigator.clipboard) {
+      show(false);
+      return;
+    }
+    navigator.clipboard.writeText(row.approval).then(
       () => show(true),
       () => show(false),
     );
