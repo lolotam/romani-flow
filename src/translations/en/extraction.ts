@@ -88,6 +88,7 @@ export const extraction = {
       'The list of approved models is unavailable. The saved selection is kept, but its live availability is unverified.',
     status_unavailable: 'The status of the extraction could not be read.',
     invalid_response: 'The answer of the server could not be read.',
+    internal_error: 'The extraction failed on the server. Try again.',
   },
   providers: {
     groq: 'Groq',
