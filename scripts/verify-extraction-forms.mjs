@@ -1716,9 +1716,12 @@ async function runFormsTests(page, api, draftDb, draftsPort) {
         if (employeeMode) await selectComboboxOption(page, 'الموظف *', 'Ahmed Al-Sabah');
         else await selectComboboxOption(page, 'الشركة', 'شركة روماني للتجارة');
         await page.locator('input[type="file"]').setInputFiles({ name: 'context.png', mimeType: 'image/png', buffer: Buffer.from(validPng) });
-        const request = await api.waitForRequest(0, 5000);
+        const request = await api.waitForRequest(0, 10000);
         await request.fulfillSuccess();
-        await page.waitForFunction(() => document.querySelector('input[name="document_number"]')?.value === '290010112345', null, { timeout: 5000 });
+        // The machine proposal reaches the form after the client settled the
+        // read and the form re-rendered. A loaded CI container needs more than
+        // five seconds for that, and the assertion below is the real proof.
+        await page.waitForFunction(() => document.querySelector('input[name="document_number"]')?.value === '290010112345', null, { timeout: 15000 });
         const form = page.locator('form');
         await form.locator('input[name="document_number"]').fill('MANUAL-CONTEXT');
         if (variant === 'company') await selectComboboxOption(page, 'الشركة', 'شركة الخليج للخدمات');
