@@ -321,8 +321,11 @@ async function getModelOptions(page) {
       options.map((opt) => ({ value: opt.value, text: (opt.textContent || '').trim() }))
     );
   }
-  // A custom combobox only renders its options while it is open: open it,
-  // read every option, then close it again.
+  // A custom combobox only renders its options while it is open: open it and
+  // read every option. The dropdown stays open on purpose: closing it from
+  // the outside raced with the popover dismissal in CI chromium, and both
+  // callers use this helper as the last assertion of their case — the next
+  // remount clears the open portal with the whole fixture tree.
   await trigger.click();
   const searchBox = page.locator('[data-testid="extraction-model-search"]');
   await searchBox.waitFor({ state: 'visible', timeout: 5000 });
@@ -336,8 +339,6 @@ async function getModelOptions(page) {
       text: (await opt.innerText()).trim(),
     });
   }
-  await page.keyboard.press('Escape');
-  await searchBox.waitFor({ state: 'hidden', timeout: 5000 });
   return result;
 }
 
