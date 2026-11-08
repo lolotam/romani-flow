@@ -79,6 +79,7 @@ export const extraction = {
     catalog_unavailable: 'قائمة النماذج المعتمدة غير متاحة. يتم الاحتفاظ بالاختيار المحفوظ، لكن توفره المباشر غير مؤكد.',
     status_unavailable: 'تعذّرت قراءة حالة الاستخراج.',
     invalid_response: 'تعذّرت قراءة رد الخادم.',
+    internal_error: 'فشل الاستخراج في الخادم. أعد المحاولة.',
   },
   providers: {
     groq: 'Groq',

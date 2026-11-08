@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { ExtractionSession, describeFailure, approvedErrorCode } from '../src/lib/extraction/session.ts';
-import { ApiRequestError } from '../src/lib/api/http.ts';
+import { ApiRequestError, request } from '../src/lib/api/http.ts';
 import { fieldNames } from '../server/contracts/documentExtraction.ts';
 
 // Helper to construct blank values dictionary matching the shared contract
@@ -477,8 +477,18 @@ for (const [wireCode, status, expected] of [
   ['stale_settings', 409, 'extraction_conflict'],
   ['stale_catalog', 409, 'extraction_conflict'],
   ['account_mismatch', 409, 'extraction_conflict'],
+  ['context_mismatch', 409, 'extraction_conflict'],
   ['unsupported_media_type', 415, 'invalid_request'],
+  ['invalid_json', 400, 'invalid_request'],
+  ['invalid_scope', 409, 'invalid_request'],
+  ['not_found', 404, 'invalid_request'],
   ['invalid_provider', 400, 'invalid_provider'],
+  ['concurrency_limit', 429, 'busy'],
+  ['provider_identity_mismatch', 502, 'invalid_result'],
+  ['truncated_output', 502, 'invalid_result'],
+  ['external_inference_forbidden', 503, 'processing_not_authorized'],
+  ['internal_error', 500, 'internal_error'],
+  ['request_timeout', 0, 'extraction_timeout'],
 ]) {
   test(`refusal mapping keeps the reason of the server: ${wireCode}`, () => {
     const outcome = describeFailure(new ApiRequestError('Never display raw server message', wireCode, status));
@@ -488,3 +498,26 @@ for (const [wireCode, status, expected] of [
     });
   });
 }
+
+// A request that runs into its own deadline is not a broken connection: it
+// carries its own code, so the form can name the deadline instead of the
+// network.
+test('a request that runs into its deadline reports the deadline', async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (_path, init) =>
+    new Promise((_resolve, reject) => {
+      init.signal.addEventListener(
+        'abort',
+        () => reject(Object.assign(new Error('aborted'), { name: 'AbortError' })),
+        { once: true },
+      );
+    });
+  try {
+    const envelope = await request('/api/document-extraction', { method: 'POST', timeoutMs: 20 });
+    assert.equal(envelope.error?.code, 'request_timeout');
+    const outcome = describeFailure(envelope.error);
+    assert.deepEqual(outcome, { phase: 'failed', errorCode: 'extraction_timeout', retryAfterSeconds: null });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});

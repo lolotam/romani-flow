@@ -454,6 +454,14 @@ export function createDocumentExtractionRouter(
       return;
     }
     const failure = publicFailure(error);
+    const requestId = randomUUID();
+    // A refused extraction is recorded without a document, a key, a file name
+    // or an upstream sentence: the code, the status and the request id are
+    // enough to tell a refused environment from a refused provider, and the
+    // administrator can quote the id.
+    console.error(
+      `[extraction] refused code=${failure.code} status=${failure.status} request=${requestId}`,
+    );
     const body: {
       data: null;
       error: { code: string; message: string; requestId: string; retryAfterSeconds?: number };
@@ -462,7 +470,7 @@ export function createDocumentExtractionRouter(
       error: {
         code: failure.code,
         message: failure.message,
-        requestId: randomUUID(),
+        requestId,
       },
     };
     if (failure.retryAfterSeconds !== undefined) {
