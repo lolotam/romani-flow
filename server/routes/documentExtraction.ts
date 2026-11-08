@@ -341,38 +341,63 @@ export function createDocumentExtractionRouter(
     }),
   );
 
-  router.get(
-    '/models',
-    asyncHandler(async (req, res) => {
-      const provider = req.query.provider;
-      if (provider !== 'groq' && provider !== 'openrouter') {
-        res.status(400).json({
-          data: null,
-          error: {
-            message: 'The provider is not known.',
-            code: 'invalid_provider',
-            requestId: randomUUID(),
-          },
-        });
-        return;
+  /**
+   * Answers one provider-bound listing request.
+   *
+   * The provider is validated first and every read runs under the abort
+   * wiring of the request: a client that leaves takes its transport call with
+   * it, and an answer is only written while the connection is still alive.
+   */
+  const respondProviderListing = async (
+    req: Request,
+    res: Response,
+    read: (provider: 'groq' | 'openrouter', signal: AbortSignal) => Promise<unknown>,
+  ): Promise<void> => {
+    const provider = req.query.provider;
+    if (provider !== 'groq' && provider !== 'openrouter') {
+      res.status(400).json({
+        data: null,
+        error: {
+          message: 'The provider is not known.',
+          code: 'invalid_provider',
+          requestId: randomUUID(),
+        },
+      });
+      return;
+    }
+    const controller = new AbortController();
+    const cancel = (): void => {
+      if (!res.writableEnded) controller.abort();
+    };
+    req.once('aborted', cancel);
+    res.once('close', cancel);
+    try {
+      const data = await read(provider, controller.signal);
+      if (!controller.signal.aborted && !res.destroyed) {
+        res.json({ data, error: null });
       }
-      const controller = new AbortController();
-      const cancel = (): void => {
-        if (!res.writableEnded) controller.abort();
-      };
-      req.once('aborted', cancel);
-      res.once('close', cancel);
-      try {
-        const choices = await service.models(provider, controller.signal);
-        if (!controller.signal.aborted && !res.destroyed) {
-          res.json({ data: choices, error: null });
-        }
-      } finally {
-        req.off('aborted', cancel);
-        res.off('close', cancel);
-      }
-    }),
-  );
+    } finally {
+      req.off('aborted', cancel);
+      res.off('close', cancel);
+    }
+  };
+
+  /**
+   * The live model catalog of one provider.
+   *
+   * The listing reads the provider model list and marks every entry as
+   * approved, approvable or unavailable. It sends no document, so it works
+   * before the extraction is enabled: the administrator needs it to choose a
+   * model. It never authorizes a processing and it never returns a key.
+   */
+  router.get('/catalog', asyncHandler((req, res) =>
+    respondProviderListing(req, res, (provider, signal) => service.catalog(provider, signal)),
+  ));
+
+  /** The reviewed live model list of one provider, as in earlier versions. */
+  router.get('/models', asyncHandler((req, res) =>
+    respondProviderListing(req, res, (provider, signal) => service.models(provider, signal)),
+  ));
 
   router.post(
     '/',

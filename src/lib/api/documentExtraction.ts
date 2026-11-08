@@ -26,6 +26,17 @@ export type ExtractionProvider = 'groq' | 'openrouter';
 /** The largest request the extraction endpoint accepts. */
 const MAX_REQUEST_BYTES = 10 * 1024 * 1024;
 
+/**
+ * The number of images one provider accepts per request.
+ *
+ * The bound belongs to the provider: Groq accepts three images and OpenRouter
+ * accepts one. An answer that claims more is a broken answer.
+ */
+const PROVIDER_MAX_IMAGES: Record<ExtractionProvider, number> = {
+  groq: 3,
+  openrouter: 1,
+};
+
 /** The time an extraction request may take. */
 const REQUEST_TIMEOUT_MS = 50_000;
 
@@ -99,6 +110,72 @@ export async function getExtractionModels(
   const parsed = z.array(modelChoiceSchema).max(50).safeParse(envelope.data);
   if (!parsed.success) throw new Error('extraction_invalid_response');
   return parsed.data;
+}
+
+/**
+ * One entry of the live model catalog, validated with the shared contract.
+ *
+ * The provider bound is enforced here as well, so a broken answer can never
+ * advertise an image count its provider would refuse.
+ */
+const catalogEntrySchema = z
+  .object({
+    id: z.string().min(1).max(128),
+    label: z.string().min(1).max(128),
+    provider: z.enum(['groq', 'openrouter']),
+    status: z.enum(['approved', 'approvable', 'unavailable']),
+    maxImages: z.number().int().min(1).max(3).nullable(),
+    approval: z.string().min(1).max(1024).nullable(),
+  })
+  .strict()
+  .refine(
+    (value) => value.maxImages === null || value.maxImages <= PROVIDER_MAX_IMAGES[value.provider],
+    'the model claims more images than its provider accepts',
+  );
+
+/** The answer of the live model catalog of one provider. */
+const catalogListingSchema = z
+  .object({
+    verification: z.enum(['live', 'local']),
+    entries: z.array(catalogEntrySchema).max(500),
+  })
+  .strict();
+
+/** One model of the live model catalog. */
+export type ModelCatalogEntry = z.infer<typeof catalogEntrySchema>;
+
+/** The model catalog of one provider. */
+export interface ModelCatalogListing {
+  verification: 'live' | 'local';
+  entries: ModelCatalogEntry[];
+}
+
+/**
+ * Reads the model catalog of one provider.
+ *
+ * The answer is validated before it is returned and every entry has to belong
+ * to the requested provider, so a form never shows a model of another one.
+ * The listing is read-only: it never selects, approves or activates a model.
+ */
+export async function getExtractionCatalog(
+  provider: ExtractionProvider,
+  signal?: AbortSignal,
+): Promise<ModelCatalogListing> {
+  if (provider !== 'groq' && provider !== 'openrouter') {
+    throw new Error('extraction_invalid_provider');
+  }
+  const envelope = await request<unknown>(
+    `/api/document-extraction/catalog?provider=${encodeURIComponent(provider)}`,
+    { signal },
+  );
+  if (signal?.aborted) throw abortedError();
+  if (envelope.error) throw envelope.error;
+  const parsed = catalogListingSchema.safeParse(envelope.data);
+  if (!parsed.success) throw new Error('extraction_invalid_response');
+  if (parsed.data.entries.some((entry) => entry.provider !== provider)) {
+    throw new Error('extraction_invalid_response');
+  }
+  return { verification: parsed.data.verification, entries: parsed.data.entries };
 }
 
 /**

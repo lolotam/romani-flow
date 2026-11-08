@@ -21,7 +21,7 @@ import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { useAuth } from '@/hooks/useAuth';
-import type { ExtractionStatus, ModelChoice } from '@/lib/api/documentExtraction';
+import { ExtractionModelPicker } from '@/components/settings/ExtractionModelPicker';
 import {
   EXTRACTION_ERROR_CODES,
   useExtractionSettings,
@@ -44,11 +44,6 @@ export function DocumentExtractionSettings({ refreshKey = 0 }: DocumentExtractio
   const { t, isRTL } = useLanguage();
   const admin = user?.role === 'admin';
   const state = useExtractionSettings(admin ? (user?.id ?? null) : null, refreshKey);
-
-  const modelOptions = useMemo(
-    () => buildModelOptions(state.candidates, state.status, state.editor.provider, t),
-    [state.candidates, state.status, state.editor.provider, t],
-  );
 
   /**
    * The saved model is kept for display only when the current catalogue does
@@ -114,20 +109,14 @@ export function DocumentExtractionSettings({ refreshKey = 0 }: DocumentExtractio
 
           <div className="space-y-1">
             <Label htmlFor="extraction-model">{t('extraction.model')}</Label>
-            <select
-              id="extraction-model"
-              data-testid="extraction-model-select"
-              className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
-              value={state.editor.model}
-              onChange={(event) => state.setModel(event.target.value)}
-            >
-              <option value="">{t('extraction.chooseModel')}</option>
-              {modelOptions.map((option) => (
-                <option key={option.id} value={option.id}>
-                  {option.label}
-                </option>
-              ))}
-            </select>
+            <ExtractionModelPicker
+              provider={state.editor.provider}
+              model={state.editor.model}
+              catalog={state.catalog}
+              candidates={state.candidates}
+              onSelect={state.setModel}
+              disabled={state.saving}
+            />
           </div>
 
           {state.status && (
@@ -202,30 +191,6 @@ export function DocumentExtractionSettings({ refreshKey = 0 }: DocumentExtractio
       </Card>
     </div>
   );
-}
-
-/**
- * The models the administrator may choose.
- *
- * The list is the catalogue of the server. The saved model stays visible when
- * the catalogue does not know it, because a failed refresh must never drop the
- * selection of the administrator.
- */
-function buildModelOptions(
-  candidates: ModelChoice[],
-  status: ExtractionStatus | null,
-  provider: ExtractionProvider | '',
-  t: (key: string) => string,
-): { id: string; label: string }[] {
-  const options: { id: string; label: string }[] = candidates.map((candidate) => ({
-    id: candidate.id,
-    label: candidate.label,
-  }));
-  const saved = status && status.provider === provider ? status.model : '';
-  if (saved && !options.some((option) => option.id === saved)) {
-    options.push({ id: saved, label: `${saved} (${t('extraction.catalog.savedSelection')})` });
-  }
-  return options;
 }
 
 /**

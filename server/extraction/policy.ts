@@ -61,7 +61,7 @@ export function isRouterModel(modelId: string): boolean {
 }
 
 /** Reports whether the model accepts images and answers with text. */
-function hasVisionText(model: Record<string, unknown>): boolean {
+export function hasVisionText(model: Record<string, unknown>): boolean {
   const architecture = model.architecture;
   if (!isRecord(architecture)) return false;
   const modality = typeof architecture.modality === 'string' ? architecture.modality : '';
@@ -72,7 +72,7 @@ function hasVisionText(model: Record<string, unknown>): boolean {
 }
 
 /** Reports whether the model supports the parameters the pipeline sends. */
-function supportsRequiredParameters(model: Record<string, unknown>): boolean {
+export function supportsRequiredParameters(model: Record<string, unknown>): boolean {
   const parameters = Array.isArray(model.supported_parameters) ? model.supported_parameters : [];
   return parameters.includes('response_format') && parameters.includes('max_tokens');
 }
