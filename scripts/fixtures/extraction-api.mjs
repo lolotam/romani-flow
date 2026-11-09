@@ -41,6 +41,16 @@ import { readCatalogs } from '../../server/extraction/catalog.ts';
  * draft scopes, disabled external notification transports, explicit config, loopback
  * Express, injected extraction transport, deterministic operation barriers, and strict egress interception.
  */
+/**
+ * The moment the fixture pretends to be.
+ *
+ * The clock of the fixture is pinned so that the catalogue and the approvals
+ * are the same in every run. A test that measures a lifetime measures it
+ * against this moment and never against the wall clock, because a lifetime
+ * that shrinks with the calendar would fail on a day and pass on another.
+ */
+export const FIXED_CLOCK = Date.parse('2026-11-08T00:00:00Z');
+
 export async function extractionApi(run, options = {}) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'romani-ext-api-'));
   const db = new DatabaseSync(':memory:');
@@ -427,7 +437,7 @@ export async function extractionApi(run, options = {}) {
     staticDir: dir,
     extractionTransport,
     extractionClock: options.clock ?? {
-      now: () => Date.parse('2026-11-08T00:00:00Z'),
+      now: () => FIXED_CLOCK,
       setTimeout: (callback, ms) => setTimeout(callback, ms),
       clearTimeout: timer => clearTimeout(timer),
     },

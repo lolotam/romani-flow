@@ -120,6 +120,8 @@ interface PublicFailure {
   code: string;
   message: string;
   retryAfterSeconds?: number;
+  /** The place of the answer that was refused, for the log of the server. */
+  detail?: string;
 }
 
 /**
@@ -153,6 +155,7 @@ function publicFailure(error: unknown): PublicFailure {
       code: error.code,
       message: error.message,
       retryAfterSeconds: error.retryAfterSeconds,
+      detail: error.detail,
     };
   }
   if (error instanceof RepositoryError) {
@@ -458,9 +461,12 @@ export function createDocumentExtractionRouter(
     // A refused extraction is recorded without a document, a key, a file name
     // or an upstream sentence: the code, the status and the request id are
     // enough to tell a refused environment from a refused provider, and the
-    // administrator can quote the id.
+    // administrator can quote the id. The detail names the place of the
+    // answer that was refused, and it names a field of the contract and a
+    // word of the vocabulary, never a value of the document.
+    const detail = failure.detail ? ` detail=${failure.detail}` : '';
     console.error(
-      `[extraction] refused code=${failure.code} status=${failure.status} request=${requestId}`,
+      `[extraction] refused code=${failure.code} status=${failure.status} request=${requestId}${detail}`,
     );
     const body: {
       data: null;

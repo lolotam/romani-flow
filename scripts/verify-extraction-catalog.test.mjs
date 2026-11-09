@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { extractionApi } from './fixtures/extraction-api.mjs';
+import { extractionApi, FIXED_CLOCK } from './fixtures/extraction-api.mjs';
 import {
   MOCK_MODEL_ID,
   MOCK_ENDPOINT_TAG,
@@ -183,8 +183,11 @@ test('OpenRouter catalog marks approved, approvable and unavailable models and t
     assert.equal(template.endpoint, 'PROVIDER_TAG', 'A routed template names the tag to replace');
     assert.equal(template.maxImages, 1);
     assert.equal(template.policyVersion, TEMPLATE_POLICY_VERSION);
-    const lifetime = Date.parse(template.expiresAt) - Date.now();
-    assert.ok(lifetime > 179 * 86_400_000 && lifetime < 181 * 86_400_000, 'The template expires inside its lifetime');
+    // The lifetime is measured against the clock of the fixture and never
+    // against the wall clock: a lifetime that shrinks with the calendar would
+    // pass on one day and fail on the next.
+    const lifetime = Date.parse(template.expiresAt) - FIXED_CLOCK;
+    assert.equal(lifetime, 180 * 86_400_000, 'The template expires inside its lifetime');
 
     const paid = byId.get('vendor/paid-vision:free');
     assertEntryShape(paid, 'openrouter');

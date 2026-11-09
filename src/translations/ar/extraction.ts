@@ -58,6 +58,7 @@ export const extraction = {
     provider_policy: 'رفض المزود الطلب بسبب الصلاحيات أو سياسة الخصوصية.',
     provider_rate_limit: 'تم بلوغ حد طلبات المزود.',
     provider_unavailable: 'المزود غير متاح مؤقتًا.',
+    provider_request_rejected: 'رفض المزود الطلب. تحقق من النموذج والإعدادات.',
     extraction_timeout: 'انتهت مهلة الاستخراج.',
     invalid_image: 'الصورة غير صالحة أو تتجاوز الحد المسموح.',
     preparation_limit: 'يتجاوز الملف 10 صفحات أو 4 ميجابكسل للصورة أو 10 MiB للطلب.',

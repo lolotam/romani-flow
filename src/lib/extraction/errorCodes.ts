@@ -15,7 +15,7 @@ import { isPreparationFailure } from './pdfAssets';
 const approvedErrorCodes = new Set<string>([
   'processing_not_authorized', 'extraction_disabled', 'unconfigured', 'policy_unavailable',
   'provider_auth', 'provider_balance', 'provider_policy', 'provider_rate_limit',
-  'provider_unavailable', 'extraction_timeout', 'invalid_image', 'preparation_limit',
+  'provider_unavailable', 'provider_request_rejected', 'extraction_timeout', 'invalid_image', 'preparation_limit',
   'preparation_unavailable', 'unsupported_file', 'incomplete_pages', 'invalid_result',
   'extraction_conflict', 'busy', 'network_error', 'unauthenticated', 'forbidden',
   'origin_forbidden', 'invalid_request', 'request_too_large', 'unsupported_encoding',

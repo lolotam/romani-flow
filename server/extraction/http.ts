@@ -73,6 +73,7 @@ const ERROR_MESSAGES: Record<string, { status: number; message: string }> = {
   provider_rate_limit: { status: 429, message: 'The provider is rate limiting this account.' },
   provider_unavailable: { status: 502, message: 'The provider is currently unavailable.' },
   provider_malformed_response: { status: 502, message: 'The provider returned an unexpected response.' },
+  provider_request_rejected: { status: 502, message: 'The provider refused the request.' },
   provider_identity_mismatch: { status: 502, message: 'The provider answered for a different model.' },
   truncated_output: { status: 502, message: 'The provider response was truncated.' },
   payload_too_large: { status: 502, message: 'The provider response exceeded the allowed size.' },
@@ -85,29 +86,43 @@ const ERROR_MESSAGES: Record<string, { status: number; message: string }> = {
  *
  * The code names the condition, the status is the public answer and the
  * message is fixed: a body, a key, a file name or an upstream sentence never
- * reaches the browser through this error.
+ * reaches the browser through this error. The detail names the place of the
+ * answer that was refused, for the log of the server, and it never carries a
+ * value of the document either.
  */
 export class ExtractionError extends Error {
   readonly code: string;
   readonly status: number;
   readonly retryAfterSeconds?: number;
+  readonly detail?: string;
 
-  constructor(code: string, status: number, message: string, retryAfterSeconds?: number) {
+  constructor(
+    code: string,
+    status: number,
+    message: string,
+    retryAfterSeconds?: number,
+    detail?: string,
+  ) {
     super(message);
     this.name = 'ExtractionError';
     this.code = code;
     this.status = status;
     if (retryAfterSeconds !== undefined) this.retryAfterSeconds = retryAfterSeconds;
+    if (detail !== undefined) this.detail = detail;
   }
 }
 
 /** Builds the failure of a provider step. */
-export function providerError(code: string, retryAfterSeconds?: number): ExtractionError {
+export function providerError(
+  code: string,
+  retryAfterSeconds?: number,
+  detail?: string,
+): ExtractionError {
   const entry = ERROR_MESSAGES[code] ?? {
     status: 502,
     message: 'The extraction provider request failed.',
   };
-  return new ExtractionError(code, entry.status, entry.message, retryAfterSeconds);
+  return new ExtractionError(code, entry.status, entry.message, retryAfterSeconds, detail);
 }
 
 /** Builds the failure of a rejected model identifier. */

@@ -891,3 +891,200 @@ for (const [name, payload, guarded] of providerGuardCases) {
     }
   });
 }
+
+// ---------------------------------------------------------------------------
+// 6. The Vocabulary Of A Provider (The Answer Is Translated, Never Repaired)
+// ---------------------------------------------------------------------------
+
+/** Builds the envelope of a provider answer. */
+function providerEnvelope(pages, model = MOCK_MODEL_ID) {
+  return JSON.stringify({
+    model,
+    choices: [{ message: { content: JSON.stringify({ pages }) }, finish_reason: 'stop' }],
+  });
+}
+
+/** The selection of one read against a mocked provider. */
+const vocabularySelection = {
+  provider: 'openrouter', model: MOCK_MODEL_ID, endpoint: MOCK_ENDPOINT_TAG, maxImages: 1, key: 'test-secret',
+};
+
+/** Reads one page through a mocked provider. */
+async function readOnePage(pages, envelope = providerEnvelope(pages)) {
+  const mockTransport = async () => new Response(envelope, { status: 200 });
+  return extractBatch(
+    vocabularySelection,
+    [{ page: 1, mime: 'image/png', base64: VALID_PNG_BASE64 }],
+    new AbortController().signal,
+    mockTransport,
+  );
+}
+
+test('an answer that writes "certain" and "Gregorian" is read', async () => {
+  const pages = await readOnePage([
+    makeRawPage(1, {
+      title: { value: 'CIVIL ID', certainty: 'certain' },
+      issue_date: { value: '2024-01-15', certainty: 'certain', source: '2024-01-15', calendar: 'Gregorian' },
+      expiry_date: { value: '2026-01-15', certainty: 'certain', source: '2026-01-15', calendar: 'Gregorian' },
+    }),
+  ]);
+  assert.equal(pages.length, 1);
+  assert.equal(pages[0].title.certainty, 'clear');
+  assert.equal(pages[0].issue_date.calendar, 'gregorian');
+  assert.equal(pages[0].expiry_date.calendar, 'gregorian');
+});
+
+test('a certainty the contract does not know asks for a review instead of a clear value', async () => {
+  const pages = await readOnePage([
+    makeRawPage(1, { title: { value: 'CIVIL ID', certainty: 'probably' } }),
+  ]);
+  assert.equal(pages[0].title.certainty, 'uncertain');
+});
+
+test('a calendar the contract does not know never becomes a Gregorian date', async () => {
+  const pages = await readOnePage([
+    makeRawPage(1, {
+      issue_date: { value: '2024-01-15', certainty: 'clear', source: '2024-01-15', calendar: 'Hijri' },
+    }),
+  ]);
+  assert.equal(pages[0].issue_date.calendar, 'unknown');
+});
+
+test('a date without its own origin is read but never applied', async () => {
+  const pages = await readOnePage([
+    makeRawPage(1, { issue_date: { value: '2024-01-15', certainty: 'clear' } }),
+  ]);
+  assert.equal(pages[0].issue_date.source, null);
+  assert.equal(pages[0].issue_date.calendar, 'unknown');
+});
+
+test('a canonical page number written as a text is read', async () => {
+  const pages = await readOnePage([makeRawPage('1')]);
+  assert.equal(pages[0].page, 1);
+});
+
+test('a page number that is not canonical is refused', async () => {
+  await assert.rejects(() => readOnePage([makeRawPage('01')]), (error) => error.code === 'provider_malformed_response');
+});
+
+test('a document number that arrives as a number is refused', async () => {
+  await assert.rejects(
+    () => readOnePage([makeRawPage(1, { document_number: { value: 290010112345, certainty: 'clear' } })]),
+    (error) => error.code === 'provider_malformed_response',
+  );
+});
+
+test('the request names the words of the vocabulary of the contract', async () => {
+  const calls = [];
+  const mockTransport = async (_url, init) => {
+    calls.push(init);
+    return new Response(providerEnvelope([makeRawPage(1)]), { status: 200 });
+  };
+  await extractBatch(
+    vocabularySelection,
+    [{ page: 1, mime: 'image/png', base64: VALID_PNG_BASE64 }],
+    new AbortController().signal,
+    mockTransport,
+  );
+  const body = JSON.parse(calls[0].body);
+  const prompt = JSON.stringify(body.messages);
+  assert.match(prompt, /clear, uncertain or missing/);
+  assert.match(prompt, /gregorian or unknown/);
+  assert.match(prompt, /never a number/, 'the request forbids a number where a text is expected');
+  assert.ok(
+    !/"value":"\d+"/.test(prompt),
+    'the example of the request carries no number, so no number can be copied from it',
+  );
+});
+
+test('a status the provider names no reason for is a refused request', async () => {
+  for (const status of [400, 404, 408, 413, 422]) {
+    const mockTransport = async () => new Response('{}', { status });
+    await assert.rejects(
+      () => extractBatch(
+        vocabularySelection,
+        [{ page: 1, mime: 'image/png', base64: VALID_PNG_BASE64 }],
+        new AbortController().signal,
+        mockTransport,
+      ),
+      (error) => error.code === 'provider_request_rejected',
+      `status ${status} must be a refused request`,
+    );
+  }
+});
+
+test('a refusal names the place of the answer and never a value of the document', async () => {
+  const mockTransport = async () => new Response(
+    providerEnvelope([makeRawPage(1, { title: { value: 'CIVIL ID', certainty: 'certain', note: 'x' } })]),
+    { status: 200 },
+  );
+  await assert.rejects(
+    () => extractBatch(
+      vocabularySelection,
+      [{ page: 1, mime: 'image/png', base64: VALID_PNG_BASE64 }],
+      new AbortController().signal,
+      mockTransport,
+    ),
+    (error) => {
+      assert.equal(error.code, 'provider_malformed_response');
+      assert.ok(error.detail, 'a refusal names the place of the answer');
+      assert.doesNotMatch(error.detail, /CIVIL ID/, 'the refusal carries no value of the document');
+      return true;
+    },
+  );
+});
+
+test('a token of the provider is never recorded as it is written', async () => {
+  const mockTransport = async () => new Response(JSON.stringify({
+    choices: [{ message: { content: '{"pages":[]}' }, finish_reason: 'the document says 290010112345' }],
+  }), { status: 200 });
+  await assert.rejects(
+    () => extractBatch(
+      vocabularySelection,
+      [{ page: 1, mime: 'image/png', base64: VALID_PNG_BASE64 }],
+      new AbortController().signal,
+      mockTransport,
+    ),
+    (error) => {
+      assert.equal(error.code, 'provider_malformed_response');
+      assert.ok(error.detail.includes('finish_reason:other'), 'a token that is not a word is not recorded');
+      assert.doesNotMatch(error.detail, /290010112345/, 'the refusal carries no value of the document');
+      return true;
+    },
+  );
+});
+
+test('a name that a provider writes in a word of the vocabulary is never recorded', async () => {
+  // The name is not a certainty we know, so the answer is read as uncertain
+  // and nothing is refused: the name never reaches a log at all.
+  const read = await readOnePage([
+    makeRawPage(1, { title: { value: 'CIVIL ID', certainty: 'John Smith' } }),
+  ]);
+  assert.equal(read[0].title.certainty, 'uncertain');
+
+  // With a second fault the answer is refused, and the refusal may name the
+  // word of the vocabulary but never the name itself.
+  const mockTransport = async () => new Response(
+    providerEnvelope([
+      makeRawPage(1, {
+        title: { value: 'CIVIL ID', certainty: 'John Smith' },
+        document_number: { value: 290010112345, certainty: 'clear' },
+      }),
+    ]),
+    { status: 200 },
+  );
+  await assert.rejects(
+    () => extractBatch(
+      vocabularySelection,
+      [{ page: 1, mime: 'image/png', base64: VALID_PNG_BASE64 }],
+      new AbortController().signal,
+      mockTransport,
+    ),
+    (error) => {
+      assert.equal(error.code, 'provider_malformed_response');
+      assert.ok(error.detail.includes('certainty:other'), 'a word that is not ours is not recorded');
+      assert.doesNotMatch(error.detail, /John Smith/, 'the refusal carries no name of the document');
+      return true;
+    },
+  );
+});
