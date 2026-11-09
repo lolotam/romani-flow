@@ -179,11 +179,109 @@ test('normalizePages rejects non-Gregorian or source-mismatched dates as review/
 
   assert.equal(fields.issue_date.value, null);
   assert.equal(fields.issue_date.state, 'review');
-  assert.equal(fields.issue_date.reason, 'invalid');
+  assert.equal(fields.issue_date.reason, 'uncertain');
 
-  assert.equal(fields.expiry_date.value, null);
-  assert.equal(fields.expiry_date.state, 'review');
-  assert.equal(fields.expiry_date.reason, 'invalid');
+  // The source writes the same day in the order of its country, so the
+  // source grounds the date and the date is applied.
+  assert.equal(fields.expiry_date.value, '2026-01-15');
+  assert.equal(fields.expiry_date.state, 'clear');
+  assert.equal(fields.expiry_date.reason, 'none');
+});
+
+test('normalizePages applies a date whose source names it in the order of its country', () => {
+  const p1 = makeRawPage(1, {
+    issue_date: { value: '2024-01-15', certainty: 'clear', source: '15/01/2024', calendar: 'gregorian' },
+    expiry_date: { value: '2029-01-15', certainty: 'clear', source: '15-01-2029', calendar: 'gregorian' },
+  });
+
+  const fields = normalizePages([p1], 1, SAMPLE_CATALOGS);
+
+  assert.equal(fields.issue_date.value, '2024-01-15');
+  assert.equal(fields.issue_date.state, 'clear');
+  assert.equal(fields.expiry_date.value, '2029-01-15');
+  assert.equal(fields.expiry_date.state, 'clear');
+});
+
+test('normalizePages applies a date whose source writes it with Arabic-Indic digits', () => {
+  const p1 = makeRawPage(1, {
+    issue_date: { value: '2024-01-15', certainty: 'clear', source: '١٥/٠١/٢٠٢٤', calendar: 'gregorian' },
+    expiry_date: { value: '٢٠٢٩-٠١-١٥', certainty: 'clear', source: '١٥/٠١/٢٠٢٩', calendar: 'gregorian' },
+  });
+
+  const fields = normalizePages([p1], 1, SAMPLE_CATALOGS);
+
+  assert.equal(fields.issue_date.value, '2024-01-15');
+  assert.equal(fields.issue_date.state, 'clear');
+  assert.equal(fields.expiry_date.value, '2029-01-15');
+  assert.equal(fields.expiry_date.state, 'clear');
+});
+
+test('normalizePages leaves a date to the administrator when the source names two real days', () => {
+  // The source is the first of November and the eleventh of January, so the
+  // page does not determine the day and the administrator confirms it -
+  // whatever the provider made of it.
+  const p1 = makeRawPage(1, {
+    issue_date: { value: '2024-11-01', certainty: 'clear', source: '01/11/2024', calendar: 'gregorian' },
+  });
+
+  const fields = normalizePages([p1], 1, SAMPLE_CATALOGS);
+
+  assert.equal(fields.issue_date.value, null);
+  assert.equal(fields.issue_date.state, 'review');
+  assert.equal(fields.issue_date.reason, 'uncertain');
+  assert.deepEqual(fields.issue_date.alternatives, ['2024-11-01']);
+});
+
+test('normalizePages leaves a date to the administrator when neither the value nor the source determines it', () => {
+  const p1 = makeRawPage(1, {
+    issue_date: { value: '05/06/2024', certainty: 'clear', source: '05/06/2024', calendar: 'gregorian' },
+  });
+
+  const fields = normalizePages([p1], 1, SAMPLE_CATALOGS);
+
+  assert.equal(fields.issue_date.value, null);
+  assert.equal(fields.issue_date.state, 'review');
+  assert.equal(fields.issue_date.reason, 'uncertain');
+  assert.deepEqual(fields.issue_date.alternatives, ['05/06/2024']);
+});
+
+test('normalizePages applies a date the provider read in the order of the page', () => {
+  // The provider read the day and reported it in the order of the page, and
+  // the source repeats the text of the page. The day is the same day.
+  const p1 = makeRawPage(1, {
+    issue_date: { value: '22/08/2022', certainty: 'clear', source: '22/08/2022', calendar: 'gregorian' },
+    expiry_date: { value: '2022-08-22', certainty: 'clear', source: '22/08/2022', calendar: 'gregorian' },
+  });
+
+  const fields = normalizePages([p1], 1, SAMPLE_CATALOGS);
+
+  assert.equal(fields.issue_date.value, '2022-08-22');
+  assert.equal(fields.issue_date.state, 'clear');
+  assert.equal(fields.expiry_date.value, '2022-08-22');
+  assert.equal(fields.expiry_date.state, 'clear');
+});
+
+test('normalizePages applies a date whose source names the field instead of the date', () => {
+  const p1 = makeRawPage(1, {
+    issue_date: { value: '2022-08-22', certainty: 'clear', source: 'Expiry Date', calendar: 'gregorian' },
+  });
+
+  const fields = normalizePages([p1], 1, SAMPLE_CATALOGS);
+
+  assert.equal(fields.issue_date.value, '2022-08-22');
+  assert.equal(fields.issue_date.state, 'clear');
+});
+
+test('normalizePages refuses a date whose source carries other digits', () => {
+  const p1 = makeRawPage(1, {
+    issue_date: { value: '2024-01-15', certainty: 'clear', source: '03/07/2019', calendar: 'gregorian' },
+  });
+
+  const fields = normalizePages([p1], 1, SAMPLE_CATALOGS);
+
+  assert.equal(fields.issue_date.value, null);
+  assert.equal(fields.issue_date.state, 'review');
+  assert.equal(fields.issue_date.reason, 'uncertain');
 });
 
 test('normalizePages detects cross-field date inversion (expiry < issue) and marks both as conflict', () => {
