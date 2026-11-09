@@ -63,6 +63,7 @@ export const extraction = {
     provider_policy: 'Provider access or privacy policy refused this request.',
     provider_rate_limit: 'Provider rate limit reached.',
     provider_unavailable: 'Provider is temporarily unavailable.',
+  provider_request_rejected: 'The provider refused the request. Check the model and the settings.',
     extraction_timeout: 'Extraction timed out.',
     invalid_image: 'Image is invalid or exceeds the size limit.',
     preparation_limit:

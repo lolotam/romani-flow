@@ -475,13 +475,60 @@ prevents the inference. A paid fallback is never used automatically.
 | Provider response envelope | `64 KiB` | `server/extraction/provider.ts` |
 | Provider response message content | `16 KiB` | same |
 | Output tokens per request | `4096` | same |
-| Browser request timeout | `50_000 ms` | `src/lib/api/documentExtraction.ts` |
+| Browser request timeout | `90_000 ms` | `src/lib/api/documentExtraction.ts` |
 | Local preparation deadline | `30_000 ms` | `src/lib/extraction/pdf.ts` |
 | Provider cooldown | `1..300 s` | `server/extraction/service.ts` |
 
 A rate-limited answer starts a cooldown for the account. The announced
 cooldown is bounded to 1..300 seconds and the server also caps its own
 cooldown at 300 seconds.
+
+### 9.3 The vocabulary of the answer
+
+A provider answers in its own words. It writes `certain` where the contract
+writes `clear`, and it writes `Gregorian` where the contract writes
+`gregorian`. Such an answer is a correct answer that used another word, and
+the server translates the words before the contract reads the answer
+(`server/extraction/answerVocabulary.ts`).
+
+The translation changes words and never changes values:
+
+* the certainty becomes `clear`, `uncertain` or `missing`; a word that names
+  no certainty we know becomes **`uncertain`**, so the value reaches the form
+  as a suggestion the administrator confirms and never as a value that is
+  written automatically;
+* the calendar becomes `gregorian` or `unknown`; a word that names no
+  calendar we know becomes **`unknown`**, so a date of a calendar we do not
+  read is never applied;
+* a page number that is written as a canonical text (`"1"` … `"10"`) becomes
+  the number it names; every other text stays a text and is refused;
+* a date that arrives without its own `source` and `calendar` receives the
+  most careful values (`null` and `unknown`), so it is read but never
+  applied — a date is applied only when its source repeats it exactly.
+
+Everything else stays strict. A value that is too long, a page that is
+missing or repeated, a document number that arrives as a **number** (the
+number has already lost the leading zeroes and the separators an identifier
+needs, see §11), an unknown key, a `reasoning_content` instead of a content,
+and a content that is not JSON are all refused exactly as before. No partial
+page is salvaged, no second attempt is made, and no provider is tried again.
+
+The instruction of the request names the words of the vocabulary, because a
+provider that is left to guess writes its own word. The example of the
+request keeps its values empty on purpose: an example that shows a number
+teaches the model that a number is a normal answer, and a model that answers
+with the example has answered with a number that was never on the page.
+
+A refusal is recorded in the log of the server with its code, its status,
+its request id and the place of the answer that was refused
+(`[extraction] refused code=… status=… request=… detail=…`). The place
+names a field of the contract and a word of the vocabulary, never a value of
+the document, a key, a file name or an upstream sentence.
+
+A status that the provider names no reason for is a **refused request**
+(`502 provider_request_rejected`), not an answer we could not read
+(`502 provider_malformed_response`). The two are different failures and the
+administrator sees a different copy for each.
 
 ---
 

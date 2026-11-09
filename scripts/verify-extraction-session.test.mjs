@@ -489,6 +489,7 @@ for (const [wireCode, status, expected] of [
   ['external_inference_forbidden', 503, 'processing_not_authorized'],
   ['internal_error', 500, 'internal_error'],
   ['request_timeout', 0, 'extraction_timeout'],
+  ['provider_request_rejected', 502, 'provider_request_rejected'],
 ]) {
   test(`refusal mapping keeps the reason of the server: ${wireCode}`, () => {
     const outcome = describeFailure(new ApiRequestError('Never display raw server message', wireCode, status));
