@@ -1,11 +1,11 @@
 import {
-  calendarDate,
   type CatalogEntry,
   type Catalogs,
   type ExtractionResult,
   type RawPage,
 } from '../contracts/documentExtraction.js';
 import { documentNumber } from '../contracts/documentNumber.js';
+import { groundedDate } from './dateSource.js';
 
 /**
  * Conservative reconciliation of raw provider pages.
@@ -153,10 +153,8 @@ export function normalizePages(
   const date = (field: 'issue_date' | 'expiry_date') =>
     decide(
       ordered.map(page => page[field]),
-      (value, index) => {
-        const raw = ordered[index][field];
-        return raw.calendar === 'gregorian' && raw.source?.trim() === value ? calendarDate(value) : null;
-      },
+      (value, index) => groundedDate(value, ordered[index][field]),
+      'uncertain',
     );
 
   const fields: ExtractionResult['fields'] = {
