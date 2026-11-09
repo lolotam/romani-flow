@@ -516,22 +516,24 @@ the Gregorian calendar as `2024-01-15` and repeats the text of the page as
 still the day the provider read
 (`server/extraction/dateSource.ts`).
 
-A date is applied when the source carries it:
+A date is applied when the provider reports it twice and both reports carry
+the same day — once as the value and once as the text of the page:
 
 | Source | Value of the provider | Applied |
 |---|---|---|
 | `2024-01-15` | `2024-01-15` | yes — the source repeats the date |
-| `15/01/2024` | `2024-01-15` | yes — the source determines the date, the month-first reading is not a real calendar date |
-| `2024/01/15` | `2024-01-15` | yes — the source names the year first |
-| `١٥/٠١/٢٠٢٤` | `2024-01-15` | yes — the digits of the source are written as the digits of the contract |
-| `05/06/2024` | `2024-06-05` | **no** — the source names two real days, so the administrator confirms it |
+| `15/01/2024` | `2024-01-15` | yes — the source determines the day, the month-first reading is not a real calendar date |
+| `15/01/2024` | `15/01/2024` | yes — the provider read the day in the order of the page |
+| `Expiry Date` | `2024-01-15` | yes — the source names the field, so it carries no digits to contradict |
+| `١٥/٠١/٢٠٢٤` | `2024-01-15` | yes — the digits of the source are written the way the contract writes them |
+| `05/06/2024` | `05/06/2024` | **no** — neither the value nor the source determines a day, so the administrator confirms it |
 | `03/07/2019` | `2024-01-15` | **no** — the source carries other digits |
 | `2024-01-15` | `2024-01-15`, `calendar: unknown` | **no** — the calendar is not the Gregorian one |
 
 Nothing is converted and no component is invented: every digit of an applied
-date comes from the source, and the source is read as the day it determines,
-never as the day the provider preferred. A date that is not applied stays a
-suggestion for the administrator with the reason `uncertain`.
+date comes from the value or from the source, and a day that neither of them
+determines is never applied. A date that is not applied stays a suggestion
+for the administrator with the reason `uncertain`.
 
 Everything else stays strict. A value that is too long, a page that is
 missing or repeated, a document number that arrives as a **number** (the

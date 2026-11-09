@@ -76,20 +76,36 @@ export function dateFromSource(source: string): string | null {
 }
 
 /**
+ * Sorts the digits of a text, so two texts are compared by the digits they
+ * carry and not by the order they write them in.
+ */
+function sortedDigits(value: string): string {
+  return value.replace(/\D/g, '').split('').sort().join('');
+}
+
+/**
  * Reads the date of a field when the source grounds it.
  *
- * The date is the date of the provider when the source names the same day:
- * either the source repeats the date, or the source determines it. A source
- * of another calendar, a value that is not a real calendar date and a source
- * that names the day in another order than the provider read it are all
- * refused, so a date is never applied that the source does not carry.
+ * The provider reports a day twice: as the value and as the text of the
+ * page it read. Both are read as the day they carry, and both must carry
+ * the same day. The day is applied when it is a real calendar date and
+ * either the value or the source determines it; the digits of the source
+ * must be the digits of that day, so a source that names other digits
+ * contradicts the provider and is refused. A source that names the field
+ * instead of the date carries no digits and contradicts nothing.
+ *
+ * Nothing is converted and no component is invented: every digit of an
+ * applied date comes from the value or from the source, and a day that
+ * neither of them determines is never applied.
  */
 export function groundedDate(value: string, raw: { calendar: string; source: string | null }): string | null {
   if (raw.calendar !== 'gregorian') return null;
-  const digits = asciiDigits(value);
-  const date = calendarDate(digits) ?? dateFromSource(digits);
-  if (!date) return null;
   const source = asciiDigits(raw.source?.trim() ?? '');
-  if (source === date) return date;
-  return dateFromSource(source) === date ? date : null;
+  const fromValue = calendarDate(asciiDigits(value)) ?? dateFromSource(asciiDigits(value));
+  const fromSource = source ? (calendarDate(source) ?? dateFromSource(source)) : null;
+  if (fromValue && fromSource && fromValue !== fromSource) return null;
+  const date = fromValue ?? fromSource;
+  if (!date) return null;
+  if (sortedDigits(source) && sortedDigits(source) !== sortedDigits(date)) return null;
+  return date;
 }
