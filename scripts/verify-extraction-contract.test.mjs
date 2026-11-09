@@ -216,6 +216,22 @@ test('normalizePages applies a date whose source writes it with Arabic-Indic dig
   assert.equal(fields.expiry_date.state, 'clear');
 });
 
+test('normalizePages leaves a date to the administrator when the source names two real days', () => {
+  // The source is the first of November and the eleventh of January, so the
+  // page does not determine the day and the administrator confirms it -
+  // whatever the provider made of it.
+  const p1 = makeRawPage(1, {
+    issue_date: { value: '2024-11-01', certainty: 'clear', source: '01/11/2024', calendar: 'gregorian' },
+  });
+
+  const fields = normalizePages([p1], 1, SAMPLE_CATALOGS);
+
+  assert.equal(fields.issue_date.value, null);
+  assert.equal(fields.issue_date.state, 'review');
+  assert.equal(fields.issue_date.reason, 'uncertain');
+  assert.deepEqual(fields.issue_date.alternatives, ['2024-11-01']);
+});
+
 test('normalizePages leaves a date to the administrator when neither the value nor the source determines it', () => {
   const p1 = makeRawPage(1, {
     issue_date: { value: '05/06/2024', certainty: 'clear', source: '05/06/2024', calendar: 'gregorian' },

@@ -84,6 +84,23 @@ function sortedDigits(value: string): string {
 }
 
 /**
+ * Reports whether a source names two real days.
+ *
+ * `01/11/2024` is the first of November and the eleventh of January, and
+ * the source alone does not say which one the page writes. A day that the
+ * source does not determine is not applied, whatever the provider made of
+ * it, so the administrator confirms it instead.
+ */
+export function sourceIsAmbiguous(source: string): boolean {
+  const parts = /^(\d{1,2})[/\-.](\d{1,2})[/\-.](\d{4})$/.exec(source);
+  if (!parts) return false;
+  const [, first, second, year] = parts;
+  const asDay = calendarDate(`${year}-${pad(second)}-${pad(first)}`);
+  const asMonth = calendarDate(`${year}-${pad(first)}-${pad(second)}`);
+  return asDay !== null && asMonth !== null && asDay !== asMonth;
+}
+
+/**
  * Reads the date of a field when the source grounds it.
  *
  * The provider reports a day twice: as the value and as the text of the
@@ -101,6 +118,9 @@ function sortedDigits(value: string): string {
 export function groundedDate(value: string, raw: { calendar: string; source: string | null }): string | null {
   if (raw.calendar !== 'gregorian') return null;
   const source = asciiDigits(raw.source?.trim() ?? '');
+  // The source that names two real days does not determine a day, so the
+  // date stays for the administrator, whatever the provider read from it.
+  if (sourceIsAmbiguous(source)) return null;
   const fromValue = calendarDate(asciiDigits(value)) ?? dateFromSource(asciiDigits(value));
   const fromSource = source ? (calendarDate(source) ?? dateFromSource(source)) : null;
   if (fromValue && fromSource && fromValue !== fromSource) return null;

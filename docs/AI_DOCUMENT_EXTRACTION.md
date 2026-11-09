@@ -527,6 +527,7 @@ the same day — once as the value and once as the text of the page:
 | `Expiry Date` | `2024-01-15` | yes — the source names the field, so it carries no digits to contradict |
 | `١٥/٠١/٢٠٢٤` | `2024-01-15` | yes — the digits of the source are written the way the contract writes them |
 | `05/06/2024` | `05/06/2024` | **no** — neither the value nor the source determines a day, so the administrator confirms it |
+| `01/11/2024` | `2024-11-01` | **no** — the source names two real days, so the page does not determine the day |
 | `03/07/2019` | `2024-01-15` | **no** — the source carries other digits |
 | `2024-01-15` | `2024-01-15`, `calendar: unknown` | **no** — the calendar is not the Gregorian one |
 
