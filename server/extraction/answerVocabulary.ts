@@ -80,6 +80,22 @@ const CALENDAR_WORDS: Readonly<Record<string, Calendar>> = {
 /** The page numbers a provider may write as a text. */
 const CANONICAL_PAGE = /^(?:[1-9]|10)$/;
 
+/**
+ * The finish reasons a provider may name.
+ *
+ * A finish reason that is not in this list is not recorded: a provider may
+ * write anything in the place of a token, and a token may carry a sentence
+ * of the document.
+ */
+const FINISH_REASONS: ReadonlySet<string> = new Set([
+  'stop',
+  'length',
+  'content_filter',
+  'tool_calls',
+  'function_call',
+  'error',
+]);
+
 /** The fields of the contract, used to keep a path of a refusal readable. */
 const CONTRACT_FIELDS: ReadonlySet<string> = new Set([
   'pages',
@@ -214,30 +230,39 @@ export function translateAnswer(answer: unknown): TranslatedAnswer {
  * The record carries the words of the vocabulary and their place in the
  * answer, and never a value of the document: the certainty and the calendar
  * of a field are words of the model, not the content of the page. A word
- * that is not a plain word is not recorded at all, because a provider may
- * write anything in the place of a word.
+ * that is not a word of our vocabulary is not recorded at all, because a
+ * provider may write a sentence of the document in the place of a word, and
+ * a short name satisfies every shape.
  */
 export function describeWords(words: TranslatedWord[]): string {
   return words
     .slice(0, 12)
-    .map((word) => `${word.path}:${readableWord(word.from)}->${word.to}`)
+    .map((word) => `${word.path}:${isVocabularyWord(word.from) ? word.from : 'other'}->${word.to}`)
     .join(',');
 }
 
-/** Keeps a word of the vocabulary readable, and hides anything else. */
-function readableWord(word: string): string {
-  return /^[A-Za-z][A-Za-z _-]{0,23}$/.test(word) ? word : 'other';
+/**
+ * Reports whether a word is one of the words of our vocabulary.
+ *
+ * Only a known word is recorded. A name, a phrase or a sentence of the
+ * document is not a word of the vocabulary, however short it is.
+ */
+function isVocabularyWord(word: string): boolean {
+  const key = word.trim().toLowerCase();
+  return key in CERTAINTY_WORDS || key in CALENDAR_WORDS;
 }
 
 /**
- * Keeps a token of the provider readable, and hides anything else.
+ * Keeps a finish reason of the provider readable, and hides anything else.
  *
- * A provider may write anything in the place of a token, and a token may
- * carry a sentence of the document, so a token that is not a plain word is
- * never recorded.
+ * Only a reason the provider documents is recorded, because a provider may
+ * write anything in the place of a token, and a token may carry a sentence
+ * of the document.
  */
-export function describeToken(token: unknown): string {
-  return typeof token === 'string' ? readableWord(token) : 'other';
+export function describeFinishReason(reason: unknown): string {
+  if (typeof reason !== 'string') return 'other';
+  const key = reason.trim().toLowerCase();
+  return FINISH_REASONS.has(key) ? key : 'other';
 }
 
 /**

@@ -521,9 +521,12 @@ with the example has answered with a number that was never on the page.
 
 A refusal is recorded in the log of the server with its code, its status,
 its request id and the place of the answer that was refused
-(`[extraction] refused code=… status=… request=… detail=…`). The place
-names a field of the contract and a word of the vocabulary, never a value of
-the document, a key, a file name or an upstream sentence.
+(`[extraction] refused code=… status=… request=… detail=…`). The place names
+a field of the contract and a word of our vocabulary, never a value of the
+document, a key, a file name or an upstream sentence. A word that is not one
+of ours is recorded as `other` and never as it was written, because a
+provider may write a name or a sentence of the document in the place of a
+word, and a short name satisfies every shape.
 
 A status that the provider names no reason for is a **refused request**
 (`502 provider_request_rejected`), not an answer we could not read

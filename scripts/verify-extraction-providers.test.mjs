@@ -1053,3 +1053,38 @@ test('a token of the provider is never recorded as it is written', async () => {
     },
   );
 });
+
+test('a name that a provider writes in a word of the vocabulary is never recorded', async () => {
+  // The name is not a certainty we know, so the answer is read as uncertain
+  // and nothing is refused: the name never reaches a log at all.
+  const read = await readOnePage([
+    makeRawPage(1, { title: { value: 'CIVIL ID', certainty: 'John Smith' } }),
+  ]);
+  assert.equal(read[0].title.certainty, 'uncertain');
+
+  // With a second fault the answer is refused, and the refusal may name the
+  // word of the vocabulary but never the name itself.
+  const mockTransport = async () => new Response(
+    providerEnvelope([
+      makeRawPage(1, {
+        title: { value: 'CIVIL ID', certainty: 'John Smith' },
+        document_number: { value: 290010112345, certainty: 'clear' },
+      }),
+    ]),
+    { status: 200 },
+  );
+  await assert.rejects(
+    () => extractBatch(
+      vocabularySelection,
+      [{ page: 1, mime: 'image/png', base64: VALID_PNG_BASE64 }],
+      new AbortController().signal,
+      mockTransport,
+    ),
+    (error) => {
+      assert.equal(error.code, 'provider_malformed_response');
+      assert.ok(error.detail.includes('certainty:other'), 'a word that is not ours is not recorded');
+      assert.doesNotMatch(error.detail, /John Smith/, 'the refusal carries no name of the document');
+      return true;
+    },
+  );
+});

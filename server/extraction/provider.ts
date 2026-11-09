@@ -1,7 +1,7 @@
 import { rawBatch, type ExtractionRequest, type RawPage } from '../contracts/documentExtraction.js';
 import {
+  describeFinishReason,
   describePath,
-  describeToken,
   describeWords,
   translateAnswer,
 } from './answerVocabulary.js';
@@ -210,7 +210,7 @@ function readPages(
     throw providerError(
       choice.finish_reason === 'length' ? 'truncated_output' : 'provider_malformed_response',
       undefined,
-      `finish_reason:${describeToken(choice.finish_reason)}`,
+      `finish_reason:${describeFinishReason(choice.finish_reason)}`,
     );
   }
   const message = choice.message;
