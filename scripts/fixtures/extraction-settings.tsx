@@ -38,6 +38,8 @@ export interface SettingsControls {
   setRefreshKey: (key: number) => void;
   setLanguage: (lang: Language) => void;
   getRenderInfo: () => RenderInfo;
+  /** Gives real React updates a browser rendering opportunity after HTTP settles. */
+  settleRender: () => Promise<void>;
 }
 
 declare global {
@@ -68,6 +70,9 @@ export function ExtractionSettingsFixtureInner({
       remount,
       setRefreshKey,
       setLanguage,
+      settleRender: () => new Promise<void>((resolve) => {
+        requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+      }),
       getRenderInfo: () => ({
         rendered: !isLoading,
         isLoading,

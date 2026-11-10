@@ -89,9 +89,8 @@ function isConfigured(status: ExtractionStatus | null, provider: ExtractionProvi
 
 /**
  * Reports whether the model of the editor is an approved choice of the current
- * catalogue. A catalogue that is still loading, that failed or that refuses
- * with another reason never offers a choice, so nothing can be enabled from
- * it.
+ * offline list. A failed or refusing candidate list offers no choice; the
+ * separately fetched full catalogue must also settle before enabling.
  */
 function isApprovedChoice(
   candidates: ModelChoice[],
@@ -102,6 +101,23 @@ function isApprovedChoice(
   if (reason !== 'locally_approved') return false;
   if (!provider || !model) return false;
   return candidates.some((candidate) => candidate.id === model && candidate.provider === provider);
+}
+
+/**
+ * Reports whether the catalogue refuses the selected model.
+ *
+ * A catalogue that knows the model and does not approve it refuses it, whatever
+ * the offline candidates and the saved value say: neither of them is a fresh
+ * approval, so they never override a known refusal of the catalogue.
+ */
+function isRefusedByCatalog(
+  catalog: ModelCatalogEntry[],
+  provider: ExtractionProvider | '',
+  model: string,
+): boolean {
+  if (!provider || !model) return false;
+  const entry = catalog.find((item) => item.id === model && item.provider === provider);
+  return entry !== undefined && entry.status !== 'approved';
 }
 
 /**
@@ -116,6 +132,7 @@ export function useExtractionSettings(accountId: string | null, refreshKey = 0):
   const [candidates, setCandidates] = useState<ModelChoice[]>([]);
   const [candidateReason, setCandidateReason] = useState<CandidateReason | null>(null);
   const [catalog, setCatalog] = useState<ModelCatalogEntry[]>([]);
+  const [catalogPending, setCatalogPending] = useState(true);
   const [catalogSource, setCatalogSource] = useState<'live' | 'local' | null>(null);
   const [loading, setLoading] = useState(accountId !== null);
   const [saving, setSaving] = useState(false);
@@ -129,6 +146,8 @@ export function useExtractionSettings(accountId: string | null, refreshKey = 0):
    * when the epoch moved on.
    */
   const epochRef = useRef(0);
+  // Only an actual catalogue settlement permits failure recovery.
+  const catalogSettledRef = useRef(false);
   /**
    * The token of the current write. It changes with the account and with the
    * provider, so a result of a write never reaches the editor of another
@@ -144,7 +163,6 @@ export function useExtractionSettings(accountId: string | null, refreshKey = 0):
   const seededRef = useRef(false);
   const refreshAbortRef = useRef<AbortController | null>(null);
   const saveAbortRef = useRef<AbortController | null>(null);
-
   /** Aborts the requests that a change of the account makes obsolete. */
   const abortPending = useCallback(() => {
     refreshAbortRef.current?.abort();
@@ -168,13 +186,13 @@ export function useExtractionSettings(accountId: string | null, refreshKey = 0):
     setCandidateReason(null);
     setCatalog([]);
     setCatalogSource(null);
+    setCatalogPending(true);
+    catalogSettledRef.current = false;
     setError(null);
     setSaving(false);
     setLoading(accountId !== null);
   }, [accountId, abortPending]);
-
   useEffect(() => abortPending, [abortPending]);
-
   // The status of the extraction. The answer of a former account is refused.
   useEffect(() => {
     if (!accountId) return;
@@ -228,6 +246,7 @@ export function useExtractionSettings(accountId: string | null, refreshKey = 0):
     setCandidateReason(null);
     setCatalog([]);
     setCatalogSource(null);
+    setCatalogPending(true);
 
     void loadCandidates(provider, controller.signal)
       .then((listing) => {
@@ -249,6 +268,9 @@ export function useExtractionSettings(accountId: string | null, refreshKey = 0):
         if (!active || epoch !== epochRef.current) return;
         setCatalog(listing.entries);
         setCatalogSource(listing.verification);
+        catalogSettledRef.current = true;
+        setCatalogPending(false);
+        setEditor(current => isRefusedByCatalog(listing.entries, provider, current.model) ? { ...current, enabled: false } : current);
       })
       .catch((cause) => {
         if (!active || epoch !== epochRef.current) return;
@@ -256,6 +278,8 @@ export function useExtractionSettings(accountId: string | null, refreshKey = 0):
         // broken listing never erases a selection.
         setCatalog([]);
         setCatalogSource(null);
+        catalogSettledRef.current = true;
+        setCatalogPending(false);
         if (epoch !== epochRef.current) return;
         setError(settingsError('catalog_unavailable', cause));
       });
@@ -266,19 +290,20 @@ export function useExtractionSettings(accountId: string | null, refreshKey = 0):
     };
   }, [editor.provider]);
 
-  // The extraction may only be enabled by an explicit act of the administrator
-  // and only when the environment allows it. The catalogue has to be the
-  // current one, it has to be approved locally and the chosen model has to
-  // belong to it. A catalogue that is still loading, a catalogue that failed
-  // and a model that the catalogue does not know never allow an activation.
+  // Pending full-catalogue reads block enabling and enabled writes. Once a read
+  // fails, approved offline candidates remain the intentional fail-soft path;
+  // a settled catalogue refusal always vetoes that fallback. The server still
+  // performs fresh policy validation before any activation.
   const canEnable =
     status !== null &&
     statusLoaded &&
+    !catalogPending &&
     status.processingAuthorized &&
     editor.provider !== '' &&
     editor.model !== '' &&
     isConfigured(status, editor.provider) &&
-    isApprovedChoice(candidates, candidateReason, editor.provider, editor.model);
+    isApprovedChoice(candidates, candidateReason, editor.provider, editor.model) &&
+    !isRefusedByCatalog(catalog, editor.provider, editor.model);
 
   const setEnabled = useCallback(
     (enabled: boolean) => {
@@ -302,6 +327,8 @@ export function useExtractionSettings(accountId: string | null, refreshKey = 0):
     editorEpochRef.current += 1;
     refreshAbortRef.current?.abort();
     refreshAbortRef.current = null;
+    setCatalogPending(true);
+    catalogSettledRef.current = false;
     setEditor((current) => ({ ...current, provider, model: '' }));
     setCandidates([]);
     setCandidateReason(null);
@@ -333,6 +360,7 @@ export function useExtractionSettings(accountId: string | null, refreshKey = 0):
     refreshAbortRef.current = controller;
     const selected = editor.provider;
     const seeded = seededRef.current;
+    setCatalogPending(true);
     setError(null);
 
     void getExtractionStatus(controller.signal)
@@ -348,7 +376,7 @@ export function useExtractionSettings(accountId: string | null, refreshKey = 0):
         // The catalogue belongs to the provider of the editor. A provider that
         // was never chosen has no catalogue.
         const provider = selected || (seeded ? '' : (next.provider as ExtractionProvider | ''));
-        if (!provider) return;
+        if (!provider) { setCatalogPending(false); return; }
         const candidatesPromise = loadCandidates(provider, controller.signal)
           .then((listing) => {
             if (epoch !== epochRef.current || controller.signal.aborted) return;
@@ -361,24 +389,30 @@ export function useExtractionSettings(accountId: string | null, refreshKey = 0):
             setCandidateReason(null);
             setError(settingsError('catalog_unavailable', cause));
           });
-        // The full catalog is refreshed next to the candidates: a broken
-        // catalog never blocks the approved candidates of the editor.
+        // Candidates become usable only after this catalogue settles; a failed
+        // read then retains the approved-candidate fallback, never a refusal.
         const catalogPromise = loadCatalog(provider, controller.signal)
           .then((listing) => {
             if (epoch !== epochRef.current || controller.signal.aborted) return;
             setCatalog(listing.entries);
             setCatalogSource(listing.verification);
+            catalogSettledRef.current = true;
+            setCatalogPending(false);
+            setEditor(current => isRefusedByCatalog(listing.entries, provider, current.model) ? { ...current, enabled: false } : current);
           })
           .catch((cause) => {
             if (epoch !== epochRef.current || controller.signal.aborted) return;
             setCatalog([]);
             setCatalogSource(null);
+            catalogSettledRef.current = true;
+            setCatalogPending(false);
             setError(settingsError('catalog_unavailable', cause));
           });
         return Promise.all([candidatesPromise, catalogPromise]);
       })
       .catch((cause) => {
         if (epoch !== epochRef.current || controller.signal.aborted) return;
+        setCatalogPending(!catalogSettledRef.current);
         setError(settingsError('status_unavailable', cause));
       });
   }, [accountId, editor.provider]);
@@ -392,7 +426,7 @@ export function useExtractionSettings(accountId: string | null, refreshKey = 0):
    */
   const save = useCallback(() => {
     if (!accountId) return;
-    if (!statusLoaded || status === null) return;
+    if (!statusLoaded || status === null || (editor.enabled && !canEnable)) return;
     const token = writeTokenRef.current;
     const editorEpoch = editorEpochRef.current;
     const snapshot = editor;
@@ -442,7 +476,7 @@ export function useExtractionSettings(accountId: string | null, refreshKey = 0):
           setSaving(false);
         }
       });
-  }, [accountId, editor, status, statusLoaded]);
+  }, [accountId, editor, status, statusLoaded, canEnable]);
 
   return {
     status,

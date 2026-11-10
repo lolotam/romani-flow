@@ -7,6 +7,7 @@ import { RepositoryError } from '../repositories/base.js';
 import { validateDraftScope } from '../repositories/documentDrafts.js';
 import { readCatalogs } from './catalog.js';
 import { ExtractionError, isRecord, modelSegments } from './http.js';
+import { classifyPricing } from './pricing.js';
 
 /**
  * The admission rules of the extraction pipeline.
@@ -17,9 +18,6 @@ import { ExtractionError, isRecord, modelSegments } from './http.js';
  * healthy, that no data is retained and that no private key is attached.
  * Everything that cannot be proven is refused.
  */
-
-/** The price dimensions every price record has to expose. */
-const REQUIRED_PRICE_DIMENSIONS = ['prompt', 'completion', 'image', 'request'] as const;
 
 /** The families that route a request instead of serving the model itself. */
 const ROUTER_AUTHORS = new Set(['openrouter']);
@@ -32,17 +30,12 @@ export const GROQ_CAPABILITIES: Record<string, { maxImages: number }> = {
 /**
  * Reports whether a price record is free.
  *
- * Every required dimension has to be present and every dimension of the
- * record has to be zero. An unknown representation, an exponent, a negative
- * value or a missing dimension is a refusal: a price that cannot be read as
- * zero is not a zero price.
+ * The price classifier answers three questions and this one only accepts the
+ * first of them: a price that cannot be read is not a zero price, and a price
+ * that is known to be positive is not one either.
  */
 export function zeroPrices(raw: unknown): boolean {
-  if (!isRecord(raw)) return false;
-  if (!REQUIRED_PRICE_DIMENSIONS.every(key => Object.hasOwn(raw, key))) return false;
-  return Object.values(raw).every(
-    value => value === 0 || (typeof value === 'string' && /^0(?:\.0+)?$/.test(value)),
-  );
+  return classifyPricing(raw) === 'zero';
 }
 
 /** Reports whether an approval is still valid at the given moment. */

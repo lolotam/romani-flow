@@ -48,7 +48,9 @@ export interface ExtractionModelPickerProps {
 interface PickerRow {
   id: string;
   label: string;
-  status: ModelCatalogEntry['status'];
+  status: ModelCatalogEntry['status'] | 'saved';
+  /** The fixed reason of the catalog, never a provider text. */
+  reason: ModelCatalogEntry['reason'] | null;
   maxImages: number | null;
   /** The approval record an approvable model still needs. */
   approval: string | null;
@@ -56,7 +58,7 @@ interface PickerRow {
 
 /**
  * Builds the rows of the picker. The saved model is appended when the list
- * does not know it: it stays visible for display and can be re-selected, but
+ * does not know it: it stays visible for display without being selectable, and
  * the extraction can never be enabled from a model the catalogue refuses.
  */
 function buildRows(
@@ -70,6 +72,7 @@ function buildRows(
           id: entry.id,
           label: entry.label,
           status: entry.status,
+          reason: entry.reason,
           maxImages: entry.maxImages,
           approval: entry.approval,
         }))
@@ -77,11 +80,19 @@ function buildRows(
           id: candidate.id,
           label: candidate.label,
           status: 'approved' as const,
+          reason: 'none' as const,
           maxImages: candidate.maxImages,
           approval: null,
         }));
   if (model !== '' && !rows.some((row) => row.id === model)) {
-    rows.push({ id: model, label: model, status: 'approved', maxImages: null, approval: null });
+    rows.push({
+      id: model,
+      label: model,
+      status: 'saved',
+      reason: null,
+      maxImages: null,
+      approval: null,
+    });
   }
   return rows;
 }
@@ -90,7 +101,15 @@ function buildRows(
 function statusCopy(status: PickerRow['status'], t: (key: string) => string): string {
   if (status === 'approved') return t('extraction.catalog.statusApproved');
   if (status === 'approvable') return t('extraction.catalog.statusApprovable');
+  if (status === 'unverified') return t('extraction.catalog.statusUnverified');
+  if (status === 'saved') return t('extraction.catalog.savedSelection');
   return t('extraction.catalog.statusUnavailable');
+}
+
+/** The copy of the reason a model is not approved. */
+function reasonCopy(reason: PickerRow['reason'], t: (key: string) => string): string {
+  if (reason === null) return t('extraction.catalog.savedSelectionUnavailable');
+  return t(`extraction.catalog.reasons.${reason}`);
 }
 
 /** The picker of the extraction settings. */
@@ -166,6 +185,11 @@ export function ExtractionModelPicker({
             <CommandGroup>
               {rows.map((row) => {
                 const selectable = row.status === 'approved';
+                // A row the catalogue refuses or could not prove is disabled
+                // for the keyboard and for the screen reader, so it can never
+                // be chosen. An approvable row stays interactive because the
+                // approval record next to it has to stay clickable.
+                const unresolved = row.status === 'unavailable' || row.status === 'unverified' || row.status === 'saved';
                 return (
                   <CommandItem
                     key={row.id}
@@ -173,17 +197,16 @@ export function ExtractionModelPicker({
                     keywords={[row.label]}
                     data-value={row.id}
                     data-testid="extraction-model-option"
+                    disabled={unresolved}
                     className={cn(
                       'gap-2',
                       !selectable &&
-                        'cursor-not-allowed text-muted-foreground opacity-60 data-[selected=true]:bg-transparent',
+                        'cursor-not-allowed text-muted-foreground opacity-60 data-[selected=true]:bg-transparent data-[disabled=true]:opacity-60',
                     )}
                     onSelect={() => {
                       // A row that is not approved is never selectable: the
                       // handler refuses it, so the extraction can only ever be
-                      // pointed at a model the local records approve. The row
-                      // stays interactive because the approval record next to
-                      // it has to stay clickable.
+                      // pointed at a model the local records approve.
                       if (!selectable) return;
                       onSelect(row.id);
                       setOpen(false);
@@ -195,6 +218,11 @@ export function ExtractionModelPicker({
                     <span className="flex min-w-0 flex-1 flex-col items-start">
                       <span className="w-full truncate">{row.label}</span>
                       <span className="w-full truncate text-xs text-muted-foreground">{row.id}</span>
+                      {!selectable && (
+                        <span className="w-full text-xs text-muted-foreground">
+                          {reasonCopy(row.reason, t)}
+                        </span>
+                      )}
                     </span>
                     <span className="flex shrink-0 items-center gap-1">
                       <span className="text-xs text-muted-foreground">
@@ -207,7 +235,7 @@ export function ExtractionModelPicker({
                           type="button"
                           data-testid="extraction-copy-approval"
                           aria-label={`${t('extraction.catalog.copyApproval')}: ${row.id}`}
-                          className="inline-flex size-6 items-center justify-center rounded-sm hover:bg-accent"
+                          className="pointer-events-auto inline-flex size-6 items-center justify-center rounded-sm hover:bg-accent"
                           onClick={(event) => {
                             event.stopPropagation();
                             copyApproval(row);

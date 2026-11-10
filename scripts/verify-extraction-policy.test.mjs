@@ -114,9 +114,9 @@ test('zeroPrices accepts valid free pricing formats', () => {
   const zeroExtended = {
     ...standardFree,
     input_cache_read: '0',
-    reasoning: '0.0',
+    internal_reasoning: '0.0',
     audio: '0.0000',
-    tool: 0,
+    web_search: 0,
   };
   assert.equal(zeroPrices(zeroExtended), true);
 });
@@ -124,7 +124,7 @@ test('zeroPrices accepts valid free pricing formats', () => {
 test('zeroPrices rejects missing or null required price dimensions', () => {
   const base = { prompt: '0', completion: '0', image: '0', request: '0' };
 
-  for (const dim of ['prompt', 'completion', 'image', 'request']) {
+  for (const dim of ['prompt', 'completion']) {
     const copy = { ...base };
     delete copy[dim];
     assert.equal(zeroPrices(copy), false, `Missing ${dim} must be rejected`);
@@ -177,6 +177,50 @@ test('zeroPrices rejects non-object and malformed inputs', () => {
   assert.equal(zeroPrices('free'), false);
   assert.equal(zeroPrices(0), false);
   assert.equal(zeroPrices(true), false);
+});
+
+// 2026-11-10 public metadata regression: only prompt/completion are required.
+// Model names must never enter the pricing decision. These call the real policy.
+test('zeroPrices accepts omitted optional charges and bounded discount metadata', async t => {
+  const core = { prompt: '0', completion: '0' };
+  for (const pricing of [
+    core, { ...core, discount: 0 }, { ...core, discount: 0.5 }, { ...core, discount: 1 },
+    { ...core, overrides: [] },
+    ...['image', 'request', 'audio', 'audio_output', 'image_output', 'image_token',
+      'input_audio_cache', 'input_cache_read', 'input_cache_write', 'input_cache_write_1h',
+      'internal_reasoning', 'web_search'].map(key => ({ ...core, [key]: '0.000' })),
+  ]) await t.test(JSON.stringify(pricing), () => assert.equal(zeroPrices(pricing), true));
+});
+
+test('zeroPrices never converts malformed or underflow money into a free charge', () => {
+  const base = { prompt: '0', completion: '0', image: '0', request: '0' };
+  const invalidMoney = [null, undefined, NaN, Infinity, -Infinity, true, {}, [], '', ' ',
+    '-0', '-1', '+0', '00', '.0', '0.', '0x0', '0e0', '1e-400', Number.MIN_VALUE,
+    `0.${'0'.repeat(400)}1`];
+  for (const key of ['prompt', 'completion', 'image', 'request']) {
+    for (const value of invalidMoney) {
+      assert.equal(zeroPrices({ ...base, [key]: value }), false, `${key}: ${String(value)}`);
+    }
+  }
+});
+
+test('zeroPrices rejects unknown keys, conditional overrides and malformed discount metadata', async t => {
+  const base = { prompt: '0', completion: '0', image: '0', request: '0' };
+  for (const metadata of [
+    { unknown_charge: '0' }, { reasoning: '0' }, { tool: 0 },
+    { overrides: [{ prompt: '0' }] }, { overrides: null }, { overrides: {} },
+    { discount: -0.1 }, { discount: 1.01 }, { discount: NaN }, { discount: Infinity },
+    { discount: '0' }, { discount: null }, { discount: true },
+  ]) await t.test(Object.keys(metadata)[0] + ': ' + String(Object.values(metadata)[0]), () =>
+    assert.equal(zeroPrices({ ...base, ...metadata }), false));
+});
+
+test('discount metadata never cancels a positive base price', () => {
+  const base = { prompt: '0', completion: '0', image: '0', request: '0' };
+  for (const discount of [0, 0.5, 1]) {
+    assert.equal(zeroPrices({ ...base, prompt: '0.01', discount }), false,
+      'Discount metadata never cancels a positive base price');
+  }
 });
 
 // ---------------------------------------------------------------------------
@@ -266,7 +310,7 @@ test('eligibleOpenRouter validates model-level zero pricing and rejects paid or 
   );
 
   // Model missing individual required price dimensions
-  for (const dim of ['prompt', 'completion', 'image', 'request']) {
+  for (const dim of ['prompt', 'completion']) {
     const incompletePricing = { prompt: '0', completion: '0', image: '0', request: '0' };
     delete incompletePricing[dim];
     const incompleteModel = makeMockModel({ pricing: incompletePricing });

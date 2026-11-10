@@ -28,6 +28,8 @@
  * - Case 11: Retained persisted model not in current offline catalog (reason no_candidates/policy_unavailable or failed refresh) -> display preserved but cannot enable; positive valid catalog enables.
  * - Case 12: Malformed provider candidate (maxImages: 10) -> fails closed as no-list via runtime validation; never prove pricing from offline.
  * - Case 13: Searchable full catalog -> approved selectable, approvable greyed out with copyable approval record, unavailable refused, search narrows.
+ * - Cases 14-17: Held/settled HTTP catalogue -> unverified pricing/privacy entries carry specific English/Arabic reasons and disabled choices.
+ * - Cases 18-20: Known unverified entries veto saved/candidate fallback; approved control still needs explicit choice and enabling.
  */
 
 import assert from 'node:assert/strict';
@@ -146,6 +148,11 @@ class SettingsMockApi {
     // Live catalog fixtures: entries the reviewed rules accept but no current
     // approval names, served next to the approved candidates.
     this.catalogHttpStatus = 200;
+    // Exact HTTP payload overrides and entry/settlement barriers for eligibility
+    // regressions. No production hook, parser or picker utility is replaced.
+    this.catalogEntries = null;
+    this.onCatalogEntry = null;
+    this.holdCatalog = null;
     this.catalogExtras = {
       groq: [
         {
@@ -153,6 +160,7 @@ class SettingsMockApi {
           label: 'Llama 4 Scout 17B (free)',
           provider: 'groq',
           status: 'approvable',
+          reason: 'approval_required',
           maxImages: 3,
           approval: JSON.stringify({
             provider: 'groq',
@@ -168,6 +176,7 @@ class SettingsMockApi {
           label: 'GPT-OSS 120B',
           provider: 'groq',
           status: 'unavailable',
+          reason: 'unsupported_model',
           maxImages: null,
           approval: null,
         },
@@ -178,6 +187,7 @@ class SettingsMockApi {
           label: 'Qwen3 30B A3B (free)',
           provider: 'openrouter',
           status: 'approvable',
+          reason: 'approval_required',
           maxImages: 1,
           approval: JSON.stringify({
             provider: 'openrouter',
@@ -422,6 +432,27 @@ function statusSettled(page) {
     const timer = setTimeout(() => {
       cleanup();
       reject(new Error('Status settlement timed out'));
+    }, 7000);
+    page.on('requestfinished', done);
+    page.on('requestfailed', done);
+  });
+}
+
+function catalogSettled(page, provider) {
+  return new Promise((resolve, reject) => {
+    const cleanup = () => {
+      clearTimeout(timer);
+      page.off('requestfinished', done);
+      page.off('requestfailed', done);
+    };
+    const done = request => {
+      if (!request.url().includes(`/catalog?provider=${provider}`)) return;
+      cleanup();
+      resolve();
+    };
+    const timer = setTimeout(() => {
+      cleanup();
+      reject(new Error(`Catalog settlement timed out: ${provider}`));
     }, 7000);
     page.on('requestfinished', done);
     page.on('requestfailed', done);
@@ -1425,6 +1456,341 @@ async function runSettingsTests(page, api, origin, fixtureUrl) {
     assert.equal(await getSelectedModel(page), 'qwen/qwen3.8-27b', 'Approved model click must select it');
   });
 
+  // 2026-11-10 eligibility regression. Real HTTP responses cross the current
+  // runtime schema, hook and picker; only the HTTP boundary is controlled.
+  const eligibilityId = 'synthetic/arbitrary-vision-2026:free';
+  async function withEligibilityCatalog({ reason, saved = false, candidate = false }, inspect) {
+    const choice = { id: eligibilityId, label: 'Synthetic Vision', provider: 'openrouter', maxImages: 1 };
+    const controls = getSettingsControls(page);
+    api.currentUser = { id: 'account-admin-1', email: 'admin@romani.test', name: 'Administrator', role: 'admin' };
+    api.authHttpStatus = 200;
+    api.statusHttpStatus = 200;
+    api.candidatesHttpStatus = 200;
+    api.catalogHttpStatus = 200;
+    api.candidatesReason = 'locally_approved';
+    api.offlineCandidates.openrouter = candidate ? [choice] : [];
+    api.catalogEntries = [{ ...choice, status: reason === 'none' ? 'approved' : 'unverified',
+      reason, maxImages: reason === 'none' ? 1 : null, approval: null }];
+    api.status = { ...api.status, enabled: false, provider: 'openrouter', model: saved ? eligibilityId : '',
+      configured: { groq: true, openrouter: true }, processingAuthorized: true,
+      processingContext: 'kw-docs-context', available: false, reason: 'disabled' };
+    let release;
+    let entered;
+    const entry = new Promise(resolve => { entered = resolve; });
+    api.holdCatalog = new Promise(resolve => { release = resolve; });
+    api.onCatalogEntry = provider => { if (provider === 'openrouter') entered(); };
+    const settled = catalogSettled(page, 'openrouter');
+    const candidates = candidateSettled(page, 'openrouter');
+    const puts = api.putSettingsCalls;
+    try {
+      await remountFixture(page, { role: 'admin' });
+      await boundedEntry(entry, 'eligibility catalog HTTP entry');
+      await candidates;
+      await boundedEntry(page.evaluate(() => window.__settingsControls.settleRender()), 'held render');
+      assert.equal(await getSelectedModel(page), saved ? eligibilityId : '', 'Held HTTP never changes explicit selection');
+      assert.equal(await controls.enableSwitch.getAttribute('data-state'), 'unchecked', 'No automatic enabling');
+      assert.equal(api.putSettingsCalls, puts, 'Catalog reads never PUT settings');
+      release();
+      await settled;
+      await boundedEntry(page.evaluate(() => window.__settingsControls.settleRender()), 'settled render');
+      await inspect(controls, choice);
+      assert.equal(api.putSettingsCalls, puts, 'Inspecting a blocked choice never writes settings');
+    } finally {
+      release();
+      api.holdCatalog = null;
+      api.onCatalogEntry = null;
+      api.catalogEntries = null;
+      // Always settle the held request before the next case owns the fixture.
+      await Promise.all([settled, candidates]);
+      await page.keyboard.press('Escape');
+    }
+  }
+
+  const reasonCopy = {
+    pricing_unverified: {
+      en: /(?:pric(?:e|es|ing)|cost).*(?:verif|unknown|unconfirmed)|(?:verif|unknown|unconfirmed).*(?:pric|cost)/i,
+      ar: /(?:السعر|الأسعار|التسعير|التكلفة)/,
+    },
+    privacy_policy: {
+      en: /privacy.*(?:require|unmet|unverified|verif|not.*met)|(?:require|unmet|unverified|verif).*privacy/i,
+      ar: /(?:الخصوصية|خصوصية|الاحتفاظ بالبيانات)/,
+    },
+  };
+  let eligibilityCase = 14;
+  for (const reason of ['pricing_unverified', 'privacy_policy']) {
+    for (const language of ['en', 'ar']) {
+      await runCase(eligibilityCase++, `Unverified ${reason}: actionable ${language} copy and disabled choice`, async () => {
+        await withEligibilityCatalog({ reason }, async (controls) => {
+          await page.evaluate(lang => window.__settingsControls.setLanguage(lang), language);
+          await waitForCommittedState(page, { language, direction: language === 'ar' ? 'rtl' : 'ltr' });
+          await page.locator('[data-testid="extraction-model-select"]').click();
+          const row = page.getByRole('option').filter({ hasText: eligibilityId });
+          await row.waitFor({ state: 'visible', timeout: 5000 });
+          const text = await row.innerText();
+          assert.match(text, language === 'en' ? /Needs verification/i : /(?:يحتاج|بحاجة|يلزم|يتطلب).*تحقق/,
+            'Unresolved metadata needs a verification badge, never an approved badge');
+          assert.match(text, reasonCopy[reason][language], 'Specific translated blocking reason must be visible');
+          if (language === 'ar') assert.match(text, /(?:التحقق|غير|متطلبات|مستوف|مؤكد|معروف|موثق)/,
+            'Arabic reason explains unmet or unverified requirements');
+          assert.ok(!text.includes(reason) && !text.includes('extraction.catalog.'), 'No raw reason codes or missing translation keys');
+          assert.equal(await row.getAttribute('aria-disabled'), 'true', 'Unverified choice is accessibly disabled');
+          assert.equal(await controls.enableSwitch.isDisabled(), true);
+          assert.equal(await getSelectedModel(page), '', 'Unverified metadata cannot select a model');
+          assert.equal(await row.locator('[data-testid="extraction-copy-approval"]').count(), 0,
+            'Pricing/privacy uncertainty cannot be repaired by copying approval');
+        });
+      });
+    }
+  }
+
+  for (const candidate of [false, true]) {
+    await runCase(eligibilityCase++, `Explicit unverified catalogue blocks saved model${candidate ? ' despite approved-candidate fallback' : ''}`, async () => {
+      await withEligibilityCatalog({ reason: 'pricing_unverified', saved: true, candidate }, async controls => {
+        assert.equal(await getSelectedModel(page), eligibilityId, 'Persisted identity remains visible');
+        assert.equal(await controls.enableSwitch.isDisabled(), true,
+          'Known unverified catalogue entry vetoes both saved and locally approved fallback');
+        await page.locator('[data-testid="extraction-model-select"]').click();
+        const row = page.getByRole('option').filter({ hasText: eligibilityId });
+        await row.waitFor({ state: 'visible', timeout: 5000 });
+        assert.equal(await row.getAttribute('aria-disabled'), 'true', 'Saved model never becomes a fresh approval');
+      });
+    });
+  }
+
+  await runCase(eligibilityCase++, 'Eligible unchanged control still needs explicit model choice and enabling', async () => {
+    await withEligibilityCatalog({ reason: 'none', candidate: true }, async controls => {
+      assert.equal(await getSelectedModel(page), '');
+      assert.equal(await controls.enableSwitch.isDisabled(), true);
+      await selectModel(page, eligibilityId);
+      assert.equal(await getSelectedModel(page), eligibilityId);
+      assert.equal(await controls.enableSwitch.isDisabled(), false);
+      await setEnableSwitch(page, true);
+      assert.equal(await controls.enableSwitch.getAttribute('data-state'), 'checked');
+    });
+  });
+
+
+  // PR23 review4524440499: offline candidates must not outrun a pending catalogue.
+  const raceChoice = { id: 'synthetic/catalog-race:free', label: 'Catalogue race control', provider: 'openrouter', maxImages: 1 };
+  const renderSettled = () => page.evaluate(() => window.__settingsControls.settleRender());
+  function configureCatalogRace(provider = 'openrouter') {
+    api.currentUser = { id: 'account-admin-1', email: 'admin@romani.test', name: 'Administrator', role: 'admin' };
+    api.authHttpStatus = api.statusHttpStatus = api.candidatesHttpStatus = api.catalogHttpStatus = api.putSettingsHttpStatus = 200;
+    api.status = { ...api.status, enabled: false, provider, model: provider ? raceChoice.id : '',
+      processingAuthorized: true, configured: { groq: true, openrouter: true } };
+    api.candidatesReason = 'locally_approved';
+    api.offlineCandidates.openrouter = [raceChoice];
+    api.catalogEntries = [{ ...raceChoice, status: 'approved', reason: 'none', approval: null }];
+  }
+  async function heldCatalog(action, inspect, heldProvider = 'openrouter') {
+    let entered, release;
+    const entry = new Promise(resolve => { entered = resolve; });
+    api.holdCatalog = new Promise(resolve => { release = resolve; });
+    api.onCatalogEntry = provider => { if (provider === heldProvider) entered(); };
+    const settled = catalogSettled(page, heldProvider);
+    const candidates = candidateSettled(page, heldProvider);
+    try {
+      await action();
+      await boundedEntry(entry, 'review catalogue entry');
+      await candidates;
+      await renderSettled();
+      await inspect(async () => { release(); await settled; await renderSettled(); });
+    } finally {
+      release();
+      await Promise.all([settled, candidates]);
+      api.holdCatalog = api.onCatalogEntry = null;
+      await page.keyboard.press('Escape');
+    }
+  }
+  for (const initial of [true, false]) {
+    await runCase(eligibilityCase++, `${initial ? 'Initial' : 'Provider effect'} waits for catalogue before enabling`, async () => {
+      configureCatalogRace(initial ? 'openrouter' : '');
+      const controls = getSettingsControls(page);
+      const puts = api.putSettingsCalls;
+      await heldCatalog(async () => {
+        await remountFixture(page, { role: 'admin' });
+        if (!initial) { await selectProvider(page, 'openrouter'); await selectModel(page, raceChoice.id); }
+      }, async release => {
+        assert.equal(await controls.enableSwitch.isDisabled(), true, 'Candidates-first cannot enable while catalogue is pending');
+        assert.equal(await controls.enableSwitch.getAttribute('data-state'), 'unchecked');
+        await controls.saveButton.click();
+        await renderSettled();
+        assert.ok(api.capturedPutSettings.slice(puts).every(body => body.settings['ai_extraction.enabled'] === false), 'No enabled PUT while catalogue pending');
+        await release();
+        await controls.enableSwitch.waitFor({ state: 'visible' });
+        await page.waitForFunction(() => !document.querySelector('[data-testid="extraction-enabled-switch"]').disabled);
+        await setEnableSwitch(page, true);
+        assert.equal(await controls.enableSwitch.getAttribute('data-state'), 'checked', 'Successful catalogue allows explicit enabling');
+      });
+    });
+  }
+  for (const pending of [true, false]) {
+    await runCase(eligibilityCase++, `Refresh ${pending ? 'pending blocks enabled PUT' : 'refusal clears enabled editor'}`, async () => {
+      configureCatalogRace();
+      const controls = getSettingsControls(page);
+      const first = catalogSettled(page, 'openrouter');
+      await remountFixture(page, { role: 'admin' });
+      await first; await renderSettled();
+      await page.waitForFunction(() => !document.querySelector('[data-testid="extraction-enabled-switch"]').disabled);
+      await setEnableSwitch(page, true);
+      const puts = api.putSettingsCalls;
+      // Snapshot the refusal at HTTP entry, before holding the response.
+      api.catalogEntries = [{ ...raceChoice, status: 'unverified', reason: 'pricing_unverified', maxImages: null, approval: null }];
+      await heldCatalog(() => controls.refreshButton.click(), async release => {
+        if (pending) {
+          await controls.saveButton.click(); await renderSettled();
+          assert.equal(api.putSettingsCalls, puts, 'Refresh cannot PUT enabled=true before catalogue settles');
+        }
+        await release();
+        assert.equal(await controls.enableSwitch.getAttribute('data-state'), 'unchecked', 'Late refusal clears enabled editor');
+        assert.equal(await controls.enableSwitch.isDisabled(), true);
+        await controls.saveButton.click(); await renderSettled();
+        assert.ok(api.capturedPutSettings.slice(puts).every(body => body.settings['ai_extraction.enabled'] === false), 'Late refusal cannot save enabled=true');
+      });
+    });
+  }
+  await runCase(eligibilityCase++, 'Settled catalogue failure retains intended approved-candidate fallback', async () => {
+    configureCatalogRace();
+    const controls = getSettingsControls(page);
+    await heldCatalog(() => remountFixture(page, { role: 'admin' }), async release => {
+      api.catalogHttpStatus = 500;
+      await release();
+      await page.waitForFunction(() => !document.querySelector('[data-testid="extraction-enabled-switch"]').disabled);
+      assert.equal(await getSelectedModel(page), raceChoice.id, 'Failed catalogue preserves saved selection');
+      await setEnableSwitch(page, true);
+      const put = page.waitForResponse(response => response.url().endsWith('/api/settings') && response.request().method() === 'PUT');
+      await controls.saveButton.click(); await put;
+      assert.equal(api.capturedPutSettings.at(-1).settings['ai_extraction.enabled'], true, 'Settled failure permits explicit fallback; server remains authority');
+    });
+    api.catalogHttpStatus = 200;
+    api.catalogEntries = null;
+  });
+
+
+  // PR23 Codex4524555900: a failed refresh status read must restore only a
+  // previously settled decision, never turn an unresolved read into fallback.
+  async function mountRaceCatalog(refused = false) {
+    configureCatalogRace();
+    if (refused) api.catalogEntries = [{ ...raceChoice, status: 'unverified', reason: 'pricing_unverified', maxImages: null, approval: null }];
+    const settled = catalogSettled(page, 'openrouter');
+    await remountFixture(page, { role: 'admin' });
+    await settled; await renderSettled();
+  }
+  async function failedRefreshStatus(inspect) {
+    let entered, release;
+    const entry = new Promise(resolve => { entered = resolve; });
+    api.holdStatus = new Promise(resolve => { release = resolve; });
+    api.onStatusEntry = () => entered();
+    const settled = statusSettled(page);
+    api.statusHttpStatus = 503;
+    try {
+      await getSettingsControls(page).refreshButton.click();
+      await boundedEntry(entry, 'refresh status entry');
+      // The first request already owns its barrier; later identities do not.
+      api.holdStatus = api.onStatusEntry = null;
+      api.statusHttpStatus = 200;
+      await renderSettled();
+      await inspect(async () => {
+        release(); await settled; await renderSettled();
+      });
+    } finally {
+      release(); await settled;
+      api.holdStatus = api.onStatusEntry = null;
+      api.statusHttpStatus = 200;
+    }
+  }
+  await runCase(eligibilityCase++, 'Refresh status failure restores settled approval and enabled save', async () => {
+    await mountRaceCatalog();
+    const controls = getSettingsControls(page);
+    await setEnableSwitch(page, true);
+    const puts = api.putSettingsCalls;
+    await failedRefreshStatus(async release => {
+      await controls.saveButton.click(); await renderSettled();
+      assert.equal(api.putSettingsCalls, puts, 'Held status cannot save enabled settings');
+      await release();
+      await controls.errorAlert.waitFor({ state: 'visible' });
+      assert.equal(await getSelectedModel(page), raceChoice.id);
+      assert.equal(await controls.enableSwitch.getAttribute('data-state'), 'checked', 'Failure preserves enabled editor');
+      await setEnableSwitch(page, false);
+      assert.equal(await controls.enableSwitch.isDisabled(), false, 'Prior settled approval is usable after status failure');
+      await setEnableSwitch(page, true);
+      const put = page.waitForResponse(response => response.url().endsWith('/api/settings') && response.request().method() === 'PUT');
+      await controls.saveButton.click(); await boundedEntry(put, 'enabled save after status failure');
+      assert.equal(api.capturedPutSettings.at(-1).settings['ai_extraction.enabled'], true);
+    });
+  });
+  await runCase(eligibilityCase++, 'Refresh status failure preserves prior catalogue refusal', async () => {
+    await mountRaceCatalog(true);
+    const controls = getSettingsControls(page);
+    await failedRefreshStatus(async release => {
+      await release();
+      await controls.errorAlert.waitFor({ state: 'visible' });
+      assert.equal(await getSelectedModel(page), raceChoice.id);
+      assert.equal(await controls.enableSwitch.isDisabled(), true);
+      assert.equal(await controls.enableSwitch.getAttribute('data-state'), 'unchecked');
+    });
+  });
+  await runCase(eligibilityCase++, 'Refresh status failure cannot unlock never-settled catalogue; retry recovers', async () => {
+    configureCatalogRace();
+    const controls = getSettingsControls(page);
+    await heldCatalog(() => remountFixture(page, { role: 'admin' }), async releaseCatalog => {
+      await failedRefreshStatus(async releaseStatus => {
+        await releaseStatus();
+        assert.equal(await controls.enableSwitch.isDisabled(), true, 'No settled catalogue means no fallback');
+        await controls.saveButton.click(); await renderSettled();
+        assert.ok(api.capturedPutSettings.at(-1)?.settings['ai_extraction.enabled'] !== true, 'No false enabled write');
+      });
+      await releaseCatalog();
+      assert.equal(await controls.enableSwitch.isDisabled(), true, 'Stale initial read cannot recover refresh');
+    });
+    const retry = catalogSettled(page, 'openrouter');
+    await controls.refreshButton.click(); await retry; await renderSettled();
+    await page.waitForFunction(() => !document.querySelector('[data-testid="extraction-enabled-switch"]').disabled);
+    await setEnableSwitch(page, true);
+    assert.equal(await controls.enableSwitch.getAttribute('data-state'), 'checked');
+  });
+  for (const account of [false, true]) {
+    await runCase(eligibilityCase++, `Late failed refresh cannot unlock ${account ? 'another account' : 'another provider'}`, async () => {
+      await mountRaceCatalog();
+      const controls = getSettingsControls(page);
+      await failedRefreshStatus(async releaseStatus => {
+        if (account) api.currentUser = { ...api.currentUser, id: 'account-admin-2' };
+        await heldCatalog(async () => {
+          if (account) {
+            await remountFixture(page, { role: 'admin' });
+            await waitForCommittedState(page, { accountId: 'account-admin-2' });
+          } else {
+            // A genuinely different provider owns its own candidate and response.
+            const groqChoice = { ...raceChoice, id: 'qwen/qwen3.8-27b', provider: 'groq', maxImages: 3 };
+            api.offlineCandidates.groq = [groqChoice];
+            api.catalogEntries = [{ ...groqChoice, status: 'approved', reason: 'none', approval: null }];
+            await selectProvider(page, 'groq');
+            await selectModel(page, groqChoice.id);
+            assert.equal(await getSelectedProvider(page), 'groq');
+          }
+        }, async releaseCatalog => {
+          await releaseStatus();
+          assert.equal(await controls.enableSwitch.isDisabled(), true, 'Old status failure cannot release new pending catalogue');
+          assert.equal(await controls.enableSwitch.getAttribute('data-state'), 'unchecked');
+          await releaseCatalog();
+          await page.waitForFunction(() => !document.querySelector('[data-testid="extraction-enabled-switch"]').disabled);
+        }, account ? 'openrouter' : 'groq');
+      });
+    });
+  }
+  await runCase(eligibilityCase++, 'Refresh without provider settles and later explicit provider can enable', async () => {
+    configureCatalogRace('');
+    await remountFixture(page, { role: 'admin' });
+    const controls = getSettingsControls(page);
+    const refreshed = statusSettled(page);
+    await controls.refreshButton.click(); await refreshed; await renderSettled();
+    assert.equal(await controls.enableSwitch.isDisabled(), true);
+    const catalog = catalogSettled(page, 'openrouter');
+    await selectProvider(page, 'openrouter'); await catalog; await renderSettled();
+    await selectModel(page, raceChoice.id);
+    await page.waitForFunction(() => !document.querySelector('[data-testid="extraction-enabled-switch"]').disabled);
+  });
+
   const passedCount = results.filter((r) => r.passed).length;
   const failedCount = results.filter((r) => !r.passed).length;
 
@@ -1439,7 +1805,7 @@ async function runSettingsTests(page, api, origin, fixtureUrl) {
     );
   }
 
-  console.log('[SETTINGS SUITE] All 12 settings contract behaviors verified.');
+  console.log(`[SETTINGS SUITE] All ${results.length} settings contract behaviors verified.`);
 }
 
 export async function main() {
@@ -1456,7 +1822,7 @@ export async function main() {
   const preflight = runPreflightCheck();
   if (!preflight.ok) {
     console.error('======================================================================');
-    console.error('[SETTINGS SUITE] PREFLIGHT SEMANTIC CHECK: FAILED (EXPECTED RED)');
+    console.error('[SETTINGS SUITE] PREFLIGHT SEMANTIC CHECK: SETUP FAILURE (NOT BEHAVIORAL RED)');
     if (preflight.missingModules.length > 0) {
       console.error('Missing required Task 15 production modules:');
       for (const mod of preflight.missingModules) {
@@ -1624,6 +1990,8 @@ export async function main() {
         }
 
         if (url.pathname === '/api/document-extraction/status') {
+          // Each held response owns its status even if a new identity starts.
+          const statusHttpStatus = api.statusHttpStatus;
           api.statusCalls += 1;
           if (api.onStatusEntry) {
             api.onStatusEntry();
@@ -1631,9 +1999,9 @@ export async function main() {
           if (api.holdStatus) {
             await api.holdStatus;
           }
-          if (api.statusHttpStatus !== 200) {
+          if (statusHttpStatus !== 200) {
             return route.fulfill({
-              status: api.statusHttpStatus,
+              status: statusHttpStatus,
               json: { data: null, error: { code: 'status_error', message: 'Failed to load status' } },
             });
           }
@@ -1724,6 +2092,12 @@ export async function main() {
         // approvable extras. A malformed candidate is dropped here as well,
         // so a broken fixture can never become a catalog entry.
         if (url.pathname === '/api/document-extraction/catalog' && req.method() === 'GET') {
+          const provider = url.searchParams.get('provider');
+          // Capture before holding, so later fixture changes cannot rewrite an
+          // already entered HTTP response during a race.
+          const explicitEntries = api.catalogEntries?.map(entry => ({ ...entry }));
+          if (api.onCatalogEntry) api.onCatalogEntry(provider);
+          if (api.holdCatalog) await api.holdCatalog;
           if (api.catalogHttpStatus !== 200) {
             return route.fulfill({
               status: api.catalogHttpStatus,
@@ -1733,7 +2107,6 @@ export async function main() {
               },
             });
           }
-          const provider = url.searchParams.get('provider');
           const bounds = { groq: 3, openrouter: 1 };
           const approved = (api.offlineCandidates[provider] || [])
             .filter(
@@ -1747,13 +2120,14 @@ export async function main() {
               label: candidate.label,
               provider,
               status: 'approved',
+              reason: 'none',
               maxImages: candidate.maxImages,
               approval: null,
             }));
           const extras = (api.catalogExtras[provider] || []).map((entry) => ({ ...entry, provider }));
           return route.fulfill({
             status: 200,
-            json: { data: { verification: 'live', entries: [...approved, ...extras] }, error: null },
+            json: { data: { verification: 'live', entries: explicitEntries ?? [...approved, ...extras] }, error: null },
           });
         }
 
@@ -1807,12 +2181,15 @@ export async function main() {
       return route.continue();
     });
 
-    await runSettingsTests(page, api, origin, fixtureUrl);
-
-    // Strict boundary and error assertions
-    assert.deepEqual(unexpectedApiCalls, [], 'Settings suite must not encounter unexpected API calls');
-    assert.deepEqual(egressViolations, [], 'Settings suite must not attempt non-loopback egress');
-    assert.deepEqual(pageErrors, [], 'Settings suite must not encounter uncaught page errors');
+    try {
+      await runSettingsTests(page, api, origin, fixtureUrl);
+    } finally {
+      // A behavioral RED must still report the actual safety boundaries.
+      console.log('[SETTINGS BOUNDARIES]', JSON.stringify({ unexpectedApiCalls, egressViolations, pageErrors }));
+      assert.deepEqual(unexpectedApiCalls, [], 'Settings suite must not encounter unexpected API calls');
+      assert.deepEqual(egressViolations, [], 'Settings suite must not attempt non-loopback egress');
+      assert.deepEqual(pageErrors, [], 'Settings suite must not encounter uncaught page errors');
+    }
     console.log('[SETTINGS SUITE] Settings contract run completed successfully.');
   } finally {
     if (browser) await browser.close();

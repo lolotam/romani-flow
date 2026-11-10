@@ -22,16 +22,22 @@ const OPENROUTER_MODELS_URL = 'https://openrouter.ai/api/v1/models';
 function assertEntryShape(entry, provider) {
   assert.deepEqual(
     Object.keys(entry).sort(),
-    ['approval', 'id', 'label', 'maxImages', 'provider', 'status'],
+    ['approval', 'id', 'label', 'maxImages', 'provider', 'reason', 'status'],
     'Every entry carries exactly the contract fields',
   );
   assert.equal(entry.provider, provider, 'Every entry belongs to the requested provider');
-  assert.ok(['approved', 'approvable', 'unavailable'].includes(entry.status), 'Known status only');
+  assert.ok(['approved', 'approvable', 'unavailable', 'unverified'].includes(entry.status), 'Known status only');
+  assert.ok([
+    'none', 'unsupported_images', 'unsupported_json', 'pricing_unverified', 'nonzero_pricing',
+    'approval_required', 'privacy_policy', 'authorization_required', 'provider_unconfigured',
+    'unsupported_model', 'not_free', 'router_model',
+  ].includes(entry.reason), 'Only the sanitized contract reason enum is public');
   if (entry.status === 'approved') {
+    assert.equal(entry.reason, 'none');
     assert.equal(entry.approval, null, 'An approved entry carries no template');
     assert.ok(Number.isInteger(entry.maxImages) && entry.maxImages >= 1, 'Approved entries carry an image count');
   }
-  if (entry.status === 'unavailable') {
+  if (entry.status === 'unavailable' || entry.status === 'unverified') {
     assert.equal(entry.approval, null, 'An unavailable entry carries no template');
     assert.equal(entry.maxImages, null, 'An unavailable entry carries no image count');
   }
@@ -146,6 +152,7 @@ test('Groq models outside the reviewed capabilities are offered as unavailable',
     assert.ok(other, 'The served model must be listed');
     assertEntryShape(other, 'groq');
     assert.equal(other.status, 'unavailable');
+    assert.equal(other.reason, 'unsupported_model');
     assert.equal(other.maxImages, null);
     assertNoSecrets(JSON.stringify(res.json), f);
   }, {
@@ -174,6 +181,7 @@ test('OpenRouter catalog marks approved, approvable and unavailable models and t
     assert.ok(approvable, 'The unapproved but eligible model must be listed');
     assertEntryShape(approvable, 'openrouter');
     assert.equal(approvable.status, 'approvable');
+    assert.equal(approvable.reason, 'approval_required');
     assert.equal(approvable.maxImages, 1);
     assert.ok(approvable.approval, 'An approvable entry carries a template record');
     const template = JSON.parse(approvable.approval);
@@ -192,12 +200,15 @@ test('OpenRouter catalog marks approved, approvable and unavailable models and t
     const paid = byId.get('vendor/paid-vision:free');
     assertEntryShape(paid, 'openrouter');
     assert.equal(paid.status, 'unavailable');
+    assert.equal(paid.reason, 'nonzero_pricing');
     const router = byId.get('openrouter/auto:free');
     assertEntryShape(router, 'openrouter');
     assert.equal(router.status, 'unavailable');
+    assert.equal(router.reason, 'router_model');
     const notFree = byId.get('vendor/paid-vision');
     assertEntryShape(notFree, 'openrouter');
     assert.equal(notFree.status, 'unavailable');
+    assert.equal(notFree.reason, 'not_free');
     assertNoSecrets(JSON.stringify(res.json), f);
     assert.ok(f.calls.every((c) => c.url === OPENROUTER_MODELS_URL), 'Only the model list is read');
   }, {
@@ -262,10 +273,10 @@ test('a routed provider without a key answers the local catalog with zero calls'
     const [entry] = [byId.get(MOCK_MODEL_ID)];
     assertEntryShape(entry, 'openrouter');
     assert.equal(entry.id, MOCK_MODEL_ID);
-    // Without a key nothing is selectable, so the model is offered as
-    // approvable with its template instead of pretending it is approved.
-    assert.equal(entry.status, 'approvable');
-    assert.ok(entry.approval?.includes('PROVIDER_TAG'), 'The local template names the tag to replace');
+    // Missing configuration cannot be repaired by copying another approval.
+    assert.equal(entry.status, 'unverified');
+    assert.equal(entry.reason, 'provider_unconfigured');
+    assert.equal(entry.approval, null);
 
     // A paid or router approval is a dead record: the locally checkable ID
     // rules refuse it even before the provider is ever contacted.
@@ -292,7 +303,9 @@ test('an unauthorized environment answers the local Groq catalog with zero calls
     const res = await f.request('/api/document-extraction/catalog?provider=groq');
     assertCatalogEnvelope(res, 'local');
     assert.deepEqual(res.json.data.entries.map((entry) => entry.id), [MOCK_GROQ_MODEL_ID]);
-    assert.equal(res.json.data.entries[0].status, 'approvable');
+    assertEntryShape(res.json.data.entries[0], 'groq');
+    assert.equal(res.json.data.entries[0].status, 'unverified');
+    assert.equal(res.json.data.entries[0].reason, 'authorization_required');
     assert.equal(f.calls.length, 0, 'An unauthorized environment is never contacted');
   }, {
     enabled: false, authorized: false, provider: 'groq',

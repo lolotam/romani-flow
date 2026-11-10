@@ -198,8 +198,32 @@ export interface ModelChoice {
  * selectable now. `approvable` means the reviewed rules accept the model but
  * no current approval names it, so the administrator can add one. `unavailable`
  * means the reviewed rules refuse the model, so no approval can select it.
+ * `unverified` means the model could not be proven usable at all: a missing
+ * price, a missing privacy attestation, a missing authorization or a missing
+ * configuration. Nothing that is unverified may be enabled.
  */
-export type ModelCatalogStatus = 'approved' | 'approvable' | 'unavailable';
+export type ModelCatalogStatus = 'approved' | 'approvable' | 'unavailable' | 'unverified';
+
+/**
+ * Why one model of a provider catalog has the state it has.
+ *
+ * The reasons are a fixed, sanitized vocabulary: a provider answer, a key, an
+ * endpoint tag or a policy payload never reaches the client. `none` is the
+ * reason of an approved model.
+ */
+export type ModelCatalogReason =
+  | 'none'
+  | 'unsupported_images'
+  | 'unsupported_json'
+  | 'pricing_unverified'
+  | 'nonzero_pricing'
+  | 'approval_required'
+  | 'privacy_policy'
+  | 'authorization_required'
+  | 'provider_unconfigured'
+  | 'unsupported_model'
+  | 'not_free'
+  | 'router_model';
 
 /** One entry of the live model catalog of one provider. */
 export interface ModelCatalogEntry {
@@ -207,6 +231,8 @@ export interface ModelCatalogEntry {
   label: string;
   provider: 'groq' | 'openrouter';
   status: ModelCatalogStatus;
+  /** The fixed reason of the state, never a provider text. */
+  reason: ModelCatalogReason;
   /** The number of images a request may send, when the model is reviewed. */
   maxImages: number | null;
   /**
