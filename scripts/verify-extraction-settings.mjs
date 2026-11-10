@@ -1582,13 +1582,13 @@ async function runSettingsTests(page, api, origin, fixtureUrl) {
     api.offlineCandidates.openrouter = [raceChoice];
     api.catalogEntries = [{ ...raceChoice, status: 'approved', reason: 'none', approval: null }];
   }
-  async function heldCatalog(action, inspect) {
+  async function heldCatalog(action, inspect, heldProvider = 'openrouter') {
     let entered, release;
     const entry = new Promise(resolve => { entered = resolve; });
     api.holdCatalog = new Promise(resolve => { release = resolve; });
-    api.onCatalogEntry = provider => { if (provider === 'openrouter') entered(); };
-    const settled = catalogSettled(page, 'openrouter');
-    const candidates = candidateSettled(page, 'openrouter');
+    api.onCatalogEntry = provider => { if (provider === heldProvider) entered(); };
+    const settled = catalogSettled(page, heldProvider);
+    const candidates = candidateSettled(page, heldProvider);
     try {
       await action();
       await boundedEntry(entry, 'review catalogue entry');
@@ -1664,6 +1664,131 @@ async function runSettingsTests(page, api, origin, fixtureUrl) {
     });
     api.catalogHttpStatus = 200;
     api.catalogEntries = null;
+  });
+
+
+  // PR23 Codex4524555900: a failed refresh status read must restore only a
+  // previously settled decision, never turn an unresolved read into fallback.
+  async function mountRaceCatalog(refused = false) {
+    configureCatalogRace();
+    if (refused) api.catalogEntries = [{ ...raceChoice, status: 'unverified', reason: 'pricing_unverified', maxImages: null, approval: null }];
+    const settled = catalogSettled(page, 'openrouter');
+    await remountFixture(page, { role: 'admin' });
+    await settled; await renderSettled();
+  }
+  async function failedRefreshStatus(inspect) {
+    let entered, release;
+    const entry = new Promise(resolve => { entered = resolve; });
+    api.holdStatus = new Promise(resolve => { release = resolve; });
+    api.onStatusEntry = () => entered();
+    const settled = statusSettled(page);
+    api.statusHttpStatus = 503;
+    try {
+      await getSettingsControls(page).refreshButton.click();
+      await boundedEntry(entry, 'refresh status entry');
+      // The first request already owns its barrier; later identities do not.
+      api.holdStatus = api.onStatusEntry = null;
+      api.statusHttpStatus = 200;
+      await renderSettled();
+      await inspect(async () => {
+        release(); await settled; await renderSettled();
+      });
+    } finally {
+      release(); await settled;
+      api.holdStatus = api.onStatusEntry = null;
+      api.statusHttpStatus = 200;
+    }
+  }
+  await runCase(eligibilityCase++, 'Refresh status failure restores settled approval and enabled save', async () => {
+    await mountRaceCatalog();
+    const controls = getSettingsControls(page);
+    await setEnableSwitch(page, true);
+    const puts = api.putSettingsCalls;
+    await failedRefreshStatus(async release => {
+      await controls.saveButton.click(); await renderSettled();
+      assert.equal(api.putSettingsCalls, puts, 'Held status cannot save enabled settings');
+      await release();
+      await controls.errorAlert.waitFor({ state: 'visible' });
+      assert.equal(await getSelectedModel(page), raceChoice.id);
+      assert.equal(await controls.enableSwitch.getAttribute('data-state'), 'checked', 'Failure preserves enabled editor');
+      await setEnableSwitch(page, false);
+      assert.equal(await controls.enableSwitch.isDisabled(), false, 'Prior settled approval is usable after status failure');
+      await setEnableSwitch(page, true);
+      const put = page.waitForResponse(response => response.url().endsWith('/api/settings') && response.request().method() === 'PUT');
+      await controls.saveButton.click(); await boundedEntry(put, 'enabled save after status failure');
+      assert.equal(api.capturedPutSettings.at(-1).settings['ai_extraction.enabled'], true);
+    });
+  });
+  await runCase(eligibilityCase++, 'Refresh status failure preserves prior catalogue refusal', async () => {
+    await mountRaceCatalog(true);
+    const controls = getSettingsControls(page);
+    await failedRefreshStatus(async release => {
+      await release();
+      await controls.errorAlert.waitFor({ state: 'visible' });
+      assert.equal(await getSelectedModel(page), raceChoice.id);
+      assert.equal(await controls.enableSwitch.isDisabled(), true);
+      assert.equal(await controls.enableSwitch.getAttribute('data-state'), 'unchecked');
+    });
+  });
+  await runCase(eligibilityCase++, 'Refresh status failure cannot unlock never-settled catalogue; retry recovers', async () => {
+    configureCatalogRace();
+    const controls = getSettingsControls(page);
+    await heldCatalog(() => remountFixture(page, { role: 'admin' }), async releaseCatalog => {
+      await failedRefreshStatus(async releaseStatus => {
+        await releaseStatus();
+        assert.equal(await controls.enableSwitch.isDisabled(), true, 'No settled catalogue means no fallback');
+        await controls.saveButton.click(); await renderSettled();
+        assert.ok(api.capturedPutSettings.at(-1)?.settings['ai_extraction.enabled'] !== true, 'No false enabled write');
+      });
+      await releaseCatalog();
+      assert.equal(await controls.enableSwitch.isDisabled(), true, 'Stale initial read cannot recover refresh');
+    });
+    const retry = catalogSettled(page, 'openrouter');
+    await controls.refreshButton.click(); await retry; await renderSettled();
+    await page.waitForFunction(() => !document.querySelector('[data-testid="extraction-enabled-switch"]').disabled);
+    await setEnableSwitch(page, true);
+    assert.equal(await controls.enableSwitch.getAttribute('data-state'), 'checked');
+  });
+  for (const account of [false, true]) {
+    await runCase(eligibilityCase++, `Late failed refresh cannot unlock ${account ? 'another account' : 'another provider'}`, async () => {
+      await mountRaceCatalog();
+      const controls = getSettingsControls(page);
+      await failedRefreshStatus(async releaseStatus => {
+        if (account) api.currentUser = { ...api.currentUser, id: 'account-admin-2' };
+        await heldCatalog(async () => {
+          if (account) {
+            await remountFixture(page, { role: 'admin' });
+            await waitForCommittedState(page, { accountId: 'account-admin-2' });
+          } else {
+            // A genuinely different provider owns its own candidate and response.
+            const groqChoice = { ...raceChoice, id: 'qwen/qwen3.8-27b', provider: 'groq', maxImages: 3 };
+            api.offlineCandidates.groq = [groqChoice];
+            api.catalogEntries = [{ ...groqChoice, status: 'approved', reason: 'none', approval: null }];
+            await selectProvider(page, 'groq');
+            await selectModel(page, groqChoice.id);
+            assert.equal(await getSelectedProvider(page), 'groq');
+          }
+        }, async releaseCatalog => {
+          await releaseStatus();
+          assert.equal(await controls.enableSwitch.isDisabled(), true, 'Old status failure cannot release new pending catalogue');
+          assert.equal(await controls.enableSwitch.getAttribute('data-state'), 'unchecked');
+          await releaseCatalog();
+          await page.waitForFunction(() => !document.querySelector('[data-testid="extraction-enabled-switch"]').disabled);
+        }, account ? 'openrouter' : 'groq');
+      });
+    });
+  }
+  await runCase(eligibilityCase++, 'Refresh without provider settles and later explicit provider can enable', async () => {
+    configureCatalogRace('');
+    await remountFixture(page, { role: 'admin' });
+    const controls = getSettingsControls(page);
+    const refreshed = statusSettled(page);
+    await controls.refreshButton.click(); await refreshed; await renderSettled();
+    assert.equal(await controls.enableSwitch.isDisabled(), true);
+    const catalog = catalogSettled(page, 'openrouter');
+    await selectProvider(page, 'openrouter'); await catalog; await renderSettled();
+    await selectModel(page, raceChoice.id);
+    await page.waitForFunction(() => !document.querySelector('[data-testid="extraction-enabled-switch"]').disabled);
   });
 
   const passedCount = results.filter((r) => r.passed).length;
@@ -1865,6 +1990,8 @@ export async function main() {
         }
 
         if (url.pathname === '/api/document-extraction/status') {
+          // Each held response owns its status even if a new identity starts.
+          const statusHttpStatus = api.statusHttpStatus;
           api.statusCalls += 1;
           if (api.onStatusEntry) {
             api.onStatusEntry();
@@ -1872,9 +1999,9 @@ export async function main() {
           if (api.holdStatus) {
             await api.holdStatus;
           }
-          if (api.statusHttpStatus !== 200) {
+          if (statusHttpStatus !== 200) {
             return route.fulfill({
-              status: api.statusHttpStatus,
+              status: statusHttpStatus,
               json: { data: null, error: { code: 'status_error', message: 'Failed to load status' } },
             });
           }

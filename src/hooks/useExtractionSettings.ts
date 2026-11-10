@@ -146,6 +146,8 @@ export function useExtractionSettings(accountId: string | null, refreshKey = 0):
    * when the epoch moved on.
    */
   const epochRef = useRef(0);
+  // Only an actual catalogue settlement permits failure recovery.
+  const catalogSettledRef = useRef(false);
   /**
    * The token of the current write. It changes with the account and with the
    * provider, so a result of a write never reaches the editor of another
@@ -161,7 +163,6 @@ export function useExtractionSettings(accountId: string | null, refreshKey = 0):
   const seededRef = useRef(false);
   const refreshAbortRef = useRef<AbortController | null>(null);
   const saveAbortRef = useRef<AbortController | null>(null);
-
   /** Aborts the requests that a change of the account makes obsolete. */
   const abortPending = useCallback(() => {
     refreshAbortRef.current?.abort();
@@ -186,13 +187,12 @@ export function useExtractionSettings(accountId: string | null, refreshKey = 0):
     setCatalog([]);
     setCatalogSource(null);
     setCatalogPending(true);
+    catalogSettledRef.current = false;
     setError(null);
     setSaving(false);
     setLoading(accountId !== null);
   }, [accountId, abortPending]);
-
   useEffect(() => abortPending, [abortPending]);
-
   // The status of the extraction. The answer of a former account is refused.
   useEffect(() => {
     if (!accountId) return;
@@ -268,6 +268,7 @@ export function useExtractionSettings(accountId: string | null, refreshKey = 0):
         if (!active || epoch !== epochRef.current) return;
         setCatalog(listing.entries);
         setCatalogSource(listing.verification);
+        catalogSettledRef.current = true;
         setCatalogPending(false);
         setEditor(current => isRefusedByCatalog(listing.entries, provider, current.model) ? { ...current, enabled: false } : current);
       })
@@ -277,6 +278,7 @@ export function useExtractionSettings(accountId: string | null, refreshKey = 0):
         // broken listing never erases a selection.
         setCatalog([]);
         setCatalogSource(null);
+        catalogSettledRef.current = true;
         setCatalogPending(false);
         if (epoch !== epochRef.current) return;
         setError(settingsError('catalog_unavailable', cause));
@@ -326,6 +328,7 @@ export function useExtractionSettings(accountId: string | null, refreshKey = 0):
     refreshAbortRef.current?.abort();
     refreshAbortRef.current = null;
     setCatalogPending(true);
+    catalogSettledRef.current = false;
     setEditor((current) => ({ ...current, provider, model: '' }));
     setCandidates([]);
     setCandidateReason(null);
@@ -373,7 +376,7 @@ export function useExtractionSettings(accountId: string | null, refreshKey = 0):
         // The catalogue belongs to the provider of the editor. A provider that
         // was never chosen has no catalogue.
         const provider = selected || (seeded ? '' : (next.provider as ExtractionProvider | ''));
-        if (!provider) return;
+        if (!provider) { setCatalogPending(false); return; }
         const candidatesPromise = loadCandidates(provider, controller.signal)
           .then((listing) => {
             if (epoch !== epochRef.current || controller.signal.aborted) return;
@@ -393,6 +396,7 @@ export function useExtractionSettings(accountId: string | null, refreshKey = 0):
             if (epoch !== epochRef.current || controller.signal.aborted) return;
             setCatalog(listing.entries);
             setCatalogSource(listing.verification);
+            catalogSettledRef.current = true;
             setCatalogPending(false);
             setEditor(current => isRefusedByCatalog(listing.entries, provider, current.model) ? { ...current, enabled: false } : current);
           })
@@ -400,6 +404,7 @@ export function useExtractionSettings(accountId: string | null, refreshKey = 0):
             if (epoch !== epochRef.current || controller.signal.aborted) return;
             setCatalog([]);
             setCatalogSource(null);
+            catalogSettledRef.current = true;
             setCatalogPending(false);
             setError(settingsError('catalog_unavailable', cause));
           });
@@ -407,6 +412,7 @@ export function useExtractionSettings(accountId: string | null, refreshKey = 0):
       })
       .catch((cause) => {
         if (epoch !== epochRef.current || controller.signal.aborted) return;
+        setCatalogPending(!catalogSettledRef.current);
         setError(settingsError('status_unavailable', cause));
       });
   }, [accountId, editor.provider]);
