@@ -1569,6 +1569,103 @@ async function runSettingsTests(page, api, origin, fixtureUrl) {
     });
   });
 
+
+  // PR23 review4524440499: offline candidates must not outrun a pending catalogue.
+  const raceChoice = { id: 'synthetic/catalog-race:free', label: 'Catalogue race control', provider: 'openrouter', maxImages: 1 };
+  const renderSettled = () => page.evaluate(() => window.__settingsControls.settleRender());
+  function configureCatalogRace(provider = 'openrouter') {
+    api.currentUser = { id: 'account-admin-1', email: 'admin@romani.test', name: 'Administrator', role: 'admin' };
+    api.authHttpStatus = api.statusHttpStatus = api.candidatesHttpStatus = api.catalogHttpStatus = api.putSettingsHttpStatus = 200;
+    api.status = { ...api.status, enabled: false, provider, model: provider ? raceChoice.id : '',
+      processingAuthorized: true, configured: { groq: true, openrouter: true } };
+    api.candidatesReason = 'locally_approved';
+    api.offlineCandidates.openrouter = [raceChoice];
+    api.catalogEntries = [{ ...raceChoice, status: 'approved', reason: 'none', approval: null }];
+  }
+  async function heldCatalog(action, inspect) {
+    let entered, release;
+    const entry = new Promise(resolve => { entered = resolve; });
+    api.holdCatalog = new Promise(resolve => { release = resolve; });
+    api.onCatalogEntry = provider => { if (provider === 'openrouter') entered(); };
+    const settled = catalogSettled(page, 'openrouter');
+    const candidates = candidateSettled(page, 'openrouter');
+    try {
+      await action();
+      await boundedEntry(entry, 'review catalogue entry');
+      await candidates;
+      await renderSettled();
+      await inspect(async () => { release(); await settled; await renderSettled(); });
+    } finally {
+      release();
+      await Promise.all([settled, candidates]);
+      api.holdCatalog = api.onCatalogEntry = null;
+      await page.keyboard.press('Escape');
+    }
+  }
+  for (const initial of [true, false]) {
+    await runCase(eligibilityCase++, `${initial ? 'Initial' : 'Provider effect'} waits for catalogue before enabling`, async () => {
+      configureCatalogRace(initial ? 'openrouter' : '');
+      const controls = getSettingsControls(page);
+      const puts = api.putSettingsCalls;
+      await heldCatalog(async () => {
+        await remountFixture(page, { role: 'admin' });
+        if (!initial) { await selectProvider(page, 'openrouter'); await selectModel(page, raceChoice.id); }
+      }, async release => {
+        assert.equal(await controls.enableSwitch.isDisabled(), true, 'Candidates-first cannot enable while catalogue is pending');
+        assert.equal(await controls.enableSwitch.getAttribute('data-state'), 'unchecked');
+        await controls.saveButton.click();
+        await renderSettled();
+        assert.ok(api.capturedPutSettings.slice(puts).every(body => body.settings['ai_extraction.enabled'] === false), 'No enabled PUT while catalogue pending');
+        await release();
+        await controls.enableSwitch.waitFor({ state: 'visible' });
+        await page.waitForFunction(() => !document.querySelector('[data-testid="extraction-enabled-switch"]').disabled);
+        await setEnableSwitch(page, true);
+        assert.equal(await controls.enableSwitch.getAttribute('data-state'), 'checked', 'Successful catalogue allows explicit enabling');
+      });
+    });
+  }
+  for (const pending of [true, false]) {
+    await runCase(eligibilityCase++, `Refresh ${pending ? 'pending blocks enabled PUT' : 'refusal clears enabled editor'}`, async () => {
+      configureCatalogRace();
+      const controls = getSettingsControls(page);
+      const first = catalogSettled(page, 'openrouter');
+      await remountFixture(page, { role: 'admin' });
+      await first; await renderSettled();
+      await page.waitForFunction(() => !document.querySelector('[data-testid="extraction-enabled-switch"]').disabled);
+      await setEnableSwitch(page, true);
+      const puts = api.putSettingsCalls;
+      // Snapshot the refusal at HTTP entry, before holding the response.
+      api.catalogEntries = [{ ...raceChoice, status: 'unverified', reason: 'pricing_unverified', maxImages: null, approval: null }];
+      await heldCatalog(() => controls.refreshButton.click(), async release => {
+        if (pending) {
+          await controls.saveButton.click(); await renderSettled();
+          assert.equal(api.putSettingsCalls, puts, 'Refresh cannot PUT enabled=true before catalogue settles');
+        }
+        await release();
+        assert.equal(await controls.enableSwitch.getAttribute('data-state'), 'unchecked', 'Late refusal clears enabled editor');
+        assert.equal(await controls.enableSwitch.isDisabled(), true);
+        await controls.saveButton.click(); await renderSettled();
+        assert.ok(api.capturedPutSettings.slice(puts).every(body => body.settings['ai_extraction.enabled'] === false), 'Late refusal cannot save enabled=true');
+      });
+    });
+  }
+  await runCase(eligibilityCase++, 'Settled catalogue failure retains intended approved-candidate fallback', async () => {
+    configureCatalogRace();
+    const controls = getSettingsControls(page);
+    await heldCatalog(() => remountFixture(page, { role: 'admin' }), async release => {
+      api.catalogHttpStatus = 500;
+      await release();
+      await page.waitForFunction(() => !document.querySelector('[data-testid="extraction-enabled-switch"]').disabled);
+      assert.equal(await getSelectedModel(page), raceChoice.id, 'Failed catalogue preserves saved selection');
+      await setEnableSwitch(page, true);
+      const put = page.waitForResponse(response => response.url().endsWith('/api/settings') && response.request().method() === 'PUT');
+      await controls.saveButton.click(); await put;
+      assert.equal(api.capturedPutSettings.at(-1).settings['ai_extraction.enabled'], true, 'Settled failure permits explicit fallback; server remains authority');
+    });
+    api.catalogHttpStatus = 200;
+    api.catalogEntries = null;
+  });
+
   const passedCount = results.filter((r) => r.passed).length;
   const failedCount = results.filter((r) => !r.passed).length;
 
