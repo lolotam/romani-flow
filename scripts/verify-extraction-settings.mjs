@@ -1432,6 +1432,23 @@ async function runSettingsTests(page, api, origin, fixtureUrl) {
     const unavailableText = (await unavailableOption.innerText()).trim();
     assert.match(unavailableText, /Not eligible|غير مؤهل/i, 'Unavailable row must state it is not eligible');
 
+    // The visible reason must explain the remaining verification in both languages;
+    // the badge alone is not actionable and capability is not privacy approval.
+    for (const language of ['en', 'ar']) {
+      await page.evaluate(lang => window.__settingsControls.setLanguage(lang), language);
+      await waitForCommittedState(page, { language, direction: language === 'ar' ? 'rtl' : 'ltr' });
+      const reason = await approvableOption.innerText();
+      assert.match(reason, /ZDR/, 'Approval explanation includes the applicable privacy verification');
+      assert.match(reason, language === 'en' ? /endpoint/i : /\u0646\u0642\u0637\u0629 \u0627\u0644\u062e\u062f\u0645\u0629/, 'Explanation names endpoint verification');
+      assert.match(reason, language === 'en' ? /before enabling/i : /\u0642\u0628\u0644 \u0627\u0644\u062a\u0641\u0639\u064a\u0644/, 'Explanation states the action needed before use');
+      assert.match(reason, language === 'en' ? /where required/i : /\u0639\u0646\u062f \u0627\u0634\u062a\u0631\u0627\u0637\u0647/, 'ZDR wording is conditional, not a universal absence claim');
+      assert.match(reason, language === 'en' ? /server approval/i : /\u0627\u0639\u062a\u0645\u0627\u062f \u0627\u0644\u062e\u0627\u062f\u0645/, 'Explanation distinguishes approval from capability');
+      await approvableOption.click();
+      assert.equal(await getSelectedModel(page), '', 'Reading approval explanation cannot select or enable the model');
+      assert.equal(await getSettingsControls(page).enableSwitch.isDisabled(), true);
+      assert.ok(!reason.includes('extraction.catalog.'), 'Visible explanation is translated');
+    }
+
     // Search narrows the list to matching models only.
     await searchBox.fill('llama');
     const searchMatches = await page.locator('[role="option"]').locator('visible=true').count();

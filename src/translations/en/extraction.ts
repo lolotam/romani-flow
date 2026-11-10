@@ -114,8 +114,10 @@ export const extraction = {
       unsupported_json: 'The model does not answer with structured JSON.',
       pricing_unverified: 'The prices of the model are not verified.',
       nonzero_pricing: 'The model is not free.',
-      approval_required: 'The model needs an approval record.',
-      privacy_policy: 'The privacy requirements of the model are not met.',
+      approval_required:
+        'Before enabling, verify the provider endpoint and privacy requirements (including ZDR where required), then complete server approval. Image support and free pricing alone are insufficient.',
+      privacy_policy:
+        'Privacy requirements are unmet or unverified. Verify data retention and required privacy guarantees before enabling.',
       authorization_required:
         'Document processing is not authorized for this environment.',
       provider_unconfigured: 'The provider is not configured.',
