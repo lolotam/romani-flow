@@ -105,6 +105,23 @@ function isApprovedChoice(
 }
 
 /**
+ * Reports whether the catalogue refuses the selected model.
+ *
+ * A catalogue that knows the model and does not approve it refuses it, whatever
+ * the offline candidates and the saved value say: neither of them is a fresh
+ * approval, so they never override a known refusal of the catalogue.
+ */
+function isRefusedByCatalog(
+  catalog: ModelCatalogEntry[],
+  provider: ExtractionProvider | '',
+  model: string,
+): boolean {
+  if (!provider || !model) return false;
+  const entry = catalog.find((item) => item.id === model && item.provider === provider);
+  return entry !== undefined && entry.status !== 'approved';
+}
+
+/**
  * Owns the settings of the AI document extraction. The account owns the
  * settings: a change of the account starts from an empty editor and refuses
  * every answer that belongs to the former one.
@@ -271,6 +288,8 @@ export function useExtractionSettings(accountId: string | null, refreshKey = 0):
   // current one, it has to be approved locally and the chosen model has to
   // belong to it. A catalogue that is still loading, a catalogue that failed
   // and a model that the catalogue does not know never allow an activation.
+  // A catalogue that knows the model and refuses it refuses it as well: an
+  // approved candidate and a saved value are not a fresh approval.
   const canEnable =
     status !== null &&
     statusLoaded &&
@@ -278,7 +297,8 @@ export function useExtractionSettings(accountId: string | null, refreshKey = 0):
     editor.provider !== '' &&
     editor.model !== '' &&
     isConfigured(status, editor.provider) &&
-    isApprovedChoice(candidates, candidateReason, editor.provider, editor.model);
+    isApprovedChoice(candidates, candidateReason, editor.provider, editor.model) &&
+    !isRefusedByCatalog(catalog, editor.provider, editor.model);
 
   const setEnabled = useCallback(
     (enabled: boolean) => {

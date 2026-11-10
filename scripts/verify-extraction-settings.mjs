@@ -28,6 +28,8 @@
  * - Case 11: Retained persisted model not in current offline catalog (reason no_candidates/policy_unavailable or failed refresh) -> display preserved but cannot enable; positive valid catalog enables.
  * - Case 12: Malformed provider candidate (maxImages: 10) -> fails closed as no-list via runtime validation; never prove pricing from offline.
  * - Case 13: Searchable full catalog -> approved selectable, approvable greyed out with copyable approval record, unavailable refused, search narrows.
+ * - Cases 14-17: Held/settled HTTP catalogue -> unverified pricing/privacy entries carry specific English/Arabic reasons and disabled choices.
+ * - Cases 18-20: Known unverified entries veto saved/candidate fallback; approved control still needs explicit choice and enabling.
  */
 
 import assert from 'node:assert/strict';
@@ -146,6 +148,11 @@ class SettingsMockApi {
     // Live catalog fixtures: entries the reviewed rules accept but no current
     // approval names, served next to the approved candidates.
     this.catalogHttpStatus = 200;
+    // Exact HTTP payload overrides and entry/settlement barriers for eligibility
+    // regressions. No production hook, parser or picker utility is replaced.
+    this.catalogEntries = null;
+    this.onCatalogEntry = null;
+    this.holdCatalog = null;
     this.catalogExtras = {
       groq: [
         {
@@ -153,6 +160,7 @@ class SettingsMockApi {
           label: 'Llama 4 Scout 17B (free)',
           provider: 'groq',
           status: 'approvable',
+          reason: 'approval_required',
           maxImages: 3,
           approval: JSON.stringify({
             provider: 'groq',
@@ -168,6 +176,7 @@ class SettingsMockApi {
           label: 'GPT-OSS 120B',
           provider: 'groq',
           status: 'unavailable',
+          reason: 'unsupported_model',
           maxImages: null,
           approval: null,
         },
@@ -178,6 +187,7 @@ class SettingsMockApi {
           label: 'Qwen3 30B A3B (free)',
           provider: 'openrouter',
           status: 'approvable',
+          reason: 'approval_required',
           maxImages: 1,
           approval: JSON.stringify({
             provider: 'openrouter',
@@ -422,6 +432,27 @@ function statusSettled(page) {
     const timer = setTimeout(() => {
       cleanup();
       reject(new Error('Status settlement timed out'));
+    }, 7000);
+    page.on('requestfinished', done);
+    page.on('requestfailed', done);
+  });
+}
+
+function catalogSettled(page, provider) {
+  return new Promise((resolve, reject) => {
+    const cleanup = () => {
+      clearTimeout(timer);
+      page.off('requestfinished', done);
+      page.off('requestfailed', done);
+    };
+    const done = request => {
+      if (!request.url().includes(`/catalog?provider=${provider}`)) return;
+      cleanup();
+      resolve();
+    };
+    const timer = setTimeout(() => {
+      cleanup();
+      reject(new Error(`Catalog settlement timed out: ${provider}`));
     }, 7000);
     page.on('requestfinished', done);
     page.on('requestfailed', done);
@@ -1425,6 +1456,119 @@ async function runSettingsTests(page, api, origin, fixtureUrl) {
     assert.equal(await getSelectedModel(page), 'qwen/qwen3.8-27b', 'Approved model click must select it');
   });
 
+  // 2026-11-10 eligibility regression. Real HTTP responses cross the current
+  // runtime schema, hook and picker; only the HTTP boundary is controlled.
+  const eligibilityId = 'synthetic/arbitrary-vision-2026:free';
+  async function withEligibilityCatalog({ reason, saved = false, candidate = false }, inspect) {
+    const choice = { id: eligibilityId, label: 'Synthetic Vision', provider: 'openrouter', maxImages: 1 };
+    const controls = getSettingsControls(page);
+    api.currentUser = { id: 'account-admin-1', email: 'admin@romani.test', name: 'Administrator', role: 'admin' };
+    api.authHttpStatus = 200;
+    api.statusHttpStatus = 200;
+    api.candidatesHttpStatus = 200;
+    api.catalogHttpStatus = 200;
+    api.candidatesReason = 'locally_approved';
+    api.offlineCandidates.openrouter = candidate ? [choice] : [];
+    api.catalogEntries = [{ ...choice, status: reason === 'none' ? 'approved' : 'unverified',
+      reason, maxImages: reason === 'none' ? 1 : null, approval: null }];
+    api.status = { ...api.status, enabled: false, provider: 'openrouter', model: saved ? eligibilityId : '',
+      configured: { groq: true, openrouter: true }, processingAuthorized: true,
+      processingContext: 'kw-docs-context', available: false, reason: 'disabled' };
+    let release;
+    let entered;
+    const entry = new Promise(resolve => { entered = resolve; });
+    api.holdCatalog = new Promise(resolve => { release = resolve; });
+    api.onCatalogEntry = provider => { if (provider === 'openrouter') entered(); };
+    const settled = catalogSettled(page, 'openrouter');
+    const candidates = candidateSettled(page, 'openrouter');
+    const puts = api.putSettingsCalls;
+    try {
+      await remountFixture(page, { role: 'admin' });
+      await boundedEntry(entry, 'eligibility catalog HTTP entry');
+      await candidates;
+      await boundedEntry(page.evaluate(() => window.__settingsControls.settleRender()), 'held render');
+      assert.equal(await getSelectedModel(page), saved ? eligibilityId : '', 'Held HTTP never changes explicit selection');
+      assert.equal(await controls.enableSwitch.getAttribute('data-state'), 'unchecked', 'No automatic enabling');
+      assert.equal(api.putSettingsCalls, puts, 'Catalog reads never PUT settings');
+      release();
+      await settled;
+      await boundedEntry(page.evaluate(() => window.__settingsControls.settleRender()), 'settled render');
+      await inspect(controls, choice);
+      assert.equal(api.putSettingsCalls, puts, 'Inspecting a blocked choice never writes settings');
+    } finally {
+      release();
+      api.holdCatalog = null;
+      api.onCatalogEntry = null;
+      api.catalogEntries = null;
+      // Always settle the held request before the next case owns the fixture.
+      await Promise.all([settled, candidates]);
+      await page.keyboard.press('Escape');
+    }
+  }
+
+  const reasonCopy = {
+    pricing_unverified: {
+      en: /(?:pric(?:e|es|ing)|cost).*(?:verif|unknown|unconfirmed)|(?:verif|unknown|unconfirmed).*(?:pric|cost)/i,
+      ar: /(?:السعر|الأسعار|التسعير|التكلفة)/,
+    },
+    privacy_policy: {
+      en: /privacy.*(?:require|unmet|unverified|verif|not.*met)|(?:require|unmet|unverified|verif).*privacy/i,
+      ar: /(?:الخصوصية|خصوصية|الاحتفاظ بالبيانات)/,
+    },
+  };
+  let eligibilityCase = 14;
+  for (const reason of ['pricing_unverified', 'privacy_policy']) {
+    for (const language of ['en', 'ar']) {
+      await runCase(eligibilityCase++, `Unverified ${reason}: actionable ${language} copy and disabled choice`, async () => {
+        await withEligibilityCatalog({ reason }, async (controls) => {
+          await page.evaluate(lang => window.__settingsControls.setLanguage(lang), language);
+          await waitForCommittedState(page, { language, direction: language === 'ar' ? 'rtl' : 'ltr' });
+          await page.locator('[data-testid="extraction-model-select"]').click();
+          const row = page.getByRole('option').filter({ hasText: eligibilityId });
+          await row.waitFor({ state: 'visible', timeout: 5000 });
+          const text = await row.innerText();
+          assert.match(text, language === 'en' ? /Needs verification/i : /(?:يحتاج|بحاجة|يلزم|يتطلب).*تحقق/,
+            'Unresolved metadata needs a verification badge, never an approved badge');
+          assert.match(text, reasonCopy[reason][language], 'Specific translated blocking reason must be visible');
+          if (language === 'ar') assert.match(text, /(?:التحقق|غير|متطلبات|مستوف|مؤكد|معروف|موثق)/,
+            'Arabic reason explains unmet or unverified requirements');
+          assert.ok(!text.includes(reason) && !text.includes('extraction.catalog.'), 'No raw reason codes or missing translation keys');
+          assert.equal(await row.getAttribute('aria-disabled'), 'true', 'Unverified choice is accessibly disabled');
+          assert.equal(await controls.enableSwitch.isDisabled(), true);
+          assert.equal(await getSelectedModel(page), '', 'Unverified metadata cannot select a model');
+          assert.equal(await row.locator('[data-testid="extraction-copy-approval"]').count(), 0,
+            'Pricing/privacy uncertainty cannot be repaired by copying approval');
+        });
+      });
+    }
+  }
+
+  for (const candidate of [false, true]) {
+    await runCase(eligibilityCase++, `Explicit unverified catalogue blocks saved model${candidate ? ' despite approved-candidate fallback' : ''}`, async () => {
+      await withEligibilityCatalog({ reason: 'pricing_unverified', saved: true, candidate }, async controls => {
+        assert.equal(await getSelectedModel(page), eligibilityId, 'Persisted identity remains visible');
+        assert.equal(await controls.enableSwitch.isDisabled(), true,
+          'Known unverified catalogue entry vetoes both saved and locally approved fallback');
+        await page.locator('[data-testid="extraction-model-select"]').click();
+        const row = page.getByRole('option').filter({ hasText: eligibilityId });
+        await row.waitFor({ state: 'visible', timeout: 5000 });
+        assert.equal(await row.getAttribute('aria-disabled'), 'true', 'Saved model never becomes a fresh approval');
+      });
+    });
+  }
+
+  await runCase(eligibilityCase++, 'Eligible unchanged control still needs explicit model choice and enabling', async () => {
+    await withEligibilityCatalog({ reason: 'none', candidate: true }, async controls => {
+      assert.equal(await getSelectedModel(page), '');
+      assert.equal(await controls.enableSwitch.isDisabled(), true);
+      await selectModel(page, eligibilityId);
+      assert.equal(await getSelectedModel(page), eligibilityId);
+      assert.equal(await controls.enableSwitch.isDisabled(), false);
+      await setEnableSwitch(page, true);
+      assert.equal(await controls.enableSwitch.getAttribute('data-state'), 'checked');
+    });
+  });
+
   const passedCount = results.filter((r) => r.passed).length;
   const failedCount = results.filter((r) => !r.passed).length;
 
@@ -1439,7 +1583,7 @@ async function runSettingsTests(page, api, origin, fixtureUrl) {
     );
   }
 
-  console.log('[SETTINGS SUITE] All 12 settings contract behaviors verified.');
+  console.log(`[SETTINGS SUITE] All ${results.length} settings contract behaviors verified.`);
 }
 
 export async function main() {
@@ -1456,7 +1600,7 @@ export async function main() {
   const preflight = runPreflightCheck();
   if (!preflight.ok) {
     console.error('======================================================================');
-    console.error('[SETTINGS SUITE] PREFLIGHT SEMANTIC CHECK: FAILED (EXPECTED RED)');
+    console.error('[SETTINGS SUITE] PREFLIGHT SEMANTIC CHECK: SETUP FAILURE (NOT BEHAVIORAL RED)');
     if (preflight.missingModules.length > 0) {
       console.error('Missing required Task 15 production modules:');
       for (const mod of preflight.missingModules) {
@@ -1724,6 +1868,12 @@ export async function main() {
         // approvable extras. A malformed candidate is dropped here as well,
         // so a broken fixture can never become a catalog entry.
         if (url.pathname === '/api/document-extraction/catalog' && req.method() === 'GET') {
+          const provider = url.searchParams.get('provider');
+          // Capture before holding, so later fixture changes cannot rewrite an
+          // already entered HTTP response during a race.
+          const explicitEntries = api.catalogEntries?.map(entry => ({ ...entry }));
+          if (api.onCatalogEntry) api.onCatalogEntry(provider);
+          if (api.holdCatalog) await api.holdCatalog;
           if (api.catalogHttpStatus !== 200) {
             return route.fulfill({
               status: api.catalogHttpStatus,
@@ -1733,7 +1883,6 @@ export async function main() {
               },
             });
           }
-          const provider = url.searchParams.get('provider');
           const bounds = { groq: 3, openrouter: 1 };
           const approved = (api.offlineCandidates[provider] || [])
             .filter(
@@ -1747,13 +1896,14 @@ export async function main() {
               label: candidate.label,
               provider,
               status: 'approved',
+              reason: 'none',
               maxImages: candidate.maxImages,
               approval: null,
             }));
           const extras = (api.catalogExtras[provider] || []).map((entry) => ({ ...entry, provider }));
           return route.fulfill({
             status: 200,
-            json: { data: { verification: 'live', entries: [...approved, ...extras] }, error: null },
+            json: { data: { verification: 'live', entries: explicitEntries ?? [...approved, ...extras] }, error: null },
           });
         }
 
@@ -1807,12 +1957,15 @@ export async function main() {
       return route.continue();
     });
 
-    await runSettingsTests(page, api, origin, fixtureUrl);
-
-    // Strict boundary and error assertions
-    assert.deepEqual(unexpectedApiCalls, [], 'Settings suite must not encounter unexpected API calls');
-    assert.deepEqual(egressViolations, [], 'Settings suite must not attempt non-loopback egress');
-    assert.deepEqual(pageErrors, [], 'Settings suite must not encounter uncaught page errors');
+    try {
+      await runSettingsTests(page, api, origin, fixtureUrl);
+    } finally {
+      // A behavioral RED must still report the actual safety boundaries.
+      console.log('[SETTINGS BOUNDARIES]', JSON.stringify({ unexpectedApiCalls, egressViolations, pageErrors }));
+      assert.deepEqual(unexpectedApiCalls, [], 'Settings suite must not encounter unexpected API calls');
+      assert.deepEqual(egressViolations, [], 'Settings suite must not attempt non-loopback egress');
+      assert.deepEqual(pageErrors, [], 'Settings suite must not encounter uncaught page errors');
+    }
     console.log('[SETTINGS SUITE] Settings contract run completed successfully.');
   } finally {
     if (browser) await browser.close();
