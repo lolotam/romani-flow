@@ -44,6 +44,10 @@ const { limits } = await tsImport(
   '../server/contracts/documentExtraction.ts',
   import.meta.url
 );
+const copyTranslations = {
+  en: (await tsImport('../src/translations/en/extraction.ts', import.meta.url)).extraction.catalog,
+  ar: (await tsImport('../src/translations/ar/extraction.ts', import.meta.url)).extraction.catalog,
+};
 
 // Required production modules from Task 15 (must exist for settings browser execution)
 const REQUIRED_TASK15_MODULES = [
@@ -1462,7 +1466,11 @@ async function runSettingsTests(page, api, origin, fixtureUrl) {
     const copyStatus = page.locator('[data-testid="extraction-copy-status"]');
     await copyStatus.waitFor({ state: 'visible', timeout: 5000 });
     const copyText = (await copyStatus.innerText()).trim();
-    assert.match(copyText, /copied|failed|تم النسخ|تعذر/i, 'Copy feedback must be shown');
+    const copyLanguage = await page.evaluate(() => window.__settingsControls.getRenderInfo().language);
+    assert.ok(Object.hasOwn(copyTranslations, copyLanguage), 'Copy feedback language must be supported');
+    const copy = copyTranslations[copyLanguage];
+    assert.ok([copy.copied, copy.copyFailed].includes(copyText), 'Copy feedback must equal the localized success or failure message');
+    console.log('[CLIPBOARD FEEDBACK]', JSON.stringify({ language: copyLanguage, result: copyText === copy.copied ? 'success' : 'failure' }));
 
     // A greyed-out model can never be chosen.
     await approvableOption.click();
