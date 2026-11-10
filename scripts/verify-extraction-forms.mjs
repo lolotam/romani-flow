@@ -560,6 +560,7 @@ async function runFormsTests(page, api, draftDb, draftsPort) {
   let unexpectedFailCount = 0;
 
   async function testCase(name, isPositiveControl, fn) {
+    if (process.argv.includes('--case18') && !name.startsWith('Case 18:')) return;
     if (process.argv.includes('--remaining-review') && !/Case 14:|Case 15:|Case 16:|cleanup|Radix/.test(name)) return;
     totalCount++;
     const start = Date.now();
@@ -1707,6 +1708,15 @@ async function runFormsTests(page, api, draftDb, draftsPort) {
     try {
       for (const variant of ['company', 'beneficiary', 'employee', 'filter']) {
         console.log(`    [Case 18] Running variant: ${variant}`);
+        // Context edits can start another extraction on the previous mounted
+        // form. Retire and drain it before clearing request indices, so its
+        // late POST cannot become request zero of the next variant.
+        const retiredEpoch = await page.evaluate(() => window.__formsControls.getState().mountEpoch);
+        await page.evaluate(() => window.__formsControls.unmount());
+        await page.locator('[data-testid="forms-mount-container"][data-mode="none"]').waitFor();
+        await boundedGate(page.evaluate(() => window.__extractionProbe.drain()), 'retired context tasks/decode');
+        await page.waitForFunction(epoch => [...window.__extractionProbe.reads.values()]
+          .filter(read => read.epoch === epoch).every(read => read.settled), retiredEpoch);
         await api.reset();
         api.seedDraft('new', null);
         const epoch = await page.evaluate(() => window.__formsControls.mountGeneral());
@@ -1717,6 +1727,9 @@ async function runFormsTests(page, api, draftDb, draftsPort) {
         else await selectComboboxOption(page, 'الشركة', 'شركة روماني للتجارة');
         await page.locator('input[type="file"]').setInputFiles({ name: 'context.png', mimeType: 'image/png', buffer: Buffer.from(validPng) });
         const request = await api.waitForRequest(0, 10000);
+        const ownership = await page.evaluate(id => ({ read: window.__extractionProbe.reads.get(id), current: window.__formsControls.getState() }), request.id);
+        console.log('[CASE18 REQUEST OWNERSHIP]', JSON.stringify({ variant, expectedEpoch: epoch, requestId: request.id, ownership }));
+        assert.equal(ownership.read?.epoch, epoch, 'Context variant must fulfill its own mounted request');
         await request.fulfillSuccess();
         // The machine proposal reaches the form after the client settled the
         // read and the form re-rendered. A loaded CI container needs more than
