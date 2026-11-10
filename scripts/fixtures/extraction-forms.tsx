@@ -22,7 +22,8 @@ import { DocumentDraftSession, type DraftReference, type DraftStatus, type Draft
 
 // Tracks actual extraction HTTP/body settlement without changing hook or form behavior.
 const nativeFetch = window.fetch.bind(window);
-const extractionReads = new Map<string, { settled: boolean; outcome: string }>();
+type ExtractionRead = { settled: boolean; outcome: string; epoch: number | null; context: string[] };
+const extractionReads = new Map<string, ExtractionRead>();
 const bitmapWork = new Set<Promise<ImageBitmap>>();
 const nativeBitmap = window.createImageBitmap.bind(window);
 window.createImageBitmap = ((...args: Parameters<typeof createImageBitmap>) => {
@@ -48,7 +49,8 @@ window.fetch = async (input, init) => {
   if (url.pathname !== '/api/document-extraction' || init?.method !== 'POST') return nativeFetch(input, init);
   let id = `malformed-${extractionReads.size}`;
   try { id = JSON.parse(String(init.body)).requestId ?? id; } catch { /* Observe malformed POSTs too; never prevent transport. */ }
-  const record = { settled: false, outcome: 'pending' };
+  const record = { settled: false, outcome: 'pending', epoch: window.__formsControls?.getState().mountEpoch ?? null,
+    context: Array.from(document.querySelectorAll<HTMLSelectElement>('form select')).map(select => select.value) };
   extractionReads.set(id, record);
   try {
     const response = await nativeFetch(input, init);
@@ -155,7 +157,7 @@ export interface FormsControls {
 declare global {
   interface Window {
     __extractionProbe: {
-      reads: Map<string, { settled: boolean; outcome: string }>;
+      reads: Map<string, ExtractionRead>;
       drain: () => Promise<void>;
     };
     __formsControls?: FormsControls;
