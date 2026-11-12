@@ -234,7 +234,7 @@ test('legacy erase cannot commit over private drafts or queued bytes after migra
   writeSeedMarker(f.db);
   const draft = await f.request('/api/document-drafts/new', { method: 'PUT', headers: { 'x-draft-account': 'admin' }, body: { revision: 'none', values: { notes: 'private synthetic note' } } });
   assert.equal(draft.status, 200);
-  const stored = await f.storage.save(file.buffer, file.originalname, file.mimetype);
+  const stored = await f.storage.save('ws_legacy', { buffer: file.buffer, originalName: file.originalname, mimeType: file.mimetype });
   f.db.prepare('INSERT INTO upload_cleanup_queue(workspace_id, file_path,created_at) VALUES(\'ws_legacy\', ?,?)').run(stored.relativePath, new Date().toISOString());
   // Pre-008 erase commits only after writing this existing seed marker. Its
   // transaction must roll back before its post-commit unlink loop can run.

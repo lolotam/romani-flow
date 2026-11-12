@@ -19,7 +19,7 @@ test('closed async API admission rejects new document sends without an attempt o
 }));
 
 for(const [outcome,drainFails] of [['sent',false],['failed',false],['sent',true]])test(`detached SMTP persists ${outcome} before shutdown completes (drain failure: ${drainFails})`,()=>reminderApi(async f=>{
- const file=await f.storage.save(Buffer.from('%PDF-1.4\nSynthetic shutdown fixture\n%%EOF'),'synthetic.pdf','application/pdf');
+ const file=await f.storage.save('ws_legacy',{buffer:Buffer.from('%PDF-1.4\nSynthetic shutdown fixture\n%%EOF'),originalName:'synthetic.pdf',mimeType:'application/pdf'});
  f.db.prepare('UPDATE documents SET file_path=?,file_name=?,mime_type=? WHERE id=?').run(file.relativePath,file.fileName,file.mimeType,f.document.id);
  let release,entered;
  const blocked=new Promise(resolve=>release=resolve),started=new Promise(resolve=>entered=resolve);

@@ -11,6 +11,12 @@ import path from 'node:path';
  * rewriting a single row.
  */
 
+export interface IncomingFile {
+  buffer: Buffer;
+  originalName: string;
+  mimeType: string;
+}
+
 export interface StoredFile {
   relativePath: string;
   fileName: string;
@@ -57,24 +63,29 @@ export class StorageService {
   }
 
   /**
-   * Writes a file into the bucket.
+   * Writes a file into its workspace's folder of the bucket.
    *
-   * Files are bucketed by year and month so no single directory grows unbounded.
+   * Files land in `<workspaceId>/YYYY/MM/`, so no single directory grows
+   * unbounded and each workspace's files can be measured or removed as one tree.
+   * Files stored before workspaces existed keep their `YYYY/MM/` paths.
    */
-  async save(buffer: Buffer, originalName: string, mimeType: string, beforeWrite?: (relativePath: string) => void): Promise<StoredFile> {
+  async save(workspaceId: string, file: IncomingFile, beforeWrite?: (relativePath: string) => void): Promise<StoredFile> {
+    // The id becomes a directory name, so it must never carry a separator or `..`.
+    if (!/^[A-Za-z0-9_-]{1,64}$/.test(workspaceId)) throw new Error('Invalid workspace folder.');
     this.ensureDirectories();
 
     const now = new Date();
     const year = String(now.getUTCFullYear());
     const month = String(now.getUTCMonth() + 1).padStart(2, '0');
-    const directory = path.join(this.uploadsDir, year, month);
+    const directory = path.join(this.uploadsDir, workspaceId, year, month);
 
     fs.mkdirSync(directory, { recursive: true });
 
+    const { buffer, originalName, mimeType } = file;
     const sanitized = this.sanitizeFileName(originalName);
     const uniqueName = `${crypto.randomUUID()}-${sanitized}`;
     const absolutePath = path.join(directory, uniqueName);
-    const relativePath = path.posix.join(year, month, uniqueName);
+    const relativePath = path.posix.join(workspaceId, year, month, uniqueName);
     // Staging records cleanup responsibility before a partial disk write can fail.
     beforeWrite?.(relativePath);
     await fs.promises.writeFile(absolutePath, buffer);

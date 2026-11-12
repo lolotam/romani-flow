@@ -63,7 +63,7 @@ export class DocumentService {
       const paths: string[] = [];
       try {
       for (const file of files) {
-        const stored = await this.storage.save(file.buffer, file.originalname, file.mimetype, path => {
+        const stored = await this.storage.save(scope.workspaceId, { buffer: file.buffer, originalName: file.originalname, mimeType: file.mimetype }, path => {
           this.db.prepare('INSERT INTO upload_cleanup_queue(file_path,created_at,workspace_id) VALUES(?,?,?)').run(path, new Date().toISOString(), scope.workspaceId);
           paths.push(path);
         });

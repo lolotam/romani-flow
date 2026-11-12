@@ -1,4 +1,7 @@
 import type { Db } from '../db/connection.js';
+import { seedStarterCatalog } from '../db/starterCatalog.js';
+import { atomic } from '../notifications/whatsapp/repository.js';
+import { ensureWorkspaceDefaults } from './settings.js';
 
 /**
  * Workspaces are the isolation boundary between users (spec 2026-11-12).
@@ -18,8 +21,14 @@ export function listWorkspaceIds(db: Db): string[] {
     .map((row) => row.id);
 }
 
+/** Creates a workspace with its default settings and the generic starter catalog, all or nothing. */
 export function createWorkspace(db: Db, input: { id: string; name: string }): Workspace {
   const now = new Date().toISOString();
-  db.prepare('INSERT INTO workspaces (id, name, created_at, updated_at) VALUES (?, ?, ?, ?)').run(input.id, input.name, now, now);
+  const scope = { workspaceId: input.id };
+  atomic(db, () => {
+    db.prepare('INSERT INTO workspaces (id, name, created_at, updated_at) VALUES (?, ?, ?, ?)').run(input.id, input.name, now, now);
+    ensureWorkspaceDefaults(db, scope);
+    seedStarterCatalog(db, scope);
+  });
   return { id: input.id, name: input.name };
 }

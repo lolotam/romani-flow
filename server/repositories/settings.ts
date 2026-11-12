@@ -193,6 +193,13 @@ export function ensureSetting(db: Db, scope: SettingScope, key: string): void {
   setSetting(db, scope, key, definition ? definition.defaultValue : null);
 }
 
+/** Stores the default of every workspace setting that has one; values already stored are kept. */
+export function ensureWorkspaceDefaults(db: Db, scope: Scope): void {
+  for (const definition of SETTING_DEFINITIONS) {
+    if (isTenantSetting(definition.key)) ensureSetting(db, scope, definition.key);
+  }
+}
+
 export function newSettingId(): string {
   return createId();
 }

@@ -250,7 +250,7 @@ test('document save clears the exact revision atomically; stale create/update pr
   const api = transport(f), scope = 'employee:' + f.employee.id;
   const saved = await api(url(scope), { method: 'PUT', body: { revision: 'none', values: fields } });
   const newer = await api(url(scope), { method: 'PUT', body: { revision: saved.data.revision, values: { ...fields, notes: 'Newer device' } } });
-  const file = await f.storage.save(Buffer.from('%PDF-1.4\nSynthetic draft attachment'), 'draft.pdf', 'application/pdf');
+  const file = await f.storage.save('ws_legacy', { buffer: Buffer.from('%PDF-1.4\nSynthetic draft attachment'), originalName: 'draft.pdf', mimeType: 'application/pdf' });
   const staged = f.documents.registerUpload({ workspaceId: 'ws_legacy' }, { fileName: file.fileName, filePath: file.relativePath, fileSize: file.size, mimeType: file.mimeType });
   const payload = { title: 'Synthetic completed', employee_id: f.employee.id, document_type_id: f.type.id, expiry_date: '2029-01-01', upload_id: staged.uploadId };
   const count = f.db.prepare('SELECT count(*) n FROM documents').get().n;
@@ -381,7 +381,7 @@ test('pending upload validation follows the current draft without reuploading an
 }));
 
 test('business erase retries queue-only files and retains failures until bytes are removed',t=>reminderApi(async f=>{
- const stored=await f.storage.save(Buffer.from('private synthetic'),'fixture.pdf','application/pdf');
+ const stored=await f.storage.save('ws_legacy',{buffer:Buffer.from('private synthetic'),originalName:'fixture.pdf',mimeType:'application/pdf'});
  f.db.prepare('INSERT INTO upload_cleanup_queue(workspace_id, file_path,created_at) VALUES(\'ws_legacy\', ?,?)').run(stored.relativePath,new Date().toISOString());
  const remove=t.mock.method(f.storage,'remove',async()=>{throw Error('Synthetic unlink failure');});
  const failed=await f.request('/api/backup/erase',{method:'POST',body:{}});

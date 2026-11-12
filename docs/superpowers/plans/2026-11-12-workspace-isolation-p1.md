@@ -39,8 +39,8 @@ Platform tables: `workspaces, settings, schema_migrations`.
 4. Pulled forward from C: expiry service, cron and WhatsApp enqueue per workspace (D9, D11), and scoped backup export and erase (D10). Proved by `verify-tenant-isolation`, `verify-tenant-routes` and `verify-tenant-writes` (`npm run test:workspace`); the last two fail when a new read or write handler is added without a decision on how workspace B is kept out.
 
 **C. Files, jobs and backup.**
-1. Per-workspace upload prefix (D5). File routes look the record up through scope first.
-2. Per-workspace catalog seeding with generated ids (D10: generic ministries and positions only), and default settings for a new workspace (today a new workspace starts with no `workspace_settings` rows).
+1. Per-workspace upload prefix (D5): `StorageService.save` takes the workspace id and writes to `<workspace_id>/YYYY/MM/`; the id must match `[A-Za-z0-9_-]{1,64}`. File routes look the record up through scope first. Proved by `verify-workspace-setup`.
+2. Per-workspace catalog seeding with generated ids (D10: generic ministries and positions only), and default settings for a new workspace. `createWorkspace` writes both in one transaction (`db/starterCatalog.ts`, `ensureWorkspaceDefaults`). Proved by `verify-workspace-setup`.
 
 ## Gates
 

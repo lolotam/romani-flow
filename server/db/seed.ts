@@ -3,7 +3,7 @@ import path from 'node:path';
 import type { Db } from '../db/connection.js';
 import { createAdmin, findAdminByEmail } from '../repositories/adminUsers.js';
 import { LEGACY_WORKSPACE_ID } from '../repositories/workspaces.js';
-import { ensureSetting, getSetting, isTenantSetting, PLATFORM, setSetting, SETTING_DEFINITIONS } from '../repositories/settings.js';
+import { ensureSetting, ensureWorkspaceDefaults, getSetting, isTenantSetting, PLATFORM, setSetting, SETTING_DEFINITIONS } from '../repositories/settings.js';
 
 /**
  * First-boot seed.
@@ -189,9 +189,9 @@ export async function seedDatabase(db: Db, options: SeedOptions): Promise<SeedRe
   }
 
   // Settings defaults: tenant keys for the legacy workspace, the rest once for the platform.
-  const legacy = { workspaceId: LEGACY_WORKSPACE_ID };
+  ensureWorkspaceDefaults(db, { workspaceId: LEGACY_WORKSPACE_ID });
   for (const definition of SETTING_DEFINITIONS) {
-    ensureSetting(db, isTenantSetting(definition.key) ? legacy : PLATFORM, definition.key);
+    if (!isTenantSetting(definition.key)) ensureSetting(db, PLATFORM, definition.key);
   }
 
   // Admin accounts — never overwritten once they exist. The password comes only

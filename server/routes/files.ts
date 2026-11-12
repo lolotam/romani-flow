@@ -217,7 +217,7 @@ export function createFilesRouter(
       }
 
       const file = files[0];
-      const stored = await storage.save(file.buffer, file.originalname, file.mimetype);
+      const stored = await storage.save(tenantOf(req).workspaceId, { buffer: file.buffer, originalName: file.originalname, mimeType: file.mimetype });
       const previousPath = employee.photo_path as string | undefined;
 
       db.prepare(
