@@ -16,6 +16,7 @@
     "check:sizes": "node scripts/check-file-sizes.mjs",
     "verify:api": "node scripts/verify-api.mjs",
     "test:email": "node --import tsx --test scripts/verify-email-delivery.test.mjs",
+    "test:workspace": "node --import tsx --test scripts/verify-workspace-migration.test.mjs scripts/verify-tenant-sql-guard.test.mjs scripts/verify-tenant-isolation.test.mjs scripts/verify-tenant-routes.test.mjs",
     "test:config": "node --import tsx --test scripts/verify-config.test.mjs",
     "pretest:extraction": "node --input-type=commonjs -e \"const fs=require('node:fs'); for(const file of require('./package.json').scripts['test:extraction'].split(' ').filter(value=>value.endsWith('.test.mjs'))) fs.accessSync(file)\"",
     "test:extraction": "node --import tsx --test scripts/verify-document-number.test.mjs scripts/verify-document-number-migration.test.mjs scripts/verify-extraction-foundation.test.mjs scripts/verify-extraction-contract.test.mjs scripts/verify-extraction-policy.test.mjs scripts/verify-extraction-api.test.mjs scripts/verify-extraction-providers.test.mjs scripts/verify-extraction-images.test.mjs scripts/verify-extraction-session.test.mjs scripts/verify-extraction-candidates.test.mjs scripts/verify-extraction-catalog.test.mjs scripts/verify-extraction-candidate-write.test.mjs scripts/verify-extraction-review-backend.test.mjs scripts/verify-extraction-eligibility.test.mjs scripts/verify-extraction-pricing-review.test.mjs",

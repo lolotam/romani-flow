@@ -63,13 +63,24 @@ test('010 moves every existing tenant row into the legacy workspace', () => {
   assert.equal(db.prepare('PRAGMA foreign_key_check').all().length, 0);
 });
 
-test('010 copies tenant settings and leaves platform settings where they are', () => {
+test('010 moves tenant settings into the legacy workspace and leaves platform settings where they are', () => {
   const db = databaseAt009();
   seedEveryTenantTable(db);
   runMigrations(db, migrationsDir);
-  const copied = db.prepare("SELECT value FROM workspace_settings WHERE workspace_id='ws_legacy' AND key='email.recipients'").get();
-  assert.equal(copied.value, '["x@example.invalid"]');
+  const moved = db.prepare("SELECT value FROM workspace_settings WHERE workspace_id='ws_legacy' AND key='email.recipients'").get();
+  assert.equal(moved.value, '["x@example.invalid"]');
+  assert.equal(db.prepare("SELECT count(*) n FROM settings WHERE key='email.recipients'").get().n, 0, 'no stale platform copy is left behind');
+  assert.equal(db.prepare("SELECT value FROM settings WHERE key='cron.schedule'").get().value, '"0 8 * * *"');
   assert.equal(db.prepare("SELECT count(*) n FROM workspace_settings WHERE key='cron.schedule'").get().n, 0);
+});
+
+test('the server tenant-setting list equals the keys migration 010 moves', async () => {
+  const { TENANT_SETTING_KEYS } = await import('../server/repositories/settings.ts');
+  const sql = fs.readFileSync(path.join(migrationsDir, '010_workspaces.sql'), 'utf8');
+  const lists = [...sql.matchAll(/WHERE key IN \(([^)]*)\)/g)].map(match => [...match[1].matchAll(/'([^']+)'/g)].map(key => key[1]).sort());
+  assert.equal(lists.length, 2, 'one list copies the keys, one deletes the platform originals');
+  assert.deepEqual(lists[1], lists[0], 'the copy and the delete cover the same keys');
+  assert.deepEqual([...TENANT_SETTING_KEYS].sort(), lists[0]);
 });
 
 test('a tenant row written without a workspace is refused', () => {

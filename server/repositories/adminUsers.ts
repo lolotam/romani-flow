@@ -14,6 +14,8 @@ export interface AdminUser {
   email: string;
   name: string;
   role: string;
+  /** The workspace this login works in. Clerk organizations replace it in P2. */
+  workspace_id: string;
   is_active: number;
   last_login_at: string | null;
   created_at: string;
@@ -48,7 +50,7 @@ export function findAdminById(db: Db, id: string): AdminUser | null {
 
 export function listAdmins(db: Db): AdminUser[] {
   const rows = db
-    .prepare('SELECT id, email, name, role, is_active, last_login_at, created_at, updated_at FROM admin_users ORDER BY created_at')
+    .prepare('SELECT id, email, name, role, workspace_id, is_active, last_login_at, created_at, updated_at FROM admin_users ORDER BY created_at')
     .all() as unknown as AdminUser[];
   return rows;
 }
@@ -63,20 +65,21 @@ export async function hashPassword(plain: string): Promise<string> {
 
 export async function createAdmin(
   db: Db,
-  input: { email: string; name: string; password: string; role?: string },
+  input: { email: string; name: string; password: string; role?: string; workspaceId: string },
 ): Promise<AdminUser> {
   const now = new Date().toISOString();
   const id = createId();
 
   db.prepare(
-    `INSERT INTO admin_users (id, email, name, password_hash, role, is_active, last_login_at, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, 1, NULL, ?, ?)`,
+    `INSERT INTO admin_users (id, email, name, password_hash, role, workspace_id, is_active, last_login_at, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, 1, NULL, ?, ?)`,
   ).run(
     id,
     normalizeEmail(input.email),
     input.name,
     await hashPassword(input.password),
     input.role ?? 'admin',
+    input.workspaceId,
     now,
     now,
   );

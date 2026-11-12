@@ -2,7 +2,11 @@ import type { NextFunction, Request, Response } from 'express';
 import jwt from 'jsonwebtoken';
 import type { AppConfig } from '../config.js';
 import { findAdminById, type AdminUser } from '../repositories/adminUsers.js';
+import type { Scope } from '../repositories/base.js';
 import type { Db } from '../db/connection.js';
+
+/** Re-exported so request-bound code can type its scope without a second import. */
+export type { Scope };
 
 /**
  * Session authentication.
@@ -23,6 +27,8 @@ declare global {
   namespace Express {
     interface Request {
       user?: SessionUser;
+      /** Set by requireAuth from the database, never from the token or the request. */
+      tenant?: Scope;
       db?: Db;
     }
   }
@@ -102,8 +108,20 @@ export function requireAuth(config: AppConfig, db: Db) {
     }
 
     req.user = { ...session, role: admin.role };
+    req.tenant = { workspaceId: admin.workspace_id };
     next();
   };
+}
+
+/**
+ * The workspace of an authenticated request.
+ *
+ * Throws instead of falling back to any default: a route that reaches tenant
+ * data without a resolved workspace is a bug, and must fail loudly.
+ */
+export function tenantOf(req: Request): Scope {
+  if (!req.tenant?.workspaceId) throw new Error('tenant_not_resolved');
+  return req.tenant;
 }
 
 /** Restricts a route to administrator accounts. */

@@ -19,13 +19,14 @@ export async function reminderApi(run,send,pairing={}){
  const reminders=new WhatsAppReminders(f.db,'romani',transport,()=>f.clock.now);
  const config=loadConfig({NODE_ENV:'test',JWT_SECRET:randomBytes(32).toString('hex'),DATA_DIR:dir,...pairing});
  const mailer=new Mailer(config),cron=new CronService(f.db,mailer),storage=new StorageService(config.uploadsDir);storage.ensureDirectories();
- for(const role of ['admin','viewer']) f.db.prepare("INSERT INTO admin_users(id,email,name,role,password_hash,created_at,updated_at) VALUES(?,?,?,?,?,'2026-01-01','2026-01-01')").run(role,role+'@example.invalid','Synthetic',role,'not-a-login-fixture');
+ for(const role of ['admin','viewer']) f.db.prepare("INSERT INTO admin_users(workspace_id, id,email,name,role,password_hash,created_at,updated_at) VALUES('ws_legacy', ?,?,?,?,?,'2026-01-01','2026-01-01')").run(role,role+'@example.invalid','Synthetic',role,'not-a-login-fixture');
  const documents=new DocumentService(f.db,storage);
  const app=createApp({config,db:f.db,mailer,cron,storage,documents,reminders,staticDir:dir});
  const server=http.createServer(app);
  await new Promise(r=>server.listen(0,'127.0.0.1',r));const base='http://127.0.0.1:'+server.address().port;
- const request=async(url,{method='GET',body,role='admin',headers={}}={})=>{
-  const cookie=role?{cookie:config.cookieName+'='+signSession(config,{id:role,name:'Synthetic',email:role+'@example.invalid',role})}:{};
+ // `user` signs in as another account row (for example a second workspace's admin); it defaults to the role's row.
+ const request=async(url,{method='GET',body,role='admin',user=role,headers={}}={})=>{
+  const cookie=role?{cookie:config.cookieName+'='+signSession(config,{id:user,name:'Synthetic',email:user+'@example.invalid',role})}:{};
   const res=await fetch(base+url,{method,headers:{...cookie,...(body!==undefined?{'content-type':'application/json'}:{}),...headers},body:body===undefined?undefined:JSON.stringify(body)});
   return {status:res.status,json:await res.json()};
  };

@@ -38,10 +38,10 @@ async function stageDraftFile(f, draft) {
 }
 
 test('a replacement waiting for the coordinator rechecks its draft revision before touching either file', t => reminderApi(async f => {
-  const [original] = await f.documents.stageUploads([file]);
-  await f.documents.replaceFile(f.document.id, original.uploadId);
+  const [original] = await f.documents.stageUploads({ workspaceId: 'ws_legacy' }, [file]);
+  await f.documents.replaceFile({ workspaceId: 'ws_legacy' }, f.document.id, original.uploadId);
   const draft = { account: 'admin', scope: 'edit:' + f.document.id, revision: 'none' };
-  const uploadId = await stageDraftFile(f, draft), replacementPath = f.documents.resolveUpload(uploadId).filePath;
+  const uploadId = await stageDraftFile(f, draft), replacementPath = f.documents.resolveUpload({ workspaceId: 'ws_legacy' }, uploadId).filePath;
   const endpoint = '/api/documents/' + f.document.id + '/file';
   assert.equal((await f.request(endpoint, { method: 'PUT', body: { upload_id: uploadId } })).status, 403);
   assert.equal((await f.request(endpoint, { method: 'PUT', body: { upload_id: uploadId, draft: { ...draft, scope: 'new' } } })).status, 400);
@@ -49,7 +49,7 @@ test('a replacement waiting for the coordinator rechecks its draft revision befo
   let currentRevision;
   const otherDevice = f.reminders.coordinator.runExclusive(async () => {
     entered.resolve(); await release.promise;
-    currentRevision = writeDraft(f.db, 'admin', draft, { notes: 'newer device draft' });
+    currentRevision = writeDraft(f.db, { workspaceId: 'ws_legacy' }, 'admin', draft, { notes: 'newer device draft' });
   });
   await entered.promise;
   const runExclusive = f.reminders.coordinator.runExclusive.bind(f.reminders.coordinator);
@@ -67,47 +67,47 @@ test('a replacement waiting for the coordinator rechecks its draft revision befo
   assert.equal(result.status, 409);
   assert.equal(f.db.prepare('SELECT file_path FROM documents WHERE id=?').get(f.document.id).file_path, original.filePath);
   assert.equal(f.storage.exists(original.filePath), true); assert.equal(f.storage.exists(replacementPath), true);
-  assert.notEqual(f.documents.resolveUpload(uploadId), null);
+  assert.notEqual(f.documents.resolveUpload({ workspaceId: 'ws_legacy' }, uploadId), null);
   const current = await f.request(endpoint, { method: 'PUT', body: { upload_id: uploadId, draft: { ...draft, revision: currentRevision } } });
   assert.equal(current.status, 200); assert.equal(f.storage.exists(original.filePath), false);
   assert.equal(f.db.prepare('SELECT file_path FROM documents WHERE id=?').get(f.document.id).file_path, replacementPath);
 }));
 
 test('a failed upload claim rolls back attachment replacement and keeps the original file readable', () => reminderApi(async f => {
-  const [original, replacement] = await f.documents.stageUploads([file, { ...file, buffer: Buffer.from('replacement bytes') }]);
-  await f.documents.replaceFile(f.document.id, original.uploadId);
+  const [original, replacement] = await f.documents.stageUploads({ workspaceId: 'ws_legacy' }, [file, { ...file, buffer: Buffer.from('replacement bytes') }]);
+  await f.documents.replaceFile({ workspaceId: 'ws_legacy' }, f.document.id, original.uploadId);
   const before = f.db.prepare('SELECT * FROM documents WHERE id=?').get(f.document.id);
   f.db.exec("CREATE TRIGGER reject_upload_claim BEFORE DELETE ON pending_uploads BEGIN SELECT RAISE(ABORT,'synthetic claim failure'); END");
   try {
-    await assert.rejects(f.documents.replaceFile(f.document.id, replacement.uploadId), /synthetic claim failure/);
+    await assert.rejects(f.documents.replaceFile({ workspaceId: 'ws_legacy' }, f.document.id, replacement.uploadId), /synthetic claim failure/);
     assert.deepEqual(f.db.prepare('SELECT * FROM documents WHERE id=?').get(f.document.id), before);
-    assert.notEqual(f.documents.resolveUpload(replacement.uploadId), null);
+    assert.notEqual(f.documents.resolveUpload({ workspaceId: 'ws_legacy' }, replacement.uploadId), null);
     assert.deepEqual(await f.storage.read(original.filePath), file.buffer);
     assert.deepEqual(await f.storage.read(replacement.filePath), Buffer.from('replacement bytes'));
   } finally { f.db.exec('DROP TRIGGER reject_upload_claim'); }
-  await f.documents.replaceFile(f.document.id, replacement.uploadId);
-  assert.equal(f.documents.resolveUpload(replacement.uploadId), null);
+  await f.documents.replaceFile({ workspaceId: 'ws_legacy' }, f.document.id, replacement.uploadId);
+  assert.equal(f.documents.resolveUpload({ workspaceId: 'ws_legacy' }, replacement.uploadId), null);
   assert.equal(f.storage.exists(original.filePath), false);
 }));
 
 for (const conflict of ['upload_id', 'draft_user_id', 'draft_scope']) test(`abandon preserves cleanup ownership on conflicting ${conflict}`, () => reminderApi(async f => {
   const draft = { account: 'admin', scope: 'new', revision: 'none' };
-  const uploadId = await stageDraftFile(f, draft), path = f.documents.resolveUpload(uploadId).filePath;
+  const uploadId = await stageDraftFile(f, draft), path = f.documents.resolveUpload({ workspaceId: 'ws_legacy' }, uploadId).filePath;
   const queued = { upload_id: uploadId, draft_user_id: 'admin', draft_scope: 'new', [conflict]: 'other' };
-  f.db.prepare('INSERT INTO upload_cleanup_queue(file_path,created_at,upload_id,draft_user_id,draft_scope) VALUES(?,?,?,?,?)')
+  f.db.prepare('INSERT INTO upload_cleanup_queue(workspace_id, file_path,created_at,upload_id,draft_user_id,draft_scope) VALUES(\'ws_legacy\', ?,?,?,?,?)')
     .run(path, '2026-01-01', queued.upload_id, queued.draft_user_id, queued.draft_scope);
   const before = f.db.prepare('SELECT * FROM upload_cleanup_queue WHERE file_path=?').get(path);
   const result = await f.request('/api/files/uploads/' + uploadId, { method: 'DELETE', body: { draft } });
   assert.equal(result.status, 409);
   assert.deepEqual(f.db.prepare('SELECT * FROM upload_cleanup_queue WHERE file_path=?').get(path), before);
-  assert.notEqual(f.documents.resolveUpload(uploadId), null);
+  assert.notEqual(f.documents.resolveUpload({ workspaceId: 'ws_legacy' }, uploadId), null);
   assert.deepEqual(await f.storage.read(path), file.buffer);
 }));
 
 test('draft-owned uploads reject foreign validation and every foreign or missing-context claim', () => reminderApi(async f => {
   const own = { account: 'admin', scope: 'new', revision: 'none' };
   const uploadId = await stageDraftFile(f, own);
-  f.db.prepare("INSERT INTO admin_users(id,email,name,role,password_hash,created_at,updated_at) VALUES('admin2','admin2@example.invalid','Synthetic','admin','unused','x','x')").run();
+  f.db.prepare("INSERT INTO admin_users(workspace_id, id,email,name,role,password_hash,created_at,updated_at) VALUES('ws_legacy', 'admin2','admin2@example.invalid','Synthetic','admin','unused','x','x')").run();
   const cookie = f.config.cookieName + '=' + signSession(f.config, { id: 'admin2', role: 'admin', name: 'Synthetic', email: 'admin2@example.invalid' });
   const foreign = { account: 'admin2', scope: 'new', revision: 'none' };
   const body = { title: 'Synthetic', employee_id: f.employee.id, document_type_id: f.type.id, expiry_date: '2030-01-01', upload_id: uploadId };
@@ -118,10 +118,10 @@ test('draft-owned uploads reject foreign validation and every foreign or missing
   assert.equal((await f.request('/api/documents/' + f.document.id + '/file', { method: 'PUT', headers: { cookie }, body: { upload_id: uploadId } })).status, 403);
   assert.equal((await f.request('/api/documents/' + f.document.id + '/file', { method: 'PUT', body: { upload_id: uploadId } })).status, 403);
   assert.equal(f.db.prepare('SELECT count(*) n FROM documents').get().n, 1);
-  assert.notEqual(f.documents.resolveUpload(uploadId), null);
+  assert.notEqual(f.documents.resolveUpload({ workspaceId: 'ws_legacy' }, uploadId), null);
   assert.equal((await f.request('/api/files/uploads/' + uploadId + '/validate', { method: 'POST', body: { draft: own } })).status, 200);
   assert.equal((await f.request('/api/documents', { method: 'POST', body: { ...body, draft: own } })).status, 201);
-  assert.equal(f.documents.resolveUpload(uploadId), null);
+  assert.equal(f.documents.resolveUpload({ workspaceId: 'ws_legacy' }, uploadId), null);
   for (const method of ['PATCH', 'PUT']) {
     const scope = 'edit:' + f.document.id;
     const revision = (await f.request('/api/document-drafts/' + encodeURIComponent(scope), { headers: { 'x-draft-account': 'admin' } })).json.data.revision;
@@ -129,7 +129,7 @@ test('draft-owned uploads reject foreign validation and every foreign or missing
     const ownUpload = await stageDraftFile(f, draft);
     const path = '/api/documents/' + f.document.id + (method === 'PUT' ? '/file' : '');
     assert.equal((await f.request(path, { method, body: { upload_id: ownUpload, draft } })).status, 200);
-    assert.equal(f.documents.resolveUpload(ownUpload), null);
+    assert.equal(f.documents.resolveUpload({ workspaceId: 'ws_legacy' }, ownUpload), null);
   }
 }));
 
@@ -137,33 +137,33 @@ test('abandon validates draft owner/revision and removes only the selected unfin
   const headers = { 'x-draft-account': 'admin' };
   const saved = await f.request('/api/document-drafts/new', { method: 'PUT', headers, body: { revision: 'none', values: { notes: 'first' } } });
   const old = { account: 'admin', scope: 'new', revision: saved.json.data.revision };
-  const uploadId = await stageDraftFile(f, old), path = f.documents.resolveUpload(uploadId).filePath;
+  const uploadId = await stageDraftFile(f, old), path = f.documents.resolveUpload({ workspaceId: 'ws_legacy' }, uploadId).filePath;
   const current = await f.request('/api/document-drafts/new', { method: 'PUT', headers, body: { revision: old.revision, values: { notes: 'current' } } });
   const draft = { ...old, revision: current.json.data.revision };
   const endpoint = '/api/files/uploads/' + uploadId;
   assert.equal((await f.request(endpoint, { method: 'DELETE', body: { draft: old } })).status, 409);
   assert.equal((await f.request(endpoint, { method: 'DELETE', role: 'viewer', body: { draft } })).status, 403);
-  f.db.prepare("INSERT INTO admin_users(id,email,name,role,password_hash,created_at,updated_at) VALUES('admin2','admin2@example.invalid','Synthetic','admin','unused','x','x')").run();
+  f.db.prepare("INSERT INTO admin_users(workspace_id, id,email,name,role,password_hash,created_at,updated_at) VALUES('ws_legacy', 'admin2','admin2@example.invalid','Synthetic','admin','unused','x','x')").run();
   const cookie = f.config.cookieName + '=' + signSession(f.config, { id: 'admin2', role: 'admin', name: 'Synthetic', email: 'admin2@example.invalid' });
   const foreign = await fetch(f.base + endpoint, { method: 'DELETE', headers: { cookie, 'content-type': 'application/json' }, body: JSON.stringify({ draft: { account: 'admin2', scope: 'new', revision: 'none' } }) });
   assert.equal(foreign.status, 403);
   assert.equal(f.storage.exists(path), true);
-  assert.notEqual(f.documents.resolveUpload(uploadId), null);
+  assert.notEqual(f.documents.resolveUpload({ workspaceId: 'ws_legacy' }, uploadId), null);
   const abandoned = await f.request(endpoint, { method: 'DELETE', body: { draft } });
   assert.equal(abandoned.status, 200); assert.equal(abandoned.json.data.cleanupPending, false);
-  assert.equal(f.documents.resolveUpload(uploadId), null); assert.equal(f.storage.exists(path), false);
+  assert.equal(f.documents.resolveUpload({ workspaceId: 'ws_legacy' }, uploadId), null); assert.equal(f.storage.exists(path), false);
   assert.equal((await f.request(endpoint, { method: 'DELETE', body: { draft } })).status, 200);
   assert.equal(f.db.prepare('SELECT count(*) n FROM documents').get().n, 1);
 }));
 
 test('abandon revokes a pending upload before failed unlink and can retry its tracked cleanup', t => reminderApi(async f => {
   const draft = { account: 'admin', scope: 'new', revision: 'none' };
-  const uploadId = await stageDraftFile(f, draft), path = f.documents.resolveUpload(uploadId).filePath;
+  const uploadId = await stageDraftFile(f, draft), path = f.documents.resolveUpload({ workspaceId: 'ws_legacy' }, uploadId).filePath;
   const remove = t.mock.method(f.storage, 'remove', async () => { throw Error('Synthetic unlink failure'); });
   const endpoint = '/api/files/uploads/' + uploadId;
   const first = await f.request(endpoint, { method: 'DELETE', body: { draft } });
   assert.equal(first.status, 200); assert.equal(first.json.data.cleanupPending, true);
-  assert.equal(f.documents.resolveUpload(uploadId), null);
+  assert.equal(f.documents.resolveUpload({ workspaceId: 'ws_legacy' }, uploadId), null);
   assert.equal(f.storage.exists(path), true);
   assert.equal(f.db.prepare('SELECT upload_id FROM upload_cleanup_queue WHERE file_path=?').get(path).upload_id, uploadId);
   const claim = await f.request('/api/documents/' + f.document.id + '/file', { method: 'PUT', body: { upload_id: uploadId } });
@@ -183,7 +183,7 @@ test('empty private state still blocks legacy erase while current bootstrap is e
   f.db.exec('BEGIN');
   try {
     f.db.prepare('DELETE FROM documents').run();
-    assert.throws(() => setSetting(f.db, 'system.seed_version', '1'), /erase_requires_draft_aware_runtime/);
+    assert.throws(() => setSetting(f.db, { platform: true }, 'system.seed_version', '1'), /erase_requires_draft_aware_runtime/);
   } finally { f.db.exec('ROLLBACK'); }
   assert.equal(f.db.prepare('SELECT count(*) n FROM documents').get().n, 1);
   await seedDatabase(f.db, { seedFile: 'nonexistent-synthetic-seed.json', adminEmails: [], adminPassword: null });
@@ -235,13 +235,13 @@ test('legacy erase cannot commit over private drafts or queued bytes after migra
   const draft = await f.request('/api/document-drafts/new', { method: 'PUT', headers: { 'x-draft-account': 'admin' }, body: { revision: 'none', values: { notes: 'private synthetic note' } } });
   assert.equal(draft.status, 200);
   const stored = await f.storage.save(file.buffer, file.originalname, file.mimetype);
-  f.db.prepare('INSERT INTO upload_cleanup_queue(file_path,created_at) VALUES(?,?)').run(stored.relativePath, new Date().toISOString());
+  f.db.prepare('INSERT INTO upload_cleanup_queue(workspace_id, file_path,created_at) VALUES(\'ws_legacy\', ?,?)').run(stored.relativePath, new Date().toISOString());
   // Pre-008 erase commits only after writing this existing seed marker. Its
   // transaction must roll back before its post-commit unlink loop can run.
   f.db.exec('BEGIN');
   try {
     f.db.prepare('DELETE FROM documents').run();
-    assert.throws(() => setSetting(f.db, 'system.seed_version', '1'), /erase_requires_draft_aware_runtime/);
+    assert.throws(() => setSetting(f.db, { platform: true }, 'system.seed_version', '1'), /erase_requires_draft_aware_runtime/);
   } finally { f.db.exec('ROLLBACK'); }
   assert.equal(f.db.prepare('SELECT count(*) n FROM documents').get().n, 1);
   assert.match(f.db.prepare('SELECT values_json FROM document_drafts').get().values_json, /private synthetic note/);
@@ -260,7 +260,7 @@ test('partial disk-write failure retains cleanup authority even when unlink also
     throw Object.assign(new Error('Synthetic disk full'), { code: 'ENOSPC' });
   });
   const unlink = t.mock.method(f.storage, 'remove', async () => { throw new Error('Synthetic unlink failure'); });
-  await assert.rejects(f.documents.stageUploads([file]), /Synthetic disk full/);
+  await assert.rejects(f.documents.stageUploads({ workspaceId: 'ws_legacy' }, [file]), /Synthetic disk full/);
   const queued = f.db.prepare('SELECT file_path FROM upload_cleanup_queue').all();
   assert.equal(queued.length, 1);
   assert.equal(f.db.prepare('SELECT count(*) n FROM pending_uploads').get().n, 0);
@@ -272,7 +272,7 @@ test('partial disk-write failure retains cleanup authority even when unlink also
 }));
 
 test('replacement cannot claim a stale upload while purge is unlinking it', t => reminderApi(async f => {
-  const [upload] = await f.documents.stageUploads([file]);
+  const [upload] = await f.documents.stageUploads({ workspaceId: 'ws_legacy' }, [file]);
   f.db.prepare("UPDATE pending_uploads SET created_at='2000-01-01T00:00:00.000Z' WHERE id=?").run(upload.uploadId);
   const entered = deferred(), release = deferred(), requested = deferred();
   const remove = f.storage.remove.bind(f.storage);

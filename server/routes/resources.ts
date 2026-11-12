@@ -9,9 +9,10 @@ import {
   RepositoryError,
   updateRow,
   type Row,
+  type Scope,
 } from '../repositories/base.js';
 import { asyncHandler } from '../middleware/errorHandler.js';
-import { requireAdmin } from '../middleware/auth.js';
+import { requireAdmin, tenantOf } from '../middleware/auth.js';
 import { rememberSubmission } from '../repositories/formDefaults.js';
 import { atomic } from '../notifications/whatsapp/repository.js';
 
@@ -26,13 +27,13 @@ export interface ResourceOptions {
   /** Relations embedded when the client does not ask for them explicitly. */
   defaultRelations?: string[];
   /** Hook applied to every write payload before it reaches the database. */
-  transformWrite?: (payload: Row, db: Db, existing?: Row) => Row;
+  transformWrite?: (payload: Row, db: Db, scope: Scope, existing?: Row) => Row;
   aroundWrite?: <T>(action: () => Promise<T>) => Promise<T>;
   afterWrite?: () => void;
   /** Hook that shapes a row on the way out, for derived or typed values. */
   transformRead?: (row: Row, db: Db) => Row;
   /** Hook that performs the delete and any cleanup it owns. */
-  onDelete?: (id: string) => Promise<boolean> | boolean;
+  onDelete?: (id: string, scope: Scope) => Promise<boolean> | boolean;
   /** Columns the client may never write; they are owned by the server. */
   managedFields?: string[];
 }
@@ -84,7 +85,7 @@ export function createResourceRouter(
     asyncHandler(async (req, res) => {
       const parsed = parseListOptions(req.query, tableName);
       const relations = parsed.relations ?? [];
-      const rows = listRows(db, tableName, {
+      const rows = listRows(db, tenantOf(req), tableName, {
         ...parsed,
         relations: relations.length > 0 ? relations : (options.defaultRelations ?? []),
       }).map(shape);
@@ -98,15 +99,16 @@ export function createResourceRouter(
     asyncHandler(async (req, res) => write(async () => {
       const payload = readPayload(req);
       const records = Array.isArray(payload) ? payload : [payload];
+      const scope = tenantOf(req);
 
       let inserted: Row[];
       db.exec('BEGIN');
       try {
         inserted = records.map((record) => {
           assertNoManagedFields(record, options.managedFields ?? [], tableName);
-          const prepared = options.transformWrite ? options.transformWrite(record, db) : record;
-          const row = insertRow(db, tableName, prepared);
-          rememberSubmission(db, req.user!.id, tableName, shape(row));
+          const prepared = options.transformWrite ? options.transformWrite(record, db, scope) : record;
+          const row = insertRow(db, scope, tableName, prepared);
+          rememberSubmission(db, scope, req.user!.id, tableName, shape(row));
           options.afterWrite?.();
           return row;
         });
@@ -125,7 +127,7 @@ export function createResourceRouter(
   router.get(
     '/:id',
     asyncHandler(async (req, res) => {
-      const row = findRow(db, tableName, String(req.params.id), relationsFor(req));
+      const row = findRow(db, tenantOf(req), tableName, String(req.params.id), relationsFor(req));
       if (!row) {
         res.status(404).json({
           data: null,
@@ -149,11 +151,12 @@ export function createResourceRouter(
         throw new RepositoryError('The identifier cannot be changed.', 'immutable_field', 400);
       }
 
+      const scope = tenantOf(req);
       const row = atomic(db, () => {
-        const existing = findRow(db, tableName, String(req.params.id), []);
+        const existing = findRow(db, scope, tableName, String(req.params.id), []);
         if (!existing) return null;
-        const prepared = options.transformWrite ? options.transformWrite(payload, db, existing ?? undefined) : payload;
-        const updated = updateRow(db, tableName, String(req.params.id), prepared);
+        const prepared = options.transformWrite ? options.transformWrite(payload, db, scope, existing ?? undefined) : payload;
+        const updated = updateRow(db, scope, tableName, String(req.params.id), prepared);
         options.afterWrite?.();
         return updated;
       });
@@ -174,8 +177,9 @@ export function createResourceRouter(
     requireAdmin,
     asyncHandler(async (req, res) => write(async () => {
       const id = String(req.params.id);
-      const deleted = options.onDelete ? await options.onDelete(id) : atomic(db, () => {
-        const result = deleteRow(db, tableName, id);
+      const scope = tenantOf(req);
+      const deleted = options.onDelete ? await options.onDelete(id, scope) : atomic(db, () => {
+        const result = deleteRow(db, scope, tableName, id);
         options.afterWrite?.();
         return result;
       });

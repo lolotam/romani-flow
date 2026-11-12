@@ -26,7 +26,7 @@ test('W6 unsent A-to-B-to-A and remove/re-add create one current identity; accep
   await reminders.mutate(()=>f.db.prepare("UPDATE documents SET expiry_date='2027-01-01'").run());
   assert.equal(f.db.prepare("SELECT COUNT(*) n FROM whatsapp_jobs WHERE state='cancelled'").get().n,1);
   await reminders.mutate(()=>f.db.prepare("UPDATE documents SET expiry_date='2026-01-01'").run());
-  reminders.store.enqueue((await import('../server/notifications/whatsapp/selection.ts')).selectReminders(f.db,'romani-fixture',f.clock.now));
+  reminders.store.enqueue((await import('../server/notifications/whatsapp/selection.ts')).selectReminders(f.db, { workspaceId: 'ws_legacy' },'romani-fixture',f.clock.now));
   assert.equal(await reminders.drain(),1);assert.equal(calls.length,1);
   await reminders.mutate(()=>f.db.prepare('UPDATE employees SET whatsapp_notifications_enabled=0').run());
   await reminders.mutate(()=>f.db.prepare('UPDATE employees SET whatsapp_notifications_enabled=1').run());
@@ -72,7 +72,7 @@ test('mutation commits only after in-flight handoff; failed mutation rolls back 
 });
 
 test('disabled WhatsApp performs no provider access or dispatch regardless of email settings',async()=>{
- const f=reminderFixture();try{optIn(f);const a=service(f);setSetting(f.db,'email.enabled',false);await a.reminders.schedule();assert.equal(await a.reminders.drain(),1);
+ const f=reminderFixture();try{optIn(f);const a=service(f);setSetting(f.db, { workspaceId: 'ws_legacy' }, 'email.enabled',false);await a.reminders.schedule();assert.equal(await a.reminders.drain(),1);
   await a.reminders.setEnabled(false);f.clock.now=new Date('2026-01-03T08:00:00Z');assert.equal(await a.reminders.schedule(),0);assert.equal(await a.reminders.drain(),0);assert.equal(a.calls.length,1);
  }finally{f.close();}
 });

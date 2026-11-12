@@ -23,22 +23,22 @@ function createServiceTestHarness(provider = 'groq') {
   runMigrations(db, path.resolve('server/db/migrations'));
 
   for (const role of ['admin', 'viewer']) {
-    db.prepare("INSERT INTO admin_users(id, email, name, role, password_hash, created_at, updated_at) VALUES(?, ?, ?, ?, ?, '2026-01-01', '2026-01-01')")
+    db.prepare("INSERT INTO admin_users(workspace_id, id, email, name, role, password_hash, created_at, updated_at) VALUES('ws_legacy', ?, ?, ?, ?, ?, '2026-01-01', '2026-01-01')")
       .run(role, `${role}@example.invalid`, `Synthetic ${role}`, role, 'hash');
   }
 
-  const company = insertRow(db, 'companies', { name: 'Synthetic Company', name_ar: 'شركة اختبار' });
-  insertRow(db, 'document_types', { id: 'type-civil-id', name: 'Civil ID', name_ar: 'البطاقة المدنية' });
-  insertRow(db, 'ministries', { id: 'min-moi', name: 'Ministry of Interior', name_ar: 'وزارة الداخلية' });
+  const company = insertRow(db, { workspaceId: 'ws_legacy' }, 'companies', { name: 'Synthetic Company', name_ar: 'شركة اختبار' });
+  insertRow(db, { workspaceId: 'ws_legacy' }, 'document_types', { id: 'type-civil-id', name: 'Civil ID', name_ar: 'البطاقة المدنية' });
+  insertRow(db, { workspaceId: 'ws_legacy' }, 'ministries', { id: 'min-moi', name: 'Ministry of Interior', name_ar: 'وزارة الداخلية' });
 
   const validScope = `company:${company.id}`;
   const revision = typeof globalThis.crypto?.randomUUID === 'function' ? globalThis.crypto.randomUUID() : '12345678-1234-4234-8234-123456789abc';
-  db.prepare("INSERT INTO document_drafts(user_id, scope, revision, values_json, updated_at) VALUES('admin', ?, ?, '{}', '2026-01-01T00:00:00.000Z')").run(validScope, revision);
+  db.prepare("INSERT INTO document_drafts(workspace_id, user_id, scope, revision, values_json, updated_at) VALUES('ws_legacy', 'admin', ?, ?, '{}', '2026-01-01T00:00:00.000Z')").run(validScope, revision);
 
   const model = provider === 'groq' ? MOCK_GROQ_MODEL_ID : MOCK_MODEL_ID;
-  setSetting(db, 'ai_extraction.enabled', true);
-  setSetting(db, 'ai_extraction.provider', provider);
-  setSetting(db, 'ai_extraction.model', model);
+  setSetting(db, { workspaceId: 'ws_legacy' }, 'ai_extraction.enabled', true);
+  setSetting(db, { workspaceId: 'ws_legacy' }, 'ai_extraction.provider', provider);
+  setSetting(db, { workspaceId: 'ws_legacy' }, 'ai_extraction.model', model);
 
   const config = {
     env: 'test',
@@ -56,8 +56,8 @@ function createServiceTestHarness(provider = 'groq') {
     requestId: '12345678-1234-4234-8234-123456789abc',
     scope: validScope,
     context: config.extraction.context,
-    settingsVersion: settingsVersion(db, config),
-    catalogVersion: readCatalogs(db).version,
+    settingsVersion: settingsVersion(db, { workspaceId: 'ws_legacy' }, config),
+    catalogVersion: readCatalogs(db, { workspaceId: 'ws_legacy' }).version,
     pageCount: 10,
     images: images10,
   };
@@ -167,7 +167,7 @@ test('10 pages on Groq yield 4 batches of 3, 3, 3, 1 via extraction service', as
     throw new Error('unexpected: ' + url);
   };
   const service = createExtractionService(config, db, mockTransport);
-  const result = await service.run(validRequest, 'admin', new AbortController().signal);
+  const result = await service.run({ workspaceId: 'ws_legacy' }, validRequest, 'admin', new AbortController().signal);
   assert.ok(result);
   assert.equal(result.pageCount, 10);
   assert.deepEqual(batchImageCounts, [3, 3, 3, 1]);
@@ -187,7 +187,7 @@ test('failure in batch 2 halts service processing immediately and yields no late
     throw new Error('unexpected: ' + url);
   };
   const service = createExtractionService(config, db, mockTransport);
-  await assert.rejects(() => service.run(validRequest, 'admin', new AbortController().signal), (err) => err.code === 'provider_unavailable');
+  await assert.rejects(() => service.run({ workspaceId: 'ws_legacy' }, validRequest, 'admin', new AbortController().signal), (err) => err.code === 'provider_unavailable');
   assert.equal(chatCalls, 2);
 });
 
@@ -208,7 +208,7 @@ test('10 pages on OpenRouter yield 10 single-image batches sequentially via serv
     throw new Error('unexpected: ' + url);
   };
   const service = createExtractionService(config, db, mockTransport);
-  const result = await service.run(validRequest, 'admin', new AbortController().signal);
+  const result = await service.run({ workspaceId: 'ws_legacy' }, validRequest, 'admin', new AbortController().signal);
   assert.ok(result);
   assert.equal(result.pageCount, 10);
   assert.equal(chatCalls, 10);
@@ -236,23 +236,23 @@ test('admin role revocation during batches halts extraction with 403', async () 
   const { db, config, validRequest } = createServiceTestHarness('groq');
   const h = makeRevocationTransport(() => db.prepare("UPDATE admin_users SET role = 'viewer' WHERE id = 'admin'").run());
   const service = createExtractionService(config, db, h.transport);
-  await assert.rejects(() => service.run(validRequest, 'admin', new AbortController().signal), (err) => err.code === 'forbidden');
+  await assert.rejects(() => service.run({ workspaceId: 'ws_legacy' }, validRequest, 'admin', new AbortController().signal), (err) => err.code === 'forbidden');
   assert.equal(h.getCalls(), 1);
 });
 
 test('settings change during batches halts extraction with 409 stale_settings', async () => {
   const { db, config, validRequest } = createServiceTestHarness('groq');
-  const h = makeRevocationTransport(() => setSetting(db, 'ai_extraction.enabled', false));
+  const h = makeRevocationTransport(() => setSetting(db, { workspaceId: 'ws_legacy' }, 'ai_extraction.enabled', false));
   const service = createExtractionService(config, db, h.transport);
-  await assert.rejects(() => service.run(validRequest, 'admin', new AbortController().signal), (err) => err.code === 'stale_settings');
+  await assert.rejects(() => service.run({ workspaceId: 'ws_legacy' }, validRequest, 'admin', new AbortController().signal), (err) => err.code === 'stale_settings');
   assert.equal(h.getCalls(), 1);
 });
 
 test('catalog revocation during batches halts extraction with 409 stale_catalog', async () => {
   const { db, config, validRequest } = createServiceTestHarness('groq');
-  const h = makeRevocationTransport(() => insertRow(db, 'document_types', { id: 'type-driver-license', name: 'Driver License', name_ar: 'رخصة قيادة' }));
+  const h = makeRevocationTransport(() => insertRow(db, { workspaceId: 'ws_legacy' }, 'document_types', { id: 'type-driver-license', name: 'Driver License', name_ar: 'رخصة قيادة' }));
   const service = createExtractionService(config, db, h.transport);
-  await assert.rejects(() => service.run(validRequest, 'admin', new AbortController().signal), (err) => err.code === 'stale_catalog');
+  await assert.rejects(() => service.run({ workspaceId: 'ws_legacy' }, validRequest, 'admin', new AbortController().signal), (err) => err.code === 'stale_catalog');
   assert.equal(h.getCalls(), 1);
 });
 
@@ -260,7 +260,7 @@ test('context change during batches halts extraction with 409 context_mismatch',
   const { db, config, validRequest } = createServiceTestHarness('groq');
   const h = makeRevocationTransport(() => { config.extraction.context = 'revoked-context'; });
   const service = createExtractionService(config, db, h.transport);
-  await assert.rejects(() => service.run(validRequest, 'admin', new AbortController().signal), (err) => err.code === 'context_mismatch');
+  await assert.rejects(() => service.run({ workspaceId: 'ws_legacy' }, validRequest, 'admin', new AbortController().signal), (err) => err.code === 'context_mismatch');
   assert.equal(h.getCalls(), 1);
 });
 
@@ -268,7 +268,7 @@ test('endpoint eligibility change during batches halts extraction with provider_
   const { db, config, validRequest } = createServiceTestHarness('groq');
   const h = makeRevocationTransport(() => { config.extraction.approvals = []; });
   const service = createExtractionService(config, db, h.transport);
-  await assert.rejects(() => service.run(validRequest, 'admin', new AbortController().signal), (err) => err.code === 'provider_policy' || err.code === 'stale_settings');
+  await assert.rejects(() => service.run({ workspaceId: 'ws_legacy' }, validRequest, 'admin', new AbortController().signal), (err) => err.code === 'provider_policy' || err.code === 'stale_settings');
   assert.equal(h.getCalls(), 1);
 });
 
@@ -418,11 +418,11 @@ test('service and URL builder reject malicious system input before transport wit
     return new Response(JSON.stringify({ data: [makeMockModel()] }), { status: 200 });
   };
 
-  setSetting(db, 'ai_extraction.model', '../../admin/secret');
-  validRequest.settingsVersion = settingsVersion(db, config);
+  setSetting(db, { workspaceId: 'ws_legacy' }, 'ai_extraction.model', '../../admin/secret');
+  validRequest.settingsVersion = settingsVersion(db, { workspaceId: 'ws_legacy' }, config);
   const service = createExtractionService(config, db, spyTransport);
   await assert.rejects(
-    () => service.run(validRequest, 'admin', new AbortController().signal),
+    () => service.run({ workspaceId: 'ws_legacy' }, validRequest, 'admin', new AbortController().signal),
     (err) => err.code === 'provider_policy' || err.code === 'invalid_model' || /invalid|policy/i.test(err.message)
   );
   assert.equal(calls.length, 0, 'No transport call when system model is malicious traversal');
@@ -526,7 +526,7 @@ test('revocation during deferred metadata halts extraction and prevents any foll
   };
   const service = createExtractionService(config, db, mockTransport);
   await assert.rejects(
-    () => service.run(validRequest, 'admin', new AbortController().signal),
+    () => service.run({ workspaceId: 'ws_legacy' }, validRequest, 'admin', new AbortController().signal),
     (err) => err.code === 'forbidden',
   );
   assert.equal(chatCalls, 0, 'No chat completion must be called after metadata revocation');
@@ -596,7 +596,7 @@ test('service integration accepts documented OpenRouter raw envelopes with data.
 
   const req = { ...validRequest, pageCount: 1, images: [validRequest.images[0]] };
   const service = createExtractionService(config, db, mockTransport);
-  const result = await service.run(req, 'admin', new AbortController().signal);
+  const result = await service.run({ workspaceId: 'ws_legacy' }, req, 'admin', new AbortController().signal);
   assert.ok(result);
   assert.equal(chatCalled, true);
 });
@@ -640,7 +640,7 @@ test('service integration rejects legacy invented endpoints array without docume
   const req = { ...validRequest, pageCount: 1, images: [validRequest.images[0]] };
   const service = createExtractionService(config, db, mockTransport);
   await assert.rejects(
-    () => service.run(req, 'admin', new AbortController().signal),
+    () => service.run({ workspaceId: 'ws_legacy' }, req, 'admin', new AbortController().signal),
     (err) => err.code === 'provider_policy',
   );
 });
@@ -687,7 +687,7 @@ test('service integration rejects OpenRouter ZDR preview missing explicit safety
   const req = { ...validRequest, pageCount: 1, images: [validRequest.images[0]] };
   const service = createExtractionService(config, db, mockTransport);
   await assert.rejects(
-    () => service.run(req, 'admin', new AbortController().signal),
+    () => service.run({ workspaceId: 'ws_legacy' }, req, 'admin', new AbortController().signal),
     (err) => err.code === 'provider_policy',
   );
 });

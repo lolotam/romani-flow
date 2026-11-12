@@ -15,9 +15,9 @@ import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
-import bcrypt from 'bcryptjs';
 
 import { createApp } from '../server/app.ts';
+import { createAdmin } from '../server/repositories/adminUsers.ts';
 import { loadConfig } from '../server/config.ts';
 import { runMigrations } from '../server/db/migrator.ts';
 import { insertRow } from '../server/repositories/base.ts';
@@ -48,66 +48,62 @@ async function main() {
     // Synthetic ephemeral admin credentials (never committed, never read from .env)
     const adminEmail = `admin_local_${randomBytes(4).toString('hex')}@synthetic.invalid`;
     const adminPass = `TestPass_${randomBytes(8).toString('hex')}!123`;
-    const adminHash = await bcrypt.hash(adminPass, 10);
 
-    insertRow(db, 'admin_users', {
-      id: 'admin_local_id',
+    await createAdmin(db, {
       email: adminEmail,
       name: 'Synthetic Local Admin',
+      password: adminPass,
       role: 'admin',
-      is_active: 1,
-      password_hash: adminHash,
-      created_at: '2026-01-01T00:00:00.000Z',
-      updated_at: '2026-01-01T00:00:00.000Z',
+      workspaceId: 'ws_legacy',
     });
 
     // Catalogs
-    const comp1 = insertRow(db, 'companies', {
+    const comp1 = insertRow(db, { workspaceId: 'ws_legacy' }, 'companies', {
       name: 'Acme Kuwait Trading',
       name_ar: 'شركة أكمي للتجارة',
       description: 'First test company',
     });
-    const comp2 = insertRow(db, 'companies', {
+    const comp2 = insertRow(db, { workspaceId: 'ws_legacy' }, 'companies', {
       name: 'Gulf Solutions Co',
       name_ar: 'شركة حلول الخليج',
       description: 'Second test company',
     });
 
-    insertRow(db, 'ministries', {
+    insertRow(db, { workspaceId: 'ws_legacy' }, 'ministries', {
       id: 'min-moi',
       name: 'Ministry of Interior',
       name_ar: 'وزارة الداخلية',
     });
-    insertRow(db, 'ministries', {
+    insertRow(db, { workspaceId: 'ws_legacy' }, 'ministries', {
       id: 'min-mol',
       name: 'Ministry of Labour',
       name_ar: 'وزارة الشؤون الاجتماعية والعمل',
     });
 
-    insertRow(db, 'document_types', {
+    insertRow(db, { workspaceId: 'ws_legacy' }, 'document_types', {
       id: 'type-civil-id',
       name: 'Civil ID',
       name_ar: 'البطاقة المدنية',
     });
-    insertRow(db, 'document_types', {
+    insertRow(db, { workspaceId: 'ws_legacy' }, 'document_types', {
       id: 'type-passport',
       name: 'Passport',
       name_ar: 'جواز السفر',
     });
 
-    insertRow(db, 'positions', {
+    insertRow(db, { workspaceId: 'ws_legacy' }, 'positions', {
       id: 'pos-mgr',
       name: 'Manager',
       name_ar: 'مدير',
       value: 'مدير',
     });
-    insertRow(db, 'positions', {
+    insertRow(db, { workspaceId: 'ws_legacy' }, 'positions', {
       id: 'pos-acc',
       name: 'Accountant',
       name_ar: 'محاسب',
       value: 'محاسب',
     });
-    insertRow(db, 'positions', {
+    insertRow(db, { workspaceId: 'ws_legacy' }, 'positions', {
       id: 'pos-eng',
       name: 'Engineer',
       name_ar: 'مهندس',
@@ -146,7 +142,7 @@ async function main() {
       const pos = i % 3 === 0 ? 'مدير' : i % 3 === 1 ? 'محاسب' : 'مهندس';
       const posId = i % 3 === 0 ? 'pos-mgr' : i % 3 === 1 ? 'pos-acc' : 'pos-eng';
 
-      const emp = insertRow(db, 'employees', {
+      const emp = insertRow(db, { workspaceId: 'ws_legacy' }, 'employees', {
         company_id: isComp1 ? comp1.id : comp2.id,
         name: employeeNames[i],
         phone: `+965 9000${String(i).padStart(4, '0')}`,
@@ -165,7 +161,7 @@ async function main() {
     }
 
     // Seed at least one document for testing patch, derived status, and relations
-    insertRow(db, 'documents', {
+    insertRow(db, { workspaceId: 'ws_legacy' }, 'documents', {
       id: 'doc-verify-seed',
       title: 'Civil ID Card',
       status: 'valid',
@@ -177,13 +173,13 @@ async function main() {
     });
 
     // Settings
-    setSetting(db, 'cron.enabled', 'true');
-    setSetting(db, 'cron.schedule', '0 8 * * *');
-    setSetting(db, 'cron.include_employees', 'true');
-    setSetting(db, 'cron.include_documents', 'true');
-    setSetting(db, 'email.enabled', 'true');
-    setSetting(db, 'email.recipients', '["admin@synthetic.invalid"]');
-    setSetting(db, 'email.notification_intervals', '["30", "60", "90"]');
+    setSetting(db, { workspaceId: 'ws_legacy' }, 'cron.enabled', 'true');
+    setSetting(db, { platform: true }, 'cron.schedule', '0 8 * * *');
+    setSetting(db, { workspaceId: 'ws_legacy' }, 'cron.include_employees', 'true');
+    setSetting(db, { workspaceId: 'ws_legacy' }, 'cron.include_documents', 'true');
+    setSetting(db, { workspaceId: 'ws_legacy' }, 'email.enabled', 'true');
+    setSetting(db, { workspaceId: 'ws_legacy' }, 'email.recipients', '["admin@synthetic.invalid"]');
+    setSetting(db, { workspaceId: 'ws_legacy' }, 'email.notification_intervals', '["30", "60", "90"]');
 
     // Stub mailer
     const stubMailer = {

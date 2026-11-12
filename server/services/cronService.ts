@@ -1,6 +1,8 @@
 import cron, { type ScheduledTask } from 'node-cron';
 import type { Db } from '../db/connection.js';
-import { getBoolean, getString, setSetting } from '../repositories/settings.js';
+import type { Scope } from '../repositories/base.js';
+import { getBoolean, getString, PLATFORM, setSetting } from '../repositories/settings.js';
+import { LEGACY_WORKSPACE_ID, listWorkspaceIds } from '../repositories/workspaces.js';
 import type { Mailer } from './mailer.js';
 import {
   recordAutomatedRun,
@@ -16,6 +18,10 @@ import {
  * problem without buying any throughput. The schedule is stored in the database
  * and re-read whenever the settings change, so it can be edited from the UI
  * without restarting the container.
+ *
+ * The schedule is one platform setting; each firing reports every active
+ * workspace that enabled its reminders, one workspace at a time, so a failure in
+ * one workspace never blocks or leaks into another.
  */
 
 export interface CronStatus {
@@ -29,10 +35,28 @@ export interface CronStatus {
 
 interface CronResult { sent: boolean; skipped?: string; error?: string }
 
+const DEFAULT_SCHEDULE = '0 8 * * *';
+
+/** D11: until the platform dashboard exists, only the legacy workspace edits the shared schedule. */
+export function mayChangeSchedule(scope: Scope): boolean {
+  return scope.workspaceId === LEGACY_WORKSPACE_ID;
+}
+
+/** A day is only "handled" when the run completed; a genuine failure stays retryable. */
+const COMPLETED_SKIPS = new Set(['nothing_due', 'disabled', 'no_recipients', 'no_intervals']);
+
+/** Several workspace results read as one: an error or a partial run is never hidden. */
+function combine(results: CronResult[]): CronResult {
+  if (results.length === 0) return { sent: false, skipped: 'disabled' };
+  const skipped = results.every(result => result.skipped === results[0].skipped) ? results[0].skipped : undefined;
+  const error = results.find(result => result.error)?.error;
+  return { sent: results.every(result => result.sent), ...(skipped ? { skipped } : {}), ...(error ? { error } : {}) };
+}
+
 export class CronService {
   private task: ScheduledTask | null = null;
   private inFlight = false;
-  private reminderEnqueue: (() => Promise<unknown>) | null = null;
+  private reminderEnqueue: { scope: Scope; action: () => Promise<unknown> } | null = null;
   private readonly activeRuns = new Set<Promise<CronResult>>();
   private closing = false;
 
@@ -41,43 +65,49 @@ export class CronService {
     private readonly mailer: Mailer,
   ) {}
 
-  setReminderEnqueue(action: () => Promise<unknown>): void { this.reminderEnqueue = action; }
+  /**
+   * The WhatsApp selection of the workspace that owns the instance. It only runs
+   * when that workspace enabled its scheduled reminders: another workspace
+   * enabling its own report must never select or queue messages here.
+   */
+  setReminderEnqueue(scope: Scope, action: () => Promise<unknown>): void { this.reminderEnqueue = { scope, action }; }
 
   private async enqueueReminders(source: 'cron' | 'manual'): Promise<void> {
     if (source !== 'cron' || !this.reminderEnqueue) return;
-    try { await this.reminderEnqueue(); }
+    if (!getBoolean(this.db, this.reminderEnqueue.scope, 'cron.enabled')) return;
+    try { await this.reminderEnqueue.action(); }
     catch { console.error('[whatsapp] scheduled selection failed; details suppressed'); }
   }
 
+  /** The active workspaces whose administrators turned the scheduled report on. */
+  private enabledWorkspaces(): Scope[] {
+    return listWorkspaceIds(this.db)
+      .map(workspaceId => ({ workspaceId }))
+      .filter(scope => getBoolean(this.db, scope, 'cron.enabled'));
+  }
+
   /** Reads the schedule from the database and (re)arms the scheduler. */
-  reschedule(): CronStatus {
+  reschedule(): void {
     this.stop();
-    if (this.closing) return this.status();
+    if (this.closing || this.enabledWorkspaces().length === 0) return;
 
-    const enabled = getBoolean(this.db, 'cron.enabled');
-    const schedule = getString(this.db, 'cron.schedule', '0 8 * * *');
-
-    if (!enabled) {
-      return this.status();
-    }
-
+    const schedule = this.currentSchedule();
     if (!cron.validate(schedule)) {
       console.error(`[cron] invalid schedule "${schedule}" — the job stays disabled.`);
-      setSetting(this.db, 'cron.last_run_result', `invalid schedule: ${schedule}`);
-      return this.status();
+      // Only the legacy workspace can edit the platform schedule in P1 (decision D11).
+      setSetting(this.db, { workspaceId: LEGACY_WORKSPACE_ID }, 'cron.last_run_result', `invalid schedule: ${schedule}`);
+      return;
     }
 
     this.task = cron.schedule(schedule, () => {
       void this.run();
     });
-
     console.log(`[cron] expiry reminder scheduled with "${schedule}"`);
-
-    return this.status();
   }
 
   /**
-   * Runs the expiry report.
+   * Runs the expiry report: a scheduled run covers every enabled workspace, a
+   * manual run only the requesting one.
    *
    * A run that is already in flight is not started twice, and an automatic run
    * that already happened today is skipped so a container restart cannot send a
@@ -85,15 +115,18 @@ export class CronService {
    * WhatsApp selection remains idempotent and independent when a manual email
    * report overlaps the real scheduled firing.
    */
-  run(source: 'cron' | 'manual' = 'cron'): Promise<CronResult> {
+  run(source?: 'cron'): Promise<CronResult>;
+  run(source: 'manual', scope: Scope): Promise<CronResult>;
+  run(source: 'cron' | 'manual' = 'cron', scope?: Scope): Promise<CronResult> {
+    if (source === 'manual' && !scope) throw new Error('A manual report needs the requesting workspace.');
     if (this.closing) return Promise.resolve({ sent: false, skipped: 'shutting_down' });
-    const active = this.executeRun(source);
+    const active = this.executeRun(source, scope);
     this.activeRuns.add(active);
     void active.then(() => this.activeRuns.delete(active), () => this.activeRuns.delete(active));
     return active;
   }
 
-  private async executeRun(source: 'cron' | 'manual'): Promise<CronResult> {
+  private async executeRun(source: 'cron' | 'manual', scope?: Scope): Promise<CronResult> {
     if (this.inFlight) {
       await this.enqueueReminders(source);
       return { sent: false, skipped: 'already_running' };
@@ -103,45 +136,47 @@ export class CronService {
     try {
       // WhatsApp owns its checkpoint; an email success/disable must not suppress it.
       await this.enqueueReminders(source);
-      if (source === 'cron' && shouldSkipAutomatedRun(this.db)) {
-        return { sent: false, skipped: 'already_run_today' };
-      }
-      const result = await sendExpiryReport(this.db, this.mailer, source);
-
-      if (source === 'cron') {
-        // A genuine failure must stay retryable: the day is only marked as
-        // "already handled" when the run actually completed.
-        const completed =
-          result.sent ||
-          result.skipped === 'nothing_due' ||
-          result.skipped === 'disabled' ||
-          result.skipped === 'no_recipients' ||
-          result.skipped === 'no_intervals';
-
-        recordAutomatedRun(this.db, result.sent ? 'sent' : (result.skipped ?? 'skipped'), completed);
-      }
-
-      return { sent: result.sent, skipped: result.skipped, error: result.error };
-    } catch (error) {
-      const detail = error instanceof Error ? error.message : String(error);
-      if (source === 'cron') {
-        recordAutomatedRun(this.db, `failed: ${detail}`, false);
-      }
-      console.error('[cron] expiry report failed:', error);
-      return { sent: false, error: detail };
+      if (source === 'manual') return await this.reportFor(scope!, 'manual');
+      const results: CronResult[] = [];
+      for (const workspace of this.enabledWorkspaces()) results.push(await this.reportFor(workspace, 'cron'));
+      return combine(results);
     } finally {
       this.inFlight = false;
     }
   }
 
-  status(): CronStatus {
+  private async reportFor(scope: Scope, source: 'cron' | 'manual'): Promise<CronResult> {
+    try {
+      if (source === 'cron' && shouldSkipAutomatedRun(this.db, scope)) {
+        return { sent: false, skipped: 'already_run_today' };
+      }
+      const result = await sendExpiryReport(this.db, scope, this.mailer, source);
+      if (source === 'cron') {
+        const completed = result.sent || COMPLETED_SKIPS.has(result.skipped ?? '');
+        recordAutomatedRun(this.db, scope, result.sent ? 'sent' : (result.skipped ?? 'skipped'), completed);
+      }
+      return { sent: result.sent, skipped: result.skipped, error: result.error };
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error);
+      if (source === 'cron') recordAutomatedRun(this.db, scope, `failed: ${detail}`, false);
+      console.error('[cron] expiry report failed:', error);
+      return { sent: false, error: detail };
+    }
+  }
+
+  /** The one platform schedule every enabled workspace reports on (D11). */
+  currentSchedule(): string {
+    return getString(this.db, PLATFORM, 'cron.schedule', DEFAULT_SCHEDULE);
+  }
+
+  status(scope: Scope): CronStatus {
     return {
-      enabled: getBoolean(this.db, 'cron.enabled'),
-      schedule: getString(this.db, 'cron.schedule', '0 8 * * *'),
+      enabled: getBoolean(this.db, scope, 'cron.enabled'),
+      schedule: this.currentSchedule(),
       running: this.activeRuns.size > 0,
-      lastRunAt: getString(this.db, 'cron.last_run_at'),
-      lastRunResult: getString(this.db, 'cron.last_run_result'),
-      nextRun: this.task?.getNextRun()?.toISOString() ?? null,
+      lastRunAt: getString(this.db, scope, 'cron.last_run_at'),
+      lastRunResult: getString(this.db, scope, 'cron.last_run_result'),
+      nextRun: getBoolean(this.db, scope, 'cron.enabled') ? (this.task?.getNextRun()?.toISOString() ?? null) : null,
     };
   }
 
@@ -157,5 +192,4 @@ export class CronService {
     this.stop();
     await Promise.all([...this.activeRuns]);
   }
-
 }

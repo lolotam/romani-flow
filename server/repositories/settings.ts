@@ -1,5 +1,5 @@
 import type { Db } from '../db/connection.js';
-import { createId } from './base.js';
+import { createId, type Scope } from './base.js';
 
 /**
  * Key/value application settings.
@@ -7,9 +7,18 @@ import { createId } from './base.js';
  * Values are stored as JSON so booleans, numbers and string arrays survive a
  * round trip. Secrets are never stored here — SMTP credentials live in the
  * environment only.
+ *
+ * A setting is either a *tenant* setting, stored per workspace in
+ * `workspace_settings`, or a *platform* setting, stored once in `settings`.
+ * A tenant setting can only be read or written for a workspace scope; a
+ * platform setting can be read by anyone but only written with `PLATFORM`.
  */
 
 export type SettingValue = string | number | boolean | string[] | null;
+
+/** The scope of a platform setting write: the scheduler, the seed, the erase locks. */
+export const PLATFORM = Object.freeze({ platform: true as const });
+export type SettingScope = Scope | typeof PLATFORM;
 
 export interface SettingDefinition {
   key: string;
@@ -46,6 +55,35 @@ export const SETTING_DEFINITIONS: SettingDefinition[] = [
   { key: 'ai_extraction.model', type: 'string', defaultValue: '' },
 ];
 
+/**
+ * Settings that belong to one workspace. This list must equal the keys that
+ * migration 010 moved into `workspace_settings`; a test compares the two.
+ */
+export const TENANT_SETTING_KEYS: ReadonlySet<string> = new Set([
+  'email.enabled', 'email.recipients', 'email.cc', 'email.from_name', 'email.language',
+  'email.notification_intervals', 'email.last_sent_at', 'email.last_result',
+  'expiry_warning_days', 'cron.enabled', 'cron.days', 'cron.include_employees',
+  'cron.include_documents', 'cron.last_run_at', 'cron.last_run_result', 'cron.last_run_date',
+  'reminders.dismissed', 'reminders.pinned',
+  'ai_extraction.enabled', 'ai_extraction.provider', 'ai_extraction.model',
+  'whatsapp.enabled', 'whatsapp.language', 'whatsapp.last_enqueue_date',
+  'document_drafts.epoch',
+]);
+
+export function isTenantSetting(key: string): boolean {
+  return TENANT_SETTING_KEYS.has(key);
+}
+
+function isWorkspace(scope: SettingScope): scope is Scope {
+  return 'workspaceId' in scope;
+}
+
+/** A programming error, not a user error: the caller used the wrong scope for the key. */
+function requireWorkspace(scope: SettingScope, key: string): Scope {
+  if (!isWorkspace(scope)) throw new Error(`tenant_setting_requires_workspace: ${key}`);
+  return scope;
+}
+
 const SECRET_PREFIXES = ['smtp.', 'secret.', 'password', 'jwt'];
 
 export function isSecretSetting(key: string): boolean {
@@ -61,13 +99,21 @@ function parseStored(raw: string): unknown {
   }
 }
 
-export function getSetting(db: Db, key: string): SettingValue {
-  const row = db.prepare('SELECT value FROM settings WHERE key = ?').get(key) as
-    | { value: string }
-    | undefined;
+function readStored(db: Db, scope: SettingScope, key: string): string | undefined {
+  if (isTenantSetting(key)) {
+    const row = db
+      .prepare('SELECT value FROM workspace_settings WHERE workspace_id = ? AND key = ?')
+      .get(requireWorkspace(scope, key).workspaceId, key) as { value: string | null } | undefined;
+    return row?.value ?? undefined;
+  }
+  const row = db.prepare('SELECT value FROM settings WHERE key = ?').get(key) as { value: string } | undefined;
+  return row?.value;
+}
 
-  if (row) {
-    const parsed = parseStored(row.value);
+export function getSetting(db: Db, scope: SettingScope, key: string): SettingValue {
+  const raw = readStored(db, scope, key);
+  if (raw !== undefined) {
+    const parsed = parseStored(raw);
     if (parsed !== null && parsed !== undefined) return parsed as SettingValue;
   }
 
@@ -75,24 +121,24 @@ export function getSetting(db: Db, key: string): SettingValue {
   return definition ? definition.defaultValue : null;
 }
 
-export function getBoolean(db: Db, key: string): boolean {
-  const value = getSetting(db, key);
+export function getBoolean(db: Db, scope: SettingScope, key: string): boolean {
+  const value = getSetting(db, scope, key);
   return value === true || value === 'true';
 }
 
-export function getNumber(db: Db, key: string, fallback: number): number {
-  const value = getSetting(db, key);
+export function getNumber(db: Db, scope: SettingScope, key: string, fallback: number): number {
+  const value = getSetting(db, scope, key);
   const parsed = typeof value === 'number' ? value : Number.parseInt(String(value ?? ''), 10);
   return Number.isFinite(parsed) ? parsed : fallback;
 }
 
-export function getString(db: Db, key: string, fallback = ''): string {
-  const value = getSetting(db, key);
+export function getString(db: Db, scope: SettingScope, key: string, fallback = ''): string {
+  const value = getSetting(db, scope, key);
   return typeof value === 'string' ? value : fallback;
 }
 
-export function getStringList(db: Db, key: string): string[] {
-  const value = getSetting(db, key);
+export function getStringList(db: Db, scope: SettingScope, key: string): string[] {
+  const value = getSetting(db, scope, key);
   if (Array.isArray(value)) return value.filter((item): item is string => typeof item === 'string');
   if (typeof value === 'string' && value.trim() !== '') {
     return value
@@ -104,40 +150,47 @@ export function getStringList(db: Db, key: string): string[] {
 }
 
 /** Raw list value, keeping numbers — used by the notification intervals. */
-export function getRawList(db: Db, key: string): unknown[] {
-  const value = getSetting(db, key);
+export function getRawList(db: Db, scope: SettingScope, key: string): unknown[] {
+  const value = getSetting(db, scope, key);
   return Array.isArray(value) ? value : [];
 }
 
-export function setSetting(db: Db, key: string, value: SettingValue): void {
+export function setSetting(db: Db, scope: SettingScope, key: string, value: SettingValue): void {
   const now = new Date().toISOString();
+  if (isTenantSetting(key)) {
+    db.prepare(
+      `INSERT INTO workspace_settings (workspace_id, key, value, updated_at) VALUES (?, ?, ?, ?)
+       ON CONFLICT(workspace_id, key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`,
+    ).run(requireWorkspace(scope, key).workspaceId, key, JSON.stringify(value), now);
+    return;
+  }
+  if (isWorkspace(scope)) throw new Error(`platform_setting_requires_platform_scope: ${key}`);
   db.prepare(
     `INSERT INTO settings (key, value, updated_at) VALUES (?, ?, ?)
      ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`,
   ).run(key, JSON.stringify(value), now);
 }
 
-export function setSettings(db: Db, values: Record<string, SettingValue>): void {
+export function setSettings(db: Db, scope: SettingScope, values: Record<string, SettingValue>): void {
   for (const [key, value] of Object.entries(values)) {
-    setSetting(db, key, value);
+    setSetting(db, scope, key, value);
   }
 }
 
-/** Every known setting with its current value, for the Settings screen. */
-export function readAllSettings(db: Db): Record<string, SettingValue> {
+/** Every known setting with its current value for one workspace, for the Settings screen. */
+export function readAllSettings(db: Db, scope: Scope): Record<string, SettingValue> {
   const result: Record<string, SettingValue> = {};
   for (const definition of SETTING_DEFINITIONS) {
-    result[definition.key] = getSetting(db, definition.key);
+    result[definition.key] = getSetting(db, scope, definition.key);
   }
   return result;
 }
 
-/** Ensures a row exists for a known setting (used by the seed). */
-export function ensureSetting(db: Db, key: string): void {
-  const exists = db.prepare('SELECT key FROM settings WHERE key = ?').get(key);
-  if (exists) return;
+/** Ensures a stored value exists for a known setting (used by the seed). */
+export function ensureSetting(db: Db, scope: SettingScope, key: string): void {
+  if (readStored(db, scope, key) !== undefined) return;
   const definition = SETTING_DEFINITIONS.find((item) => item.key === key);
-  setSetting(db, key, definition ? definition.defaultValue : null);
+  setSetting(db, scope, key, definition ? definition.defaultValue : null);
 }
 
 export function newSettingId(): string {

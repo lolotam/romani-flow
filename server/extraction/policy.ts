@@ -3,7 +3,7 @@ import type { Db } from '../db/connection.js';
 import { limits, type ExtractionRequest, type ExtractionStatus, type ModelChoice } from '../contracts/documentExtraction.js';
 import type { Approval, ExtractionConfig } from './config.js';
 import { getBoolean, getString } from '../repositories/settings.js';
-import { RepositoryError } from '../repositories/base.js';
+import { RepositoryError, type Scope } from '../repositories/base.js';
 import { validateDraftScope } from '../repositories/documentDrafts.js';
 import { readCatalogs } from './catalog.js';
 import { ExtractionError, isRecord, modelSegments } from './http.js';
@@ -263,11 +263,11 @@ export function resolveApprovedSelection(
  * rotated key does not invalidate a running request while a changed
  * selection, a changed approval or a changed context does.
  */
-export function settingsVersion(db: Db, config: { extraction: ExtractionConfig }): string {
+export function settingsVersion(db: Db, scope: Scope, config: { extraction: ExtractionConfig }): string {
   const payload = {
-    enabled: getBoolean(db, 'ai_extraction.enabled'),
-    provider: getString(db, 'ai_extraction.provider'),
-    model: getString(db, 'ai_extraction.model'),
+    enabled: getBoolean(db, scope, 'ai_extraction.enabled'),
+    provider: getString(db, scope, 'ai_extraction.provider'),
+    model: getString(db, scope, 'ai_extraction.model'),
     context: config.extraction.context,
     approvals: config.extraction.approvals.map(approval => ({
       provider: approval.provider,
@@ -304,9 +304,9 @@ export function assertAdmin(db: Db, userId: string): void {
  * its draft row still exists. The scope is checked with the scope validator
  * of the drafts, so both features agree on what a context is.
  */
-export function assertDraftScope(db: Db, scope: string): void {
+export function assertDraftScope(db: Db, tenant: Scope, scope: string): void {
   try {
-    validateDraftScope(db, scope);
+    validateDraftScope(db, tenant, scope);
   } catch (error) {
     if (error instanceof RepositoryError) {
       throw new ExtractionError('invalid_scope', 409, 'The draft scope is no longer available.');
@@ -378,17 +378,18 @@ export function hasPrivacyAttestations(
 /** Checks the settings version of a request. */
 export function assertSettingsCurrent(
   db: Db,
+  tenant: Scope,
   config: { extraction: ExtractionConfig },
   request: { settingsVersion: string },
 ): void {
-  if (settingsVersion(db, config) !== request.settingsVersion) {
+  if (settingsVersion(db, tenant, config) !== request.settingsVersion) {
     throw new ExtractionError('stale_settings', 409, 'The extraction settings changed. Reload and try again.');
   }
 }
 
 /** Checks the catalog version of a request. */
-export function assertCatalogCurrent(db: Db, request: { catalogVersion: string }): void {
-  if (readCatalogs(db).version !== request.catalogVersion) {
+export function assertCatalogCurrent(db: Db, tenant: Scope, request: { catalogVersion: string }): void {
+  if (readCatalogs(db, tenant).version !== request.catalogVersion) {
     throw new ExtractionError('stale_catalog', 409, 'The document catalogs changed. Reload and try again.');
   }
 }
@@ -403,17 +404,18 @@ export function assertCatalogCurrent(db: Db, request: { catalogVersion: string }
  */
 export function assertCurrent(
   db: Db,
+  tenant: Scope,
   config: { extraction: ExtractionConfig },
   request: ExtractionRequest,
   userId: string,
 ): void {
   assertAdmin(db, userId);
-  assertDraftScope(db, request.scope);
+  assertDraftScope(db, tenant, request.scope);
   assertProcessingContext(config.extraction, request);
-  const provider = getString(db, 'ai_extraction.provider');
+  const provider = getString(db, tenant, 'ai_extraction.provider');
   if (provider === 'groq' || provider === 'openrouter') assertPrivacyAttestations(config.extraction, provider);
-  assertSettingsCurrent(db, config, request);
-  assertCatalogCurrent(db, request);
+  assertSettingsCurrent(db, tenant, config, request);
+  assertCatalogCurrent(db, tenant, request);
 }
 
 /**
@@ -424,13 +426,14 @@ export function assertCurrent(
  */
 export function describeExtractionStatus(
   db: Db,
+  tenant: Scope,
   config: { extraction: ExtractionConfig; maxUploadBytes?: number },
   now: string,
 ): ExtractionStatus {
-  const enabled = getBoolean(db, 'ai_extraction.enabled');
-  const providerValue = getString(db, 'ai_extraction.provider');
+  const enabled = getBoolean(db, tenant, 'ai_extraction.enabled');
+  const providerValue = getString(db, tenant, 'ai_extraction.provider');
   const provider = providerValue === 'groq' || providerValue === 'openrouter' ? providerValue : null;
-  const model = getString(db, 'ai_extraction.model');
+  const model = getString(db, tenant, 'ai_extraction.model');
   const configured = {
     groq: Boolean(config.extraction.groqKey),
     openrouter: Boolean(config.extraction.openRouterKey),
@@ -479,8 +482,8 @@ export function describeExtractionStatus(
     processingContext,
     available,
     reason,
-    settingsVersion: settingsVersion(db, config),
-    catalogVersion: readCatalogs(db).version,
+    settingsVersion: settingsVersion(db, tenant, config),
+    catalogVersion: readCatalogs(db, tenant).version,
     // The advertised cap is the smaller of the hard source bound of the
     // pipeline and the upload cap of the server, so a client never reads a
     // bound the server would refuse.

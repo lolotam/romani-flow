@@ -643,7 +643,7 @@ test('provider 429 enforces per-account cooldown blocking later calls before tra
 
 test('PUT /api/settings with mixed settings and invalid candidate rejects atomically without writing notification or settings changes', () =>
   extractionApi(async (f) => {
-    const initialSettings = f.db.prepare("SELECT value FROM settings WHERE key = 'email.enabled'").get();
+    const initialSettings = f.db.prepare("SELECT value FROM workspace_settings WHERE workspace_id='ws_legacy' AND key='email.enabled'").get();
     assert.equal(initialSettings?.value, 'false');
 
     const res = await f.request('/api/settings', {
@@ -661,7 +661,7 @@ test('PUT /api/settings with mixed settings and invalid candidate rejects atomic
     assert.equal(res.status, 400);
     assert.equal(res.json.error.code, 'invalid_settings');
 
-    const afterSettings = f.db.prepare("SELECT value FROM settings WHERE key = 'email.enabled'").get();
+    const afterSettings = f.db.prepare("SELECT value FROM workspace_settings WHERE workspace_id='ws_legacy' AND key='email.enabled'").get();
     assert.equal(afterSettings?.value, 'false', 'Unrelated settings must not be written when candidate validation fails');
   }, { enabled: false, authorized: true }));
 
@@ -691,8 +691,8 @@ test('mixed settings require fresh zero-price eligibility before any write, with
       });
       assert.equal(response.status, paid ? 400 : 200);
       assert.ok(f.calls.some(call => call.url === 'https://openrouter.ai/api/v1/models'), 'Eligibility must use fresh provider metadata');
-      assert.equal(f.db.prepare("SELECT value FROM settings WHERE key='email.enabled'").get().value, paid ? 'false' : 'true');
-      assert.equal(f.db.prepare("SELECT value FROM settings WHERE key='ai_extraction.enabled'").get().value, paid ? 'false' : 'true');
+      assert.equal(f.db.prepare("SELECT value FROM workspace_settings WHERE workspace_id='ws_legacy' AND key='email.enabled'").get().value, paid ? 'false' : 'true');
+      assert.equal(f.db.prepare("SELECT value FROM workspace_settings WHERE workspace_id='ws_legacy' AND key='ai_extraction.enabled'").get().value, paid ? 'false' : 'true');
     }, { enabled: false, authorized: true, provider: 'openrouter', model: MOCK_MODEL_ID,
       modelOverrides: paid ? { pricing: { prompt: '0.01', completion: '0', image: '0', request: '0' } } : {} });
   }

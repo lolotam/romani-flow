@@ -1,5 +1,5 @@
 import type { Db } from '../db/connection.js';
-import type { Row } from '../repositories/base.js';
+import type { Row, Scope } from '../repositories/base.js';
 import {
   getBoolean,
   getNumber,
@@ -69,18 +69,18 @@ interface DocumentRow extends Row {
   expiry_date: string | null;
 }
 
-function nameMap(db: Db, table: string): Map<string, string> {
+function nameMap(db: Db, scope: Scope, table: string): Map<string, string> {
   const map = new Map<string, string>();
-  for (const row of db.prepare(`SELECT id, name FROM "${table}"`).all() as Row[]) {
+  for (const row of db.prepare(`SELECT id, name FROM "${table}" WHERE workspace_id = ?`).all(scope.workspaceId) as Row[]) {
     map.set(String(row.id), String(row.name ?? ''));
   }
   return map;
 }
 
 /** The Arabic name of a catalogue entry, falling back to the English one. */
-function arabicNameMap(db: Db, table: string): Map<string, string> {
+function arabicNameMap(db: Db, scope: Scope, table: string): Map<string, string> {
   const map = new Map<string, string>();
-  const rows = db.prepare(`SELECT id, name, name_ar FROM "${table}"`).all() as Row[];
+  const rows = db.prepare(`SELECT id, name, name_ar FROM "${table}" WHERE workspace_id = ?`).all(scope.workspaceId) as Row[];
   for (const row of rows) {
     const arabic = String(row.name_ar ?? '').trim();
     map.set(String(row.id), arabic.length > 0 ? arabic : String(row.name ?? ''));
@@ -90,6 +90,7 @@ function arabicNameMap(db: Db, table: string): Map<string, string> {
 
 export function collectExpiring(
   db: Db,
+  scope: Scope,
   options: {
     windowDays: number;
     includeEmployees: boolean;
@@ -105,21 +106,20 @@ export function collectExpiring(
   // The Arabic report reads the Arabic catalogue names; the English report
   // keeps the English ones. Each catalogue row carries both.
   const useArabic = language === 'ar';
-  const companies = useArabic ? arabicNameMap(db, 'companies') : nameMap(db, 'companies');
-  const employeeNames = nameMap(db, 'employees');
-  const documentTypes = useArabic
-    ? arabicNameMap(db, 'document_types')
-    : nameMap(db, 'document_types');
-  const ministries = useArabic ? arabicNameMap(db, 'ministries') : nameMap(db, 'ministries');
+  const names = useArabic ? arabicNameMap : nameMap;
+  const companies = names(db, scope, 'companies');
+  const employeeNames = nameMap(db, scope, 'employees');
+  const documentTypes = names(db, scope, 'document_types');
+  const ministries = names(db, scope, 'ministries');
 
   if (options.includeEmployees) {
     const rows = db
       .prepare(
         `SELECT id, name, company_id, residency_expiry_date
            FROM employees
-          WHERE residency_expiry_date IS NOT NULL AND residency_expiry_date != ''`,
+          WHERE workspace_id = ? AND residency_expiry_date IS NOT NULL AND residency_expiry_date != ''`,
       )
-      .all() as EmployeeRow[];
+      .all(scope.workspaceId) as EmployeeRow[];
 
     for (const row of rows) {
       // The selected intervals alone decide the eligibility. A separate
@@ -147,9 +147,9 @@ export function collectExpiring(
       .prepare(
         `SELECT id, title, file_name, employee_id, company_id, document_type_id, ministry_id, issue_date, expiry_date
            FROM documents
-          WHERE expiry_date IS NOT NULL AND expiry_date != ''`,
+          WHERE workspace_id = ? AND expiry_date IS NOT NULL AND expiry_date != ''`,
       )
-      .all() as DocumentRow[];
+      .all(scope.workspaceId) as DocumentRow[];
 
     for (const row of rows) {
       const remaining = daysUntil(row.expiry_date as string);
@@ -195,6 +195,7 @@ export function collectExpiring(
  */
 function alreadyNotified(
   db: Db,
+  scope: Scope,
   itemType: string,
   itemId: string,
   expiryDate: string,
@@ -207,15 +208,16 @@ function alreadyNotified(
   const rows = db
     .prepare(
       `SELECT recipient FROM expiry_notifications
-        WHERE item_type = ? AND item_id = ? AND expiry_date = ?
+        WHERE workspace_id = ? AND item_type = ? AND item_id = ? AND expiry_date = ?
           AND interval_days = ?`,
     )
-    .all(itemType, itemId, expiryDate, intervalDays) as { recipient: string }[];
+    .all(scope.workspaceId, itemType, itemId, expiryDate, intervalDays) as { recipient: string }[];
   return rows.some(row => emailIdentity(row.recipient) === emailIdentity(recipient));
 }
 
 function recordNotification(
   db: Db,
+  scope: Scope,
   itemType: string,
   itemId: string,
   expiryDate: string,
@@ -224,10 +226,11 @@ function recordNotification(
 ): void {
   db.prepare(
     `INSERT OR IGNORE INTO expiry_notifications
-       (id, item_type, item_id, expiry_date, interval_days, recipient, notified_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`,
+       (id, workspace_id, item_type, item_id, expiry_date, interval_days, recipient, notified_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     globalThis.crypto.randomUUID(),
+    scope.workspaceId,
     itemType,
     itemId,
     expiryDate,
@@ -249,23 +252,24 @@ export type { TriggerSource } from './emailLog.js';
 
 export async function sendExpiryReport(
   db: Db,
+  scope: Scope,
   mailer: Mailer,
   triggerSource: TriggerSource,
   options: { budgetMs?: number; minimumSendMs?: number } = {},
 ): Promise<ExpiryReportResult> {
   const deadline = performance.now() + Math.min(60_000, Math.max(1, options.budgetMs ?? 60_000));
-  const enabled = getBoolean(db, 'email.enabled');
-  const recipients = emailIdentities(getStringList(db, 'email.recipients'));
-  const cc = emailIdentities(getStringList(db, 'email.cc'));
+  const enabled = getBoolean(db, scope, 'email.enabled');
+  const recipients = emailIdentities(getStringList(db, scope, 'email.recipients'));
+  const cc = emailIdentities(getStringList(db, scope, 'email.cc'));
   const allRecipients = emailIdentities([...recipients, ...cc]);
-  const windowDays = getNumber(db, 'cron.days', 30);
-  const includeEmployees = getBoolean(db, 'cron.include_employees');
-  const includeDocuments = getBoolean(db, 'cron.include_documents');
-  const intervals = parseIntervals(getRawList(db, 'email.notification_intervals'));
-  const language = (getString(db, 'email.language', 'ar') === 'en' ? 'en' : 'ar') as EmailLanguage;
+  const windowDays = getNumber(db, scope, 'cron.days', 30);
+  const includeEmployees = getBoolean(db, scope, 'cron.include_employees');
+  const includeDocuments = getBoolean(db, scope, 'cron.include_documents');
+  const intervals = parseIntervals(getRawList(db, scope, 'email.notification_intervals'));
+  const language = (getString(db, scope, 'email.language', 'ar') === 'en' ? 'en' : 'ar') as EmailLanguage;
 
   if (!enabled) {
-    writeEmailLog(db, {
+    writeEmailLog(db, scope, {
       kind: 'expiry_report',
       recipients: allRecipients,
       subject: 'Expiry report',
@@ -277,7 +281,7 @@ export async function sendExpiryReport(
   }
 
   if (allRecipients.length === 0) {
-    writeEmailLog(db, {
+    writeEmailLog(db, scope, {
       kind: 'expiry_report',
       recipients: [],
       subject: 'Expiry report',
@@ -289,7 +293,7 @@ export async function sendExpiryReport(
   }
 
   if (intervals.length === 0) {
-    writeEmailLog(db, {
+    writeEmailLog(db, scope, {
       kind: 'expiry_report',
       recipients: allRecipients,
       subject: 'Expiry report',
@@ -300,7 +304,7 @@ export async function sendExpiryReport(
     return { sent: false, skipped: 'no_intervals', recipients: allRecipients, itemCount: 0 };
   }
 
-  const report = collectExpiring(db, {
+  const report = collectExpiring(db, scope, {
     windowDays,
     includeEmployees,
     includeDocuments,
@@ -314,10 +318,10 @@ export async function sendExpiryReport(
   // the full picture and never consumes a notification.
   // Recipients only share a report when their pending item sets are identical.
   const groups = new Map<string, { report: ExpiryReport; to: string[]; cc: string[] }>();
-  const uncertainIdentities = triggerSource === 'cron' ? uncertainEmailIdentities(db) : new Set<string>();
+  const uncertainIdentities = triggerSource === 'cron' ? uncertainEmailIdentities(db, scope) : new Set<string>();
   for (const recipient of allRecipients) {
-    const employees = report.employees.filter(item => triggerSource !== 'cron' || !alreadyNotified(db, 'employee', item.id, item.expiryDate, item.intervalDays, recipient, uncertainIdentities));
-    const documents = report.documents.filter(item => triggerSource !== 'cron' || !alreadyNotified(db, 'document', item.id, item.expiryDate, item.intervalDays, recipient, uncertainIdentities));
+    const employees = report.employees.filter(item => triggerSource !== 'cron' || !alreadyNotified(db, scope, 'employee', item.id, item.expiryDate, item.intervalDays, recipient, uncertainIdentities));
+    const documents = report.documents.filter(item => triggerSource !== 'cron' || !alreadyNotified(db, scope, 'document', item.id, item.expiryDate, item.intervalDays, recipient, uncertainIdentities));
     if (!employees.length && !documents.length) continue;
     const key = JSON.stringify([employees.map(item => [item.id, item.expiryDate, item.intervalDays]), documents.map(item => [item.id, item.expiryDate, item.intervalDays])]);
     let group = groups.get(key);
@@ -325,7 +329,7 @@ export async function sendExpiryReport(
     (recipients.includes(recipient) ? group.to : group.cc).push(recipient);
   }
   if (!groups.size) {
-    writeEmailLog(db, { kind: 'expiry_report', recipients: allRecipients, subject: expiryReportSubject(report), status: 'skipped', error: 'No items are due for this interval.', triggerSource });
+    writeEmailLog(db, scope, { kind: 'expiry_report', recipients: allRecipients, subject: expiryReportSubject(report), status: 'skipped', error: 'No items are due for this interval.', triggerSource });
     return { sent: false, skipped: 'nothing_due', recipients: allRecipients, itemCount: 0 };
   }
   const results: ExpiryReportResult[] = [];
@@ -340,7 +344,7 @@ export async function sendExpiryReport(
     }
     for (const item of group.report.employees) items.add('employee:' + item.id);
     for (const item of group.report.documents) items.add('document:' + item.id);
-    const result = await sendReportGroup(db, mailer, triggerSource, group.report, group.to, group.cc, intervals, deadline);
+    const result = await sendReportGroup(db, scope, mailer, triggerSource, group.report, group.to, group.cc, intervals, deadline);
     results.push(result);
     // Never start another handoff after a transport error or expired wait.
     if (result.error) break;
@@ -348,23 +352,23 @@ export async function sendExpiryReport(
   const completedGroups = results.length;
   for (const group of [...groups.values()].slice(completedGroups)) {
     const deferred = { sent: false, error: 'Email group deferred before SMTP handoff.', recipients: [...group.to, ...group.cc], itemCount: group.report.employees.length + group.report.documents.length };
-    writeEmailLog(db, { kind: 'expiry_report', recipients: deferred.recipients, subject: expiryReportSubject(group.report), status: 'deferred', error: deferred.error, triggerSource,
+    writeEmailLog(db, scope, { kind: 'expiry_report', recipients: deferred.recipients, subject: expiryReportSubject(group.report), status: 'deferred', error: deferred.error, triggerSource,
       details: { employees: group.report.employees.length, documents: group.report.documents.length } });
     results.push(deferred);
   }
   const sent = completedGroups === groups.size && results.every(result => result.sent);
   const error = results.find(result => result.error)?.error;
-  setSetting(db, 'email.last_result', error ? 'failed: ' + error : sent ? 'sent' : 'partial');
+  setSetting(db, scope, 'email.last_result', error ? 'failed: ' + error : sent ? 'sent' : 'partial');
   return { sent, ...(error ? { error } : {}), recipients: results.flatMap(result => result.recipients), itemCount: items.size };
 }
 
-async function sendReportGroup(db: Db, mailer: Mailer, triggerSource: TriggerSource, finalReport: ExpiryReport,
+async function sendReportGroup(db: Db, scope: Scope, mailer: Mailer, triggerSource: TriggerSource, finalReport: ExpiryReport,
   targetRecipients: string[], targetCc: string[], intervals: NotificationInterval[], deadline: number): Promise<ExpiryReportResult> {
   const { employees, documents, windowDays } = finalReport;
   const subject = expiryReportSubject(finalReport);
   const itemCount = employees.length + documents.length;
   // The attempt is recorded before the message is handed to SMTP.
-  const logId = startEmailAttempt(db, {
+  const logId = startEmailAttempt(db, scope, {
     kind: 'expiry_report',
     recipients: [...targetRecipients, ...targetCc],
     subject,
@@ -396,6 +400,7 @@ async function sendReportGroup(db: Db, mailer: Mailer, triggerSource: TriggerSou
         for (const employee of employees) {
           recordNotification(
             db,
+            scope,
             'employee',
             employee.id,
             employee.expiryDate,
@@ -406,6 +411,7 @@ async function sendReportGroup(db: Db, mailer: Mailer, triggerSource: TriggerSou
         for (const document of documents) {
           recordNotification(
             db,
+            scope,
             'document',
             document.id,
             document.expiryDate,
@@ -417,7 +423,7 @@ async function sendReportGroup(db: Db, mailer: Mailer, triggerSource: TriggerSou
     }
 
     const status = result.status === 'partial' ? 'partial' : 'sent';
-    finishEmailAttempt(db, logId, {
+    finishEmailAttempt(db, scope, logId, {
       status,
       details: { employees: employees.length, documents: documents.length, windowDays, intervals,
         recipients: [...targetRecipients, ...targetCc],
@@ -430,36 +436,36 @@ async function sendReportGroup(db: Db, mailer: Mailer, triggerSource: TriggerSou
           : undefined,
     });
 
-    setSetting(db, 'email.last_sent_at', new Date().toISOString());
-    setSetting(db, 'email.last_result', status);
+    setSetting(db, scope, 'email.last_sent_at', new Date().toISOString());
+    setSetting(db, scope, 'email.last_result', status);
 
     return { sent: result.status === 'sent', recipients: [...targetRecipients, ...targetCc], itemCount };
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error);
 
     const uncertain = error instanceof EmailDeadlineError || (error instanceof MailError && error.code === 'send_failed');
-    finishEmailAttempt(db, logId, { status: uncertain ? 'unknown' : 'failed', error: detail });
+    finishEmailAttempt(db, scope, logId, { status: uncertain ? 'unknown' : 'failed', error: detail });
 
-    setSetting(db, 'email.last_result', `failed: ${detail}`);
+    setSetting(db, scope, 'email.last_result', `failed: ${detail}`);
 
     return { sent: false, error: detail, recipients: [...targetRecipients, ...targetCc], itemCount };
   }
 }
 
 /** The last automatic run is remembered so a restart cannot double-send. */
-export function shouldSkipAutomatedRun(db: Db): boolean {
+export function shouldSkipAutomatedRun(db: Db, scope: Scope): boolean {
   const today = new Date().toISOString().slice(0, 10);
-  return getString(db, 'cron.last_run_date') === today;
+  return getString(db, scope, 'cron.last_run_date') === today;
 }
 
-export function recordAutomatedRun(db: Db, result: string, completed = true): void {
+export function recordAutomatedRun(db: Db, scope: Scope, result: string, completed = true): void {
   const now = new Date();
-  setSetting(db, 'cron.last_run_at', now.toISOString());
-  setSetting(db, 'cron.last_run_result', result);
+  setSetting(db, scope, 'cron.last_run_at', now.toISOString());
+  setSetting(db, scope, 'cron.last_run_result', result);
   // The day is only marked as handled when the run completed, so a failed run
   // stays retryable on the next tick.
   if (completed) {
-    setSetting(db, 'cron.last_run_date', now.toISOString().slice(0, 10));
+    setSetting(db, scope, 'cron.last_run_date', now.toISOString().slice(0, 10));
   }
 }
 

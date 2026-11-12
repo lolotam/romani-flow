@@ -77,7 +77,7 @@ test('upgrade migration applies 009, leaves existing rows with NULL, and repeat 
     )`).run();
 
     const result = runMigrations(db, migrationsDir);
-    assert.deepEqual(result.applied, ['009_document_number.sql'], 'Only 009 migration should be applied on upgrade');
+    assert.deepEqual(result.applied, ['009_document_number.sql', '010_workspaces.sql'], 'Only the migrations after 008 are applied on upgrade');
 
     const appliedVersions = db.prepare('SELECT version FROM schema_migrations WHERE version = ?').all('009');
     assert.equal(appliedVersions.length, 1, 'Migration 009 must be recorded in schema_migrations');
@@ -122,39 +122,39 @@ test('fresh install creates document_number column with CHECK constraint and all
       assert.equal(idxCols.some(c => c.name === 'document_number'), false, 'document_number must not have any index');
     }
 
-    freshDb.prepare("INSERT INTO companies(id, name, name_ar, created_at, updated_at) VALUES ('comp-1', 'C', 'ش', '2026-01-01', '2026-01-01')").run();
-    freshDb.prepare("INSERT INTO document_types(id, name, name_ar, created_at, updated_at) VALUES ('type-1', 'T', 'ن', '2026-01-01', '2026-01-01')").run();
+    freshDb.prepare("INSERT INTO companies(workspace_id, id, name, name_ar, created_at, updated_at) VALUES ('ws_legacy', 'comp-1', 'C', 'ش', '2026-01-01', '2026-01-01')").run();
+    freshDb.prepare("INSERT INTO document_types(workspace_id, id, name, name_ar, created_at, updated_at) VALUES ('ws_legacy', 'type-1', 'T', 'ن', '2026-01-01', '2026-01-01')").run();
 
-    freshDb.prepare("INSERT INTO documents(id, title, document_type_id, document_number, created_at, updated_at) VALUES ('d1', 'Doc 1', 'type-1', NULL, '2026-01-01', '2026-01-01')").run();
+    freshDb.prepare("INSERT INTO documents(workspace_id, id, title, document_type_id, document_number, created_at, updated_at) VALUES ('ws_legacy', 'd1', 'Doc 1', 'type-1', NULL, '2026-01-01', '2026-01-01')").run();
     assert.equal(freshDb.prepare("SELECT document_number FROM documents WHERE id = 'd1'").get().document_number, null);
 
-    freshDb.prepare("INSERT INTO documents(id, title, document_type_id, document_number, created_at, updated_at) VALUES ('d2', 'Doc 2', 'type-1', '000123', '2026-01-01', '2026-01-01')").run();
-    freshDb.prepare("INSERT INTO documents(id, title, document_type_id, document_number, created_at, updated_at) VALUES ('d3', 'Doc 3', 'type-1', 'AB-001/٧', '2026-01-01', '2026-01-01')").run();
+    freshDb.prepare("INSERT INTO documents(workspace_id, id, title, document_type_id, document_number, created_at, updated_at) VALUES ('ws_legacy', 'd2', 'Doc 2', 'type-1', '000123', '2026-01-01', '2026-01-01')").run();
+    freshDb.prepare("INSERT INTO documents(workspace_id, id, title, document_type_id, document_number, created_at, updated_at) VALUES ('ws_legacy', 'd3', 'Doc 3', 'type-1', 'AB-001/٧', '2026-01-01', '2026-01-01')").run();
     assert.equal(freshDb.prepare("SELECT document_number FROM documents WHERE id = 'd2'").get().document_number, '000123');
     assert.equal(freshDb.prepare("SELECT document_number FROM documents WHERE id = 'd3'").get().document_number, 'AB-001/٧');
 
-    freshDb.prepare("INSERT INTO documents(id, title, document_type_id, document_number, created_at, updated_at) VALUES ('d4', 'Doc 4', 'type-1', '000123', '2026-01-01', '2026-01-01')").run();
+    freshDb.prepare("INSERT INTO documents(workspace_id, id, title, document_type_id, document_number, created_at, updated_at) VALUES ('ws_legacy', 'd4', 'Doc 4', 'type-1', '000123', '2026-01-01', '2026-01-01')").run();
     assert.equal(freshDb.prepare("SELECT count(*) as count FROM documents WHERE document_number = '000123'").get().count, 2);
 
     const atLimit = 'x'.repeat(128);
-    freshDb.prepare("INSERT INTO documents(id, title, document_type_id, document_number, created_at, updated_at) VALUES ('d5', 'Doc 5', 'type-1', ?, '2026-01-01', '2026-01-01')").run(atLimit);
+    freshDb.prepare("INSERT INTO documents(workspace_id, id, title, document_type_id, document_number, created_at, updated_at) VALUES ('ws_legacy', 'd5', 'Doc 5', 'type-1', ?, '2026-01-01', '2026-01-01')").run(atLimit);
     assert.equal(freshDb.prepare("SELECT document_number FROM documents WHERE id = 'd5'").get().document_number, atLimit);
 
     const overLimit = 'x'.repeat(129);
     assert.throws(() => {
-      freshDb.prepare("INSERT INTO documents(id, title, document_type_id, document_number, created_at, updated_at) VALUES ('d6', 'Doc 6', 'type-1', ?, '2026-01-01', '2026-01-01')").run(overLimit);
+      freshDb.prepare("INSERT INTO documents(workspace_id, id, title, document_type_id, document_number, created_at, updated_at) VALUES ('ws_legacy', 'd6', 'Doc 6', 'type-1', ?, '2026-01-01', '2026-01-01')").run(overLimit);
     }, /CHECK constraint failed/);
 
     // Non-text binary BLOB is rejected by typeof(document_number) = 'text' CHECK constraint
     assert.throws(() => {
-      freshDb.prepare("INSERT INTO documents(id, title, document_type_id, document_number, created_at, updated_at) VALUES ('d7', 'Doc 7', 'type-1', ?, '2026-01-01', '2026-01-01')").run(Buffer.from([0x01, 0x02, 0x03]));
+      freshDb.prepare("INSERT INTO documents(workspace_id, id, title, document_type_id, document_number, created_at, updated_at) VALUES ('ws_legacy', 'd7', 'Doc 7', 'type-1', ?, '2026-01-01', '2026-01-01')").run(Buffer.from([0x01, 0x02, 0x03]));
     }, /CHECK constraint failed/);
 
     // Demonstrate and verify SQLite column TEXT affinity:
     // SQLite coerces numeric literals (such as 12345) to TEXT on columns with TEXT affinity
     // before the CHECK constraint evaluates, which is why client and API layer validation (Task 4)
     // must strictly enforce rejection of numeric/boolean inputs.
-    freshDb.prepare("INSERT INTO documents(id, title, document_type_id, document_number, created_at, updated_at) VALUES ('d8', 'Doc 8', 'type-1', 12345, '2026-01-01', '2026-01-01')").run();
+    freshDb.prepare("INSERT INTO documents(workspace_id, id, title, document_type_id, document_number, created_at, updated_at) VALUES ('ws_legacy', 'd8', 'Doc 8', 'type-1', 12345, '2026-01-01', '2026-01-01')").run();
     const coerced = freshDb.prepare("SELECT document_number, typeof(document_number) as stored_type FROM documents WHERE id = 'd8'").get();
     assert.equal(coerced.document_number, '12345');
     assert.equal(coerced.stored_type, 'text');

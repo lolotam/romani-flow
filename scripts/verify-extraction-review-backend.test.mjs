@@ -164,20 +164,20 @@ for (const variant of RACES) {
         await bounded(checkpointEntered.promise, 'first write completed before second write');
         successful(await first);
         const afterFirst = snapshot(f.db);
-        assert.equal(getSetting(f.db, 'ai_extraction.enabled'), false);
-        for (const [key, value] of Object.entries(variant.patch)) assert.equal(getSetting(f.db, key), value);
+        assert.equal(getSetting(f.db, { workspaceId: 'ws_legacy' }, 'ai_extraction.enabled'), false);
+        for (const [key, value] of Object.entries(variant.patch)) assert.equal(getSetting(f.db, { workspaceId: 'ws_legacy' }, key), value);
         releaseCheckpoint.resolve();
         const res = await second;
         const result = snapshot(f.db);
         t.diagnostic(JSON.stringify({ case: variant.name, secondStatus: res.status,
-          secondCode: res.json.error?.code ?? null, enabled: getSetting(f.db, 'ai_extraction.enabled'),
-          model: getSetting(f.db, 'ai_extraction.model'), provider: getSetting(f.db, 'ai_extraction.provider') }));
+          secondCode: res.json.error?.code ?? null, enabled: getSetting(f.db, { workspaceId: 'ws_legacy' }, 'ai_extraction.enabled'),
+          model: getSetting(f.db, { workspaceId: 'ws_legacy' }, 'ai_extraction.model'), provider: getSetting(f.db, { workspaceId: 'ws_legacy' }, 'ai_extraction.provider') }));
         const c = checks();
         if (variant.control) {
           c.check('unchanged queued enable succeeds', () => successful(res));
           c.check('enable and mixed email update persist', () => {
-            assert.equal(getSetting(f.db, 'ai_extraction.enabled'), true);
-            assert.equal(getSetting(f.db, 'email.enabled'), true);
+            assert.equal(getSetting(f.db, { workspaceId: 'ws_legacy' }, 'ai_extraction.enabled'), true);
+            assert.equal(getSetting(f.db, { workspaceId: 'ws_legacy' }, 'email.enabled'), true);
           });
           c.check('other complete setting rows unchanged', () => assert.deepEqual(
             result.settings.filter(r => !['ai_extraction.enabled', 'email.enabled'].includes(r.key)),
@@ -189,8 +189,8 @@ for (const variant of RACES) {
             assert.equal(res.json.error?.code, 'invalid_settings');
           });
           c.check('entire mixed write leaves complete DB snapshot untouched', () => assert.deepEqual(result, afterFirst));
-          c.check('unvalidated combination never enabled', () => assert.equal(getSetting(f.db, 'ai_extraction.enabled'), false));
-          c.check('no partial email enable', () => assert.equal(getSetting(f.db, 'email.enabled'), false));
+          c.check('unvalidated combination never enabled', () => assert.equal(getSetting(f.db, { workspaceId: 'ws_legacy' }, 'ai_extraction.enabled'), false));
+          c.check('no partial email enable', () => assert.equal(getSetting(f.db, { workspaceId: 'ws_legacy' }, 'email.enabled'), false));
         }
         c.check('all outbox/audit tables unchanged', () => {
           for (const table of Object.keys(start).filter(name => name !== 'settings')) assert.deepEqual(result[table], start[table]);

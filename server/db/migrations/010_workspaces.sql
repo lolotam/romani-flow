@@ -45,6 +45,19 @@ SELECT 'ws_legacy', key, value, updated_at FROM settings
    'document_drafts.epoch'
  );
 
+-- Moved, not copied: a stale platform copy could otherwise be read by mistake.
+DELETE FROM settings
+ WHERE key IN (
+   'email.enabled', 'email.recipients', 'email.cc', 'email.from_name', 'email.language',
+   'email.notification_intervals', 'email.last_sent_at', 'email.last_result',
+   'expiry_warning_days', 'cron.enabled', 'cron.days', 'cron.include_employees',
+   'cron.include_documents', 'cron.last_run_at', 'cron.last_run_result', 'cron.last_run_date',
+   'reminders.dismissed', 'reminders.pinned',
+   'ai_extraction.enabled', 'ai_extraction.provider', 'ai_extraction.model',
+   'whatsapp.enabled', 'whatsapp.language', 'whatsapp.last_enqueue_date',
+   'document_drafts.epoch'
+ );
+
 -- Membership for the current login. Clerk organizations replace it in P2.
 ALTER TABLE admin_users ADD COLUMN workspace_id TEXT REFERENCES workspaces(id);
 

@@ -2,7 +2,7 @@ import { Router } from 'express';
 import multer from 'multer';
 import type { AppConfig } from '../config.js';
 import type { Db } from '../db/connection.js';
-import { requireAdmin } from '../middleware/auth.js';
+import { requireAdmin, tenantOf } from '../middleware/auth.js';
 import { asyncHandler } from '../middleware/errorHandler.js';
 import { findRow } from '../repositories/base.js';
 import { assertCurrentDraft, draftReference } from '../repositories/documentDrafts.js';
@@ -43,15 +43,15 @@ export function createFilesRouter(
   router.delete('/uploads/:uploadId', requireAdmin, asyncHandler(async (req, res) => {
     res.setHeader('Cache-Control', 'no-store');
     const ref = draftReference(req.body?.draft);
-    const result = await documents.abandonStagedUpload(String(req.params.uploadId), { userId: req.user!.id, scope: ref.scope },
-      () => assertCurrentDraft(db, req.user!.id, ref));
+    const result = await documents.abandonStagedUpload(tenantOf(req), String(req.params.uploadId), { userId: req.user!.id, scope: ref.scope },
+      () => assertCurrentDraft(db, tenantOf(req), req.user!.id, ref));
     res.json({ data: result, error: null });
   }));
 
   router.post('/uploads/:uploadId/validate', requireAdmin, asyncHandler(async (req, res) => {
     res.setHeader('Cache-Control', 'no-store');
     const ref = draftReference(req.body?.draft);
-    const upload = await documents.validateStagedUpload(String(req.params.uploadId), () => assertCurrentDraft(db, req.user!.id, ref),
+    const upload = await documents.validateStagedUpload(tenantOf(req), String(req.params.uploadId), () => assertCurrentDraft(db, tenantOf(req), req.user!.id, ref),
       { userId: req.user!.id, scope: ref.scope });
     res.json({ data: { upload_id: upload.uploadId }, error: null });
   }));
@@ -108,7 +108,7 @@ export function createFilesRouter(
         try { ref = draftReference(JSON.parse(req.body.draft)); }
         catch { throw new StorageError('Invalid draft reference.', 'invalid_draft', 400); }
       }
-      const staged = (await documents.stageUploads(files, ref ? () => assertCurrentDraft(db, req.user!.id, ref!) : undefined,
+      const staged = (await documents.stageUploads(tenantOf(req), files, ref ? () => assertCurrentDraft(db, tenantOf(req), req.user!.id, ref!) : undefined,
         ref ? { userId: req.user!.id, scope: ref.scope } : undefined)).map((registered, index) => ({
           upload_id: registered.uploadId,
           file_name: registered.fileName,
@@ -124,7 +124,7 @@ export function createFilesRouter(
   router.get(
     '/:documentId',
     asyncHandler(async (req, res) => {
-      const document = findRow(db, 'documents', String(req.params.documentId), []);
+      const document = findRow(db, tenantOf(req), 'documents', String(req.params.documentId), []);
       if (!document) {
         res.status(404).json({
           data: null,
@@ -139,7 +139,7 @@ export function createFilesRouter(
   router.get(
     '/:documentId/download',
     asyncHandler(async (req, res) => {
-      const document = findRow(db, 'documents', String(req.params.documentId), []);
+      const document = findRow(db, tenantOf(req), 'documents', String(req.params.documentId), []);
       const filePath = document?.file_path as string | undefined;
 
       if (!filePath) {
@@ -166,7 +166,7 @@ export function createFilesRouter(
   router.get(
     '/:documentId/preview',
     asyncHandler(async (req, res) => {
-      const document = findRow(db, 'documents', String(req.params.documentId), []);
+      const document = findRow(db, tenantOf(req), 'documents', String(req.params.documentId), []);
       const filePath = document?.file_path as string | undefined;
 
       if (!filePath) {
@@ -198,7 +198,7 @@ export function createFilesRouter(
     photoUpload.any(),
     asyncHandler(async (req, res) => {
       const employeeId = String(req.params.employeeId);
-      const employee = findRow(db, 'employees', employeeId, []);
+      const employee = findRow(db, tenantOf(req), 'employees', employeeId, []);
       if (!employee) {
         res.status(404).json({
           data: null,
@@ -221,12 +221,13 @@ export function createFilesRouter(
       const previousPath = employee.photo_path as string | undefined;
 
       db.prepare(
-        'UPDATE employees SET photo_path = ?, photo_mime_type = ?, updated_at = ? WHERE id = ?',
+        'UPDATE employees SET photo_path = ?, photo_mime_type = ?, updated_at = ? WHERE id = ? AND workspace_id = ?',
       ).run(
         stored.relativePath,
         stored.mimeType,
         new Date().toISOString(),
         employeeId,
+        tenantOf(req).workspaceId,
       );
 
       if (previousPath && previousPath !== stored.relativePath) {
@@ -243,7 +244,7 @@ export function createFilesRouter(
   router.get(
     '/employees/:employeeId/photo',
     asyncHandler(async (req, res) => {
-      const employee = findRow(db, 'employees', String(req.params.employeeId), []);
+      const employee = findRow(db, tenantOf(req), 'employees', String(req.params.employeeId), []);
       const photoPath = employee?.photo_path as string | undefined;
 
       if (!photoPath) {
@@ -267,7 +268,7 @@ export function createFilesRouter(
     requireAdmin,
     asyncHandler(async (req, res) => {
       const employeeId = String(req.params.employeeId);
-      const employee = findRow(db, 'employees', employeeId, []);
+      const employee = findRow(db, tenantOf(req), 'employees', employeeId, []);
       if (!employee) {
         res.status(404).json({
           data: null,
@@ -278,10 +279,11 @@ export function createFilesRouter(
 
       const photoPath = employee.photo_path as string | undefined;
       db.prepare(
-        'UPDATE employees SET photo_path = NULL, photo_mime_type = NULL, updated_at = ? WHERE id = ?',
+        'UPDATE employees SET photo_path = NULL, photo_mime_type = NULL, updated_at = ? WHERE id = ? AND workspace_id = ?',
       ).run(
         new Date().toISOString(),
         employeeId,
+        tenantOf(req).workspaceId,
       );
 
       if (photoPath) await storage.remove(photoPath);

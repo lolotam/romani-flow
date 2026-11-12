@@ -17,7 +17,7 @@ const OPTIONS = { enabled: false, authorized: true, provider: 'openrouter' };
 const json = data => new Response(JSON.stringify(data), {
   headers: { 'content-type': 'application/json' },
 });
-const snapshot = f => f.db.prepare('SELECT key, value FROM settings ORDER BY key').all();
+const snapshot = f => f.db.prepare("SELECT key, value FROM settings UNION ALL SELECT workspace_id || ':' || key, value FROM workspace_settings ORDER BY 1").all();
 
 // Synthetic projections of the owner's 2026-11-10 public metadata captures.
 // image/request are omitted at both levels; endpoint discount is metadata.
@@ -204,10 +204,10 @@ for (const [name, pricing, refusal, modelId = NVIDIA] of [
           assert.equal(result.status, 200);
           assert.equal(result.json.error, null);
           const values = new Map(snapshot(f).map(row => [row.key, JSON.parse(row.value)]));
-          assert.equal(values.get('ai_extraction.enabled'), true);
-          assert.equal(values.get('ai_extraction.model'), modelId);
-          assert.equal(values.get('ai_extraction.provider'), 'openrouter');
-          assert.equal(values.get('email.enabled'), true);
+          assert.equal(values.get('ws_legacy:ai_extraction.enabled'), true);
+          assert.equal(values.get('ws_legacy:ai_extraction.model'), modelId);
+          assert.equal(values.get('ws_legacy:ai_extraction.provider'), 'openrouter');
+          assert.equal(values.get('ws_legacy:email.enabled'), true);
         }
       } finally {
         clearTimeout(timer);

@@ -22,12 +22,12 @@ async function fixture(run) {
   const db = new DatabaseSync(path.join(dir, 'romani.db'));
   db.exec('PRAGMA foreign_keys=ON; PRAGMA journal_mode=WAL');
   runMigrations(db, path.resolve('server/db/migrations'));
-  const reminderType = insertRow(db, 'document_types', { name: 'Reminder fixture', name_ar: 'Fixture' });
+  const reminderType = insertRow(db, { workspaceId: 'ws_legacy' }, 'document_types', { name: 'Reminder fixture', name_ar: 'Fixture' });
   const config = loadConfig({ NODE_ENV: 'test', JWT_SECRET: randomBytes(32).toString('hex') });
   const password = randomBytes(24).toString('hex');
   const passwordHash = await hashPassword(password);
   for (const role of ['admin', 'viewer']) db.prepare(`INSERT INTO admin_users
-    (id,email,name,role,password_hash,created_at,updated_at) VALUES(?,?,?,?,?,?,?)`)
+    (workspace_id, id,email,name,role,password_hash,created_at,updated_at) VALUES('ws_legacy', ?,?,?,?,?,?,?)`)
     .run(role, `${role}@example.invalid`, 'Isolated fixture', role, passwordHash, '2026-01-01', '2026-01-01');
   const deliveries = [];
   let mode = 'sent';
@@ -68,9 +68,9 @@ test('real login, PDF upload/save/retrieve/edit, private defaults and logout jou
   assert.equal((await request('/api/documents')).status, 401);
   const cookie = await login();
   assert.equal((await request('/api/auth/me', { cookie })).status, 200);
-  const company = insertRow(db, 'companies', { name: 'Fixture company', name_ar: 'Fixture' });
-  const type = insertRow(db, 'document_types', { name: 'Fixture type', name_ar: 'Fixture' });
-  const employee = insertRow(db, 'employees', { name: 'Fixture employee', company_id: company.id });
+  const company = insertRow(db, { workspaceId: 'ws_legacy' }, 'companies', { name: 'Fixture company', name_ar: 'Fixture' });
+  const type = insertRow(db, { workspaceId: 'ws_legacy' }, 'document_types', { name: 'Fixture type', name_ar: 'Fixture' });
+  const employee = insertRow(db, { workspaceId: 'ws_legacy' }, 'employees', { name: 'Fixture employee', company_id: company.id });
   const pdf = Buffer.from('%PDF-1.4\n1 0 obj<</Type/Catalog>>endobj\n%%EOF');
   const form = new FormData(); form.append('files', new Blob([pdf], { type: 'application/pdf' }), 'fixture.pdf');
   const upload = await request('/api/files/upload', { method: 'POST', body: form, cookie });
@@ -135,26 +135,26 @@ test('SMTP verification failure is durable and never reaches send', () => fixtur
 }));
 
 test('actual scheduler fires, records success, deduplicates and reports a future run', () => fixture(async ({ db, cron, deliveries, reminderType }) => {
-  setSetting(db, 'email.enabled', true); setSetting(db, 'email.recipients', ['test@example.invalid']);
-  setSetting(db, 'email.notification_intervals', ['1']); setSetting(db, 'cron.enabled', true);
-  setSetting(db, 'cron.schedule', '* * * * * *'); // accelerated local engine proof only
+  setSetting(db, { workspaceId: 'ws_legacy' }, 'email.enabled', true); setSetting(db, { workspaceId: 'ws_legacy' }, 'email.recipients', ['test@example.invalid']);
+  setSetting(db, { workspaceId: 'ws_legacy' }, 'email.notification_intervals', ['1']); setSetting(db, { workspaceId: 'ws_legacy' }, 'cron.enabled', true);
+  setSetting(db, { platform: true }, 'cron.schedule', '* * * * * *'); // accelerated local engine proof only
   const tomorrow = new Date(); tomorrow.setUTCDate(tomorrow.getUTCDate() + 1);
-  insertRow(db, 'documents', { title: 'Due fixture', document_type_id: reminderType.id, expiry_date: tomorrow.toISOString().slice(0, 10) });
-  const state = cron.reschedule(); assert.ok(new Date(state.nextRun).getTime() > Date.now());
+  insertRow(db, { workspaceId: 'ws_legacy' }, 'documents', { title: 'Due fixture', document_type_id: reminderType.id, expiry_date: tomorrow.toISOString().slice(0, 10) });
+  cron.reschedule(); const state = cron.status({ workspaceId: 'ws_legacy' }); assert.ok(new Date(state.nextRun).getTime() > Date.now());
   const deadline = Date.now() + 4000;
   while (deliveries.length === 0 && Date.now() < deadline) await new Promise(r => setTimeout(r, 50));
   assert.equal(deliveries.length, 1);
   assert.equal((await cron.run()).skipped, 'already_run_today');
   assert.equal(deliveries.length, 1);
   assert.equal(db.prepare("SELECT status FROM email_log WHERE kind='expiry_report'").get().status, 'sent');
-  assert.ok(new Date(cron.status().nextRun).getTime() > Date.now());
+  assert.ok(new Date(cron.status({ workspaceId: 'ws_legacy' }).nextRun).getTime() > Date.now());
 }));
 
 test('failed reminders remain retryable with durable failure evidence', () => fixture(async ({ db, cron, setMode, deliveries, reminderType }) => {
-  setSetting(db, 'email.enabled', true); setSetting(db, 'email.recipients', ['test@example.invalid']);
-  setSetting(db, 'email.notification_intervals', ['1']);
+  setSetting(db, { workspaceId: 'ws_legacy' }, 'email.enabled', true); setSetting(db, { workspaceId: 'ws_legacy' }, 'email.recipients', ['test@example.invalid']);
+  setSetting(db, { workspaceId: 'ws_legacy' }, 'email.notification_intervals', ['1']);
   const tomorrow = new Date(); tomorrow.setUTCDate(tomorrow.getUTCDate() + 1);
-  insertRow(db, 'documents', { title: 'Retry fixture', document_type_id: reminderType.id, expiry_date: tomorrow.toISOString().slice(0, 10) });
+  insertRow(db, { workspaceId: 'ws_legacy' }, 'documents', { title: 'Retry fixture', document_type_id: reminderType.id, expiry_date: tomorrow.toISOString().slice(0, 10) });
   setMode('failed'); assert.equal((await cron.run()).sent, false);
   assert.equal(db.prepare('SELECT count(*) n FROM expiry_notifications').get().n, 0);
   setMode('sent'); assert.equal((await cron.run()).sent, true);

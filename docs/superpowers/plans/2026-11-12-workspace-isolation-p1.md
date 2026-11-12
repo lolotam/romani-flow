@@ -17,6 +17,7 @@ Branch: `feat/workspace-isolation`. Users see no change in P1: the existing logi
 | D8 | A guard test scans `server/**/*.ts` for raw SQL touching a tenant table without `workspace_id`. Allowed exceptions sit in a list, each with a reason. | Stops future regressions. |
 | D9 | Background work runs **per workspace**: the expiry email automation, the daily completion guard (`workspace_settings`) and WhatsApp enqueue. The fixed WhatsApp instance belongs to `ws_legacy` only. | Per-workspace WhatsApp instances are P4. |
 | D10 | Catalog seeding (`db/seed.ts`, `ownerCatalogs.ts`) runs per workspace when a workspace is created. `ws_legacy` keeps its current rows. Backup export, erase and restore act on the caller's workspace only. | |
+| D11 | `cron.schedule` stays one **platform** setting: one timer, and each firing reports every active workspace whose `cron.enabled` is on, one at a time, with failures isolated per workspace. In P1 only `ws_legacy` may change the schedule (others get 403 `schedule_platform_managed`; resending the unchanged value is a no-op). WhatsApp settings and routes exist only for the workspace that owns the instance (404 `whatsapp_unavailable` otherwise), and the scheduled WhatsApp selection runs only while that workspace's own `cron.enabled` is on. A manual report covers the caller's workspace only. | A per-workspace schedule needs a timer per workspace; it arrives with per-workspace instances in P4. **Awaiting owner approval.** |
 
 ## Tenant tables
 
@@ -34,14 +35,20 @@ Platform tables: `workspaces, settings, schema_migrations`.
 1. Write `scripts/verify-tenant-isolation.test.mjs` and the route inventory first, and watch them fail.
 2. `base.ts`: add `Scope` to every helper. Fix all call sites the compiler reports, then the raw SQL in services and repositories, then add the D8 guard.
 3. Settings repository: read tenant keys from `workspace_settings`.
+4. Pulled forward from C: expiry service, cron and WhatsApp enqueue per workspace (D9, D11), and scoped backup export and erase (D10). Proved by `verify-tenant-isolation` and `verify-tenant-routes` (`npm run test:workspace`).
 
 **C. Files, jobs and backup.**
 1. Per-workspace upload prefix (D5). File routes look the record up through scope first.
-2. Expiry service, cron and WhatsApp enqueue run per workspace (D9). The cron test proves workspace A's reminders reach only A's recipients.
-3. Backup export, erase and restore are scoped (D10). The erase test proves workspace B's rows and files survive.
+2. Per-workspace catalog seeding with generated ids (D10), and default settings for a new workspace (today a new workspace starts with no `workspace_settings` rows).
 
 ## Gates
 
 - On every slice: `typecheck`, `lint` (500-line file limit; `extraction/service.ts` and `routes/documentExtraction.ts` are at the limit, so they must be split if touched), and every `test:*` suite plus the new suites.
 - Before production: owner approval, a `scripts/recovery.py backup` snapshot taken with owner approval (the WAL is bigger than the database file, so a plain copy is stale), a rehearsal of 010 on that snapshot in an isolated container, then deploy.
 - PR #25 also touches `server/routes/files.ts`. Rebase after it merges.
+
+## Known limits after slice B
+
+- The cron run lock is process-wide: while one workspace's report runs, a manual run in another workspace answers `already_running`.
+- The backup export's `settings` now holds only the caller's `workspace_settings` rows; platform settings are no longer exported. No restore consumes the file today.
+

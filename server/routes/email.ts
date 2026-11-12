@@ -2,7 +2,7 @@ import { Router } from 'express';
 import type { AppConfig } from '../config.js';
 import type { Db } from '../db/connection.js';
 import { asyncHandler } from '../middleware/errorHandler.js';
-import { requireAdmin } from '../middleware/auth.js';
+import { requireAdmin, tenantOf } from '../middleware/auth.js';
 import { findRow, type Row } from '../repositories/base.js';
 import { getBoolean, getNumber, getRawList, getString, getStringList } from '../repositories/settings.js';
 import type { Mailer } from '../services/mailer.js';
@@ -51,28 +51,28 @@ export function createEmailRouter(
 
   router.get(
     '/log',
-    asyncHandler(async (_req, res) => {
+    asyncHandler(async (req, res) => {
       const rows = db
-        .prepare('SELECT * FROM email_log ORDER BY created_at DESC LIMIT 100')
-        .all() as Row[];
+        .prepare('SELECT * FROM email_log WHERE workspace_id = ? ORDER BY created_at DESC LIMIT 100')
+        .all(tenantOf(req).workspaceId) as Row[];
       res.json({ data: rows, error: null });
     }),
   );
 
   router.get(
     '/status',
-    asyncHandler(async (_req, res) => {
+    asyncHandler(async (req, res) => {
       res.json({
         data: {
           smtpConfigured: mailer.isConfigured(),
           host: config.smtp.host,
           port: config.smtp.port,
           user: config.smtp.user,
-          enabled: getBoolean(db, 'email.enabled'),
-          recipients: getStringList(db, 'email.recipients'),
-          cc: getStringList(db, 'email.cc'),
-          lastSentAt: getString(db, 'email.last_sent_at'),
-          lastResult: getString(db, 'email.last_result'),
+          enabled: getBoolean(db, tenantOf(req), 'email.enabled'),
+          recipients: getStringList(db, tenantOf(req), 'email.recipients'),
+          cc: getStringList(db, tenantOf(req), 'email.cc'),
+          lastSentAt: getString(db, tenantOf(req), 'email.last_sent_at'),
+          lastResult: getString(db, tenantOf(req), 'email.last_result'),
         },
         error: null,
       });
@@ -84,8 +84,8 @@ export function createEmailRouter(
     requireAdmin,
     asyncHandler(async (req, res) => {
       const { valid, invalid: invalidTo } = parseAddressList(req.body?.to);
-      const recipients = emailIdentities(Object.hasOwn(req.body ?? {}, 'to') ? valid : getStringList(db, 'email.recipients'));
-      const copies = parseAddressList(Object.hasOwn(req.body ?? {}, 'cc') ? req.body.cc : getStringList(db, 'email.cc'));
+      const recipients = emailIdentities(Object.hasOwn(req.body ?? {}, 'to') ? valid : getStringList(db, tenantOf(req), 'email.recipients'));
+      const copies = parseAddressList(Object.hasOwn(req.body ?? {}, 'cc') ? req.body.cc : getStringList(db, tenantOf(req), 'email.cc'));
       const cc = emailIdentities(copies.valid).filter(address => !recipients.some(primary => emailIdentity(primary) === emailIdentity(address)));
       const invalid = [...invalidTo, ...copies.invalid];
       const allRecipients = [...recipients, ...cc];
@@ -98,12 +98,12 @@ export function createEmailRouter(
         return;
       }
 
-      const logId = startEmailAttempt(db, {
+      const logId = startEmailAttempt(db, tenantOf(req), {
         kind: 'test', recipients: allRecipients, subject: 'ROMANI Flow — SMTP test', details: { invalid },
       });
       const verification = await mailer.verify();
       if (!verification.ok) {
-        finishEmailAttempt(db, logId, { status: 'failed', error: verification.message });
+        finishEmailAttempt(db, tenantOf(req), logId, { status: 'failed', error: verification.message });
         res.status(502).json({
           data: null,
           error: { message: verification.message, code: 'smtp_unavailable' },
@@ -120,7 +120,7 @@ export function createEmailRouter(
           html: '<p style="font-family:Segoe UI,Arial,sans-serif">This is a test message from <strong>ROMANI Flow</strong>. SMTP is configured correctly.</p>',
         });
 
-        finishEmailAttempt(db, logId, {
+        finishEmailAttempt(db, tenantOf(req), logId, {
           status: result.status,
           error: result.rejected.length ? 'Some recipients were rejected by the relay.' : undefined,
           details: { invalid, messageId: result.messageId, accepted: result.accepted, rejected: result.rejected },
@@ -134,7 +134,7 @@ export function createEmailRouter(
         res.json({ data: { sent: true, recipients: allRecipients, invalid, messageId: result.messageId }, error: null });
       } catch (error) {
         const detail = error instanceof Error ? error.message : String(error);
-        finishEmailAttempt(db, logId, { status: 'failed', error: detail });
+        finishEmailAttempt(db, tenantOf(req), logId, { status: 'failed', error: detail });
         res.status(502).json({ data: null, error: { message: detail, code: 'send_failed' } });
       }
     }),
@@ -142,13 +142,13 @@ export function createEmailRouter(
 
   router.get(
     '/expiry-preview',
-    asyncHandler(async (_req, res) => {
-      const windowDays = getNumber(db, 'cron.days', 30);
-      const intervals = parseIntervals(getRawList(db, 'email.notification_intervals'));
-      const report = collectExpiring(db, {
+    asyncHandler(async (req, res) => {
+      const windowDays = getNumber(db, tenantOf(req), 'cron.days', 30);
+      const intervals = parseIntervals(getRawList(db, tenantOf(req), 'email.notification_intervals'));
+      const report = collectExpiring(db, tenantOf(req), {
         windowDays,
-        includeEmployees: getBoolean(db, 'cron.include_employees'),
-        includeDocuments: getBoolean(db, 'cron.include_documents'),
+        includeEmployees: getBoolean(db, tenantOf(req), 'cron.include_employees'),
+        includeDocuments: getBoolean(db, tenantOf(req), 'cron.include_documents'),
         intervals,
       });
 
@@ -168,8 +168,8 @@ export function createEmailRouter(
   router.post(
     '/expiry-report',
     requireAdmin,
-    asyncHandler(async (_req, res) => {
-      const result = await cron.run('manual');
+    asyncHandler(async (req, res) => {
+      const result = await cron.run('manual', tenantOf(req));
       res.json({
         data: {
           sent: result.sent,
@@ -235,7 +235,7 @@ export function createEmailRouter(
       const missing: Array<{ document_id: string; title: string; reason: string }> = [];
 
       for (const id of documentIds) {
-        const document = findRow(db, 'documents', id, []);
+        const document = findRow(db, tenantOf(req), 'documents', id, []);
         if (!document) {
           missing.push({ document_id: id, title: id, reason: 'not_found' });
           continue;
@@ -291,11 +291,11 @@ export function createEmailRouter(
 
       const subject = String(req.body?.subject ?? '').trim() || 'Documents from ROMANI Flow';
       const message = typeof req.body?.message === 'string' ? req.body.message : '';
-      const senderName = getString(db, 'email.from_name', 'ROMANI Flow');
-      const language = getString(db, 'email.language', 'ar') === 'en' ? 'en' : 'ar';
+      const senderName = getString(db, tenantOf(req), 'email.from_name', 'ROMANI Flow');
+      const language = getString(db, tenantOf(req), 'email.language', 'ar') === 'en' ? 'en' : 'ar';
 
       // The attempt is recorded before the files are read and handed to SMTP.
-      const logId = startEmailAttempt(db, {
+      const logId = startEmailAttempt(db, tenantOf(req), {
         kind: 'documents',
         recipients: to.valid,
         subject,
@@ -342,7 +342,7 @@ export function createEmailRouter(
           attachments,
         });
 
-        finishEmailAttempt(db, logId, {
+        finishEmailAttempt(db, tenantOf(req), logId, {
           status: result.status,
           error:
             result.rejected.length > 0
@@ -363,7 +363,7 @@ export function createEmailRouter(
         });
       } catch (error) {
         const detail = error instanceof Error ? error.message : String(error);
-        finishEmailAttempt(db, logId, { status: 'failed', error: detail });
+        finishEmailAttempt(db, tenantOf(req), logId, { status: 'failed', error: detail });
         res.status(502).json({ data: null, error: { message: detail, code: 'send_failed' } });
       }
     }),

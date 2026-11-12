@@ -5,6 +5,7 @@ import {
   RepositoryError,
   updateRow,
   type Row,
+  type Scope,
 } from '../repositories/base.js';
 import type { StorageService } from './storageService.js';
 import type { NotificationCoordinator } from '../notifications/coordinator.js';
@@ -55,7 +56,7 @@ export class DocumentService {
   }
 
   /** Stage files under erase's coordinator and check the draft before writing any bytes. */
-  stageUploads(files: Array<{ buffer: Buffer; originalname: string; mimetype: string }>, guard?: () => void, owner?: { userId: string; scope: string }): Promise<StoredUpload[]> {
+  stageUploads(scope: Scope, files: Array<{ buffer: Buffer; originalname: string; mimetype: string }>, guard?: () => void, owner?: { userId: string; scope: string }): Promise<StoredUpload[]> {
     return this.serialize(async () => {
       guard?.();
       const uploads: StoredUpload[] = [];
@@ -63,18 +64,18 @@ export class DocumentService {
       try {
       for (const file of files) {
         const stored = await this.storage.save(file.buffer, file.originalname, file.mimetype, path => {
-          this.db.prepare('INSERT INTO upload_cleanup_queue(file_path,created_at) VALUES(?,?)').run(path, new Date().toISOString());
+          this.db.prepare('INSERT INTO upload_cleanup_queue(file_path,created_at,workspace_id) VALUES(?,?,?)').run(path, new Date().toISOString(), scope.workspaceId);
           paths.push(path);
         });
-        const upload = this.registerUpload({ fileName: stored.fileName, filePath: stored.relativePath, fileSize: stored.size, mimeType: stored.mimeType });
-        if (owner) this.db.prepare('UPDATE pending_uploads SET draft_user_id=?,draft_scope=? WHERE id=?').run(owner.userId, owner.scope, upload.uploadId);
+        const upload = this.registerUpload(scope, { fileName: stored.fileName, filePath: stored.relativePath, fileSize: stored.size, mimeType: stored.mimeType });
+        if (owner) this.db.prepare('UPDATE pending_uploads SET draft_user_id=?,draft_scope=? WHERE id=? AND workspace_id=?').run(owner.userId, owner.scope, upload.uploadId, scope.workspaceId);
         uploads.push(upload);
         this.db.prepare('DELETE FROM upload_cleanup_queue WHERE file_path=?').run(stored.relativePath);
       }
       return uploads;
       } catch (error) {
         for (const path of paths) {
-          try { this.db.prepare('INSERT OR IGNORE INTO upload_cleanup_queue(file_path,created_at) VALUES(?,?)').run(path, new Date().toISOString()); }
+          try { this.db.prepare('INSERT OR IGNORE INTO upload_cleanup_queue(file_path,created_at,workspace_id) VALUES(?,?,?)').run(path, new Date().toISOString(), scope.workspaceId); }
           catch { console.error('[uploads] could not record cleanup work'); }
         }
         await this.cleanupTrackedFiles(paths);
@@ -84,22 +85,23 @@ export class DocumentService {
   }
 
   /** Reuse a still-pending upload only after validating the current draft. */
-  validateStagedUpload(uploadId: string, guard: () => void, owner?: UploadOwner): Promise<StoredUpload> {
+  validateStagedUpload(scope: Scope, uploadId: string, guard: () => void, owner?: UploadOwner): Promise<StoredUpload> {
     return this.serialize(async () => {
       guard();
-      this.assertUploadOwner(uploadId, owner);
-      const upload = this.resolveUpload(uploadId);
+      this.assertUploadOwner(scope, uploadId, owner);
+      const upload = this.resolveUpload(scope, uploadId);
       if (!upload || !this.storage.exists(upload.filePath)) throw new RepositoryError('Upload is no longer pending.', 'invalid_upload', 404);
       return upload;
     });
   }
 
   /** Revoke claimability before unlink; failed cleanup remains durable and retryable. */
-  abandonStagedUpload(uploadId: string, owner: { userId: string; scope: string }, guard: () => void): Promise<{ cleanupPending: boolean }> {
+  abandonStagedUpload(scope: Scope, uploadId: string, owner: { userId: string; scope: string }, guard: () => void): Promise<{ cleanupPending: boolean }> {
     return this.serialize(async () => {
       guard();
-      const row = this.db.prepare('SELECT file_path,draft_user_id,draft_scope FROM pending_uploads WHERE id=?').get(uploadId)
-        ?? this.db.prepare('SELECT file_path,draft_user_id,draft_scope FROM upload_cleanup_queue WHERE upload_id=?').get(uploadId);
+      const ws = scope.workspaceId;
+      const row = this.db.prepare('SELECT file_path,draft_user_id,draft_scope FROM pending_uploads WHERE id=? AND workspace_id=?').get(uploadId, ws)
+        ?? this.db.prepare('SELECT file_path,draft_user_id,draft_scope FROM upload_cleanup_queue WHERE upload_id=? AND workspace_id=?').get(uploadId, ws);
       if (!row) return { cleanupPending: false };
       if (row.draft_user_id !== owner.userId || row.draft_scope !== owner.scope) {
         throw new RepositoryError('Upload does not belong to this draft.', 'invalid_upload', 403);
@@ -110,10 +112,10 @@ export class DocumentService {
         if (queued && (queued.upload_id !== uploadId || queued.draft_user_id !== owner.userId || queued.draft_scope !== owner.scope)) {
           throw new RepositoryError('Upload cleanup belongs to a different draft.', 'invalid_upload', 409);
         }
-        this.db.prepare(`INSERT INTO upload_cleanup_queue(file_path,created_at,upload_id,draft_user_id,draft_scope) VALUES(?,?,?,?,?)
+        this.db.prepare(`INSERT INTO upload_cleanup_queue(file_path,created_at,upload_id,draft_user_id,draft_scope,workspace_id) VALUES(?,?,?,?,?,?)
           ON CONFLICT(file_path) DO NOTHING`)
-          .run(path, new Date().toISOString(), uploadId, owner.userId, owner.scope);
-        this.db.prepare('DELETE FROM pending_uploads WHERE id=?').run(uploadId);
+          .run(path, new Date().toISOString(), uploadId, owner.userId, owner.scope, ws);
+        this.db.prepare('DELETE FROM pending_uploads WHERE id=? AND workspace_id=?').run(uploadId, ws);
       });
       await this.cleanupTrackedFiles([path]);
       return { cleanupPending: Boolean(this.db.prepare('SELECT 1 FROM upload_cleanup_queue WHERE file_path=?').get(path)) };
@@ -135,14 +137,15 @@ export class DocumentService {
   }
 
   /** Records a freshly uploaded file so a record can claim it. */
-  registerUpload(upload: Omit<StoredUpload, 'uploadId'>): StoredUpload {
+  registerUpload(scope: Scope, upload: Omit<StoredUpload, 'uploadId'>): StoredUpload {
     const uploadId = globalThis.crypto.randomUUID();
 
     this.db.prepare(
-      `INSERT INTO pending_uploads (id, file_name, file_path, file_size, mime_type, created_at)
-       VALUES (?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO pending_uploads (id, workspace_id, file_name, file_path, file_size, mime_type, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
     ).run(
       uploadId,
+      scope.workspaceId,
       upload.fileName,
       upload.filePath,
       upload.fileSize,
@@ -154,8 +157,8 @@ export class DocumentService {
   }
 
   /** Resolves an upload id to its staged file, if it has not been claimed yet. */
-  resolveUpload(uploadId: string): StoredUpload | null {
-    const row = this.db.prepare('SELECT * FROM pending_uploads WHERE id = ?').get(uploadId) as
+  resolveUpload(scope: Scope, uploadId: string): StoredUpload | null {
+    const row = this.db.prepare('SELECT * FROM pending_uploads WHERE id = ? AND workspace_id = ?').get(uploadId, scope.workspaceId) as
       | Row
       | undefined;
     if (!row) return null;
@@ -170,14 +173,14 @@ export class DocumentService {
   }
 
   /** Marks an upload as claimed so it cannot be used twice. */
-  claimUpload(uploadId: string): void {
-    this.db.prepare('DELETE FROM pending_uploads WHERE id = ?').run(uploadId);
+  claimUpload(scope: Scope, uploadId: string): void {
+    this.db.prepare('DELETE FROM pending_uploads WHERE id = ? AND workspace_id = ?').run(uploadId, scope.workspaceId);
   }
 
   /** The storage columns for a document, derived from an upload id. */
-  storageFields(uploadId: string, owner?: UploadOwner): StorageFields | null {
-    this.assertUploadOwner(uploadId, owner);
-    const upload = this.resolveUpload(uploadId);
+  storageFields(scope: Scope, uploadId: string, owner?: UploadOwner): StorageFields | null {
+    this.assertUploadOwner(scope, uploadId, owner);
+    const upload = this.resolveUpload(scope, uploadId);
     if (!upload) return null;
 
     return {
@@ -189,8 +192,8 @@ export class DocumentService {
   }
 
   /** Bound draft uploads cannot be validated or claimed in a different account/context. */
-  private assertUploadOwner(uploadId: string, owner?: UploadOwner): void {
-    const row = this.db.prepare('SELECT draft_user_id,draft_scope FROM pending_uploads WHERE id=?').get(uploadId);
+  private assertUploadOwner(scope: Scope, uploadId: string, owner?: UploadOwner): void {
+    const row = this.db.prepare('SELECT draft_user_id,draft_scope FROM pending_uploads WHERE id=? AND workspace_id=?').get(uploadId, scope.workspaceId);
     if (row && (row.draft_user_id !== null || row.draft_scope !== null) && (row.draft_user_id !== owner?.userId || row.draft_scope !== owner?.scope)) {
       throw new RepositoryError('Upload does not belong to this draft.', 'invalid_upload', 403);
     }
@@ -203,29 +206,29 @@ export class DocumentService {
    * transaction rolls back and the upload stays pending, so the administrator
    * can correct the data and retry with the same upload id.
    */
-  async createDocument(payload: Row, status: (expiry: string | null) => string, hooks?: DocumentWriteHooks): Promise<Row> {
+  async createDocument(scope: Scope, payload: Row, status: (expiry: string | null) => string, hooks?: DocumentWriteHooks): Promise<Row> {
     // Same coordinator as update/delete, so a create cannot interleave with a backup erase.
-    return this.serialize(async () => this.createDocumentLocked(payload, status, hooks));
+    return this.serialize(async () => this.createDocumentLocked(scope, payload, status, hooks));
   }
 
-  private createDocumentLocked(payload: Row, status: (expiry: string | null) => string, hooks?: DocumentWriteHooks): Row {
+  private createDocumentLocked(scope: Scope, payload: Row, status: (expiry: string | null) => string, hooks?: DocumentWriteHooks): Row {
     const fields: Row = { ...payload };
     const uploadId = typeof fields.upload_id === 'string' ? fields.upload_id : null;
     delete fields.upload_id;
 
     this.db.exec('BEGIN');
     try {
-      resolveDocumentEntity(this.db, fields);
-      const storageFields: StorageFields | null = uploadId ? this.requireUpload(uploadId, hooks?.uploadOwner) : null;
+      resolveDocumentEntity(this.db, scope, fields);
+      const storageFields: StorageFields | null = uploadId ? this.requireUpload(scope, uploadId, hooks?.uploadOwner) : null;
       const expiry = typeof fields.expiry_date === 'string' ? fields.expiry_date : null;
 
-      const row = insertRow(this.db, 'documents', {
+      const row = insertRow(this.db, scope, 'documents', {
         ...fields,
         ...(storageFields ?? {}),
         status: status(expiry),
       });
 
-      if (uploadId) this.claimUpload(uploadId);
+      if (uploadId) this.claimUpload(scope, uploadId);
       hooks?.completed?.(row);
       this.notifications?.changed();
       this.db.exec('COMMIT');
@@ -243,15 +246,17 @@ export class DocumentService {
    * leave the record pointing at a file that was already deleted.
    */
   async updateDocument(
+    scope: Scope,
     documentId: string,
     payload: Row,
     status: (expiry: string | null) => string,
     hooks?: DocumentWriteHooks,
   ): Promise<Row | null> {
-    return this.serialize(() => this.updateDocumentLocked(documentId, payload, status, hooks));
+    return this.serialize(() => this.updateDocumentLocked(scope, documentId, payload, status, hooks));
   }
 
   private async updateDocumentLocked(
+    scope: Scope,
     documentId: string,
     payload: Row,
     status: (expiry: string | null) => string,
@@ -261,28 +266,28 @@ export class DocumentService {
     const uploadId = typeof fields.upload_id === 'string' ? fields.upload_id : null;
     delete fields.upload_id;
 
-    const existing = findRow(this.db, 'documents', documentId, []);
+    const existing = findRow(this.db, scope, 'documents', documentId, []);
     if (!existing) return null;
 
     const previousPath = existing.file_path as string | undefined;
 
     this.db.exec('BEGIN');
     try {
-      resolveDocumentEntity(this.db, fields);
-      const storageFields: StorageFields | null = uploadId ? this.requireUpload(uploadId, hooks?.uploadOwner) : null;
+      resolveDocumentEntity(this.db, scope, fields);
+      const storageFields: StorageFields | null = uploadId ? this.requireUpload(scope, uploadId, hooks?.uploadOwner) : null;
       const expiry =
         'expiry_date' in fields
           ? (typeof fields.expiry_date === 'string' ? fields.expiry_date : null)
           : (existing.expiry_date as string | null);
 
-      const row = updateRow(this.db, 'documents', documentId, {
+      const row = updateRow(this.db, scope, 'documents', documentId, {
         ...fields,
         ...(storageFields ?? {}),
         status: status(expiry),
       });
 
       if (row) hooks?.completed?.(row);
-      if (uploadId) this.claimUpload(uploadId);
+      if (uploadId) this.claimUpload(scope, uploadId);
       this.notifications?.changed();
       this.db.exec('COMMIT');
 
@@ -298,8 +303,8 @@ export class DocumentService {
   }
 
   /** Resolves an upload id, or fails loudly. */
-  private requireUpload(uploadId: string, owner?: UploadOwner): StorageFields {
-    const fields = this.storageFields(uploadId, owner);
+  private requireUpload(scope: Scope, uploadId: string, owner?: UploadOwner): StorageFields {
+    const fields = this.storageFields(scope, uploadId, owner);
     if (!fields) {
       throw new RepositoryError(
         'The upload is unknown or has already been claimed.',
@@ -334,16 +339,16 @@ export class DocumentService {
   }
 
   /** Deletes a document and its file together. */
-  async deleteDocument(documentId: string): Promise<boolean> {
-    return this.serialize(() => this.deleteDocumentLocked(documentId));
+  async deleteDocument(scope: Scope, documentId: string): Promise<boolean> {
+    return this.serialize(() => this.deleteDocumentLocked(scope, documentId));
   }
 
-  private async deleteDocumentLocked(documentId: string): Promise<boolean> {
-    const document = findRow(this.db, 'documents', documentId, []);
+  private async deleteDocumentLocked(scope: Scope, documentId: string): Promise<boolean> {
+    const document = findRow(this.db, scope, 'documents', documentId, []);
     if (!document) return false;
 
     const deleted = atomic(this.db, () => {
-      const result = this.db.prepare('DELETE FROM documents WHERE id = ?').run(documentId);
+      const result = this.db.prepare('DELETE FROM documents WHERE id = ? AND workspace_id = ?').run(documentId, scope.workspaceId);
       this.notifications?.changed();
       return result.changes !== 0;
     });
@@ -354,16 +359,16 @@ export class DocumentService {
   }
 
   /** Replaces the attachment of a document, keeping the old file until the swap succeeded. */
-  async replaceFile(documentId: string, uploadId: string, owner?: UploadOwner, guard?: () => void): Promise<Row | null> {
-    return this.serialize(() => this.replaceFileLocked(documentId, uploadId, owner, guard));
+  async replaceFile(scope: Scope, documentId: string, uploadId: string, owner?: UploadOwner, guard?: () => void): Promise<Row | null> {
+    return this.serialize(() => this.replaceFileLocked(scope, documentId, uploadId, owner, guard));
   }
 
-  private async replaceFileLocked(documentId: string, uploadId: string, owner?: UploadOwner, guard?: () => void): Promise<Row | null> {
+  private async replaceFileLocked(scope: Scope, documentId: string, uploadId: string, owner?: UploadOwner, guard?: () => void): Promise<Row | null> {
     guard?.();
-    const document = findRow(this.db, 'documents', documentId, []);
+    const document = findRow(this.db, scope, 'documents', documentId, []);
     if (!document) return null;
 
-    const fields = this.storageFields(uploadId, owner);
+    const fields = this.storageFields(scope, uploadId, owner);
     if (!fields) return null;
 
     const previousPath = document.file_path as string | undefined;
@@ -372,7 +377,7 @@ export class DocumentService {
       this.db.prepare(
         `UPDATE documents
           SET file_name = ?, file_path = ?, file_size = ?, mime_type = ?, updated_at = ?
-        WHERE id = ?`,
+        WHERE id = ? AND workspace_id = ?`,
       ).run(
         fields.file_name,
         fields.file_path,
@@ -380,35 +385,36 @@ export class DocumentService {
         fields.mime_type,
         new Date().toISOString(),
         documentId,
+        scope.workspaceId,
       );
 
-      this.claimUpload(uploadId);
+      this.claimUpload(scope, uploadId);
     });
 
     if (previousPath && previousPath !== fields.file_path) {
       await this.removeFile({ file_path: previousPath });
     }
 
-    return findRow(this.db, 'documents', documentId, []);
+    return findRow(this.db, scope, 'documents', documentId, []);
   }
 
   /** Detaches the file from a document without deleting the record. */
-  async detachFile(documentId: string): Promise<Row | null> {
-    return this.serialize(() => this.detachFileLocked(documentId));
+  async detachFile(scope: Scope, documentId: string): Promise<Row | null> {
+    return this.serialize(() => this.detachFileLocked(scope, documentId));
   }
 
-  private async detachFileLocked(documentId: string): Promise<Row | null> {
-    const document = findRow(this.db, 'documents', documentId, []);
+  private async detachFileLocked(scope: Scope, documentId: string): Promise<Row | null> {
+    const document = findRow(this.db, scope, 'documents', documentId, []);
     if (!document) return null;
 
     this.db.prepare(
       `UPDATE documents
           SET file_name = NULL, file_path = NULL, file_size = NULL, mime_type = NULL, updated_at = ?
-        WHERE id = ?`,
-    ).run(new Date().toISOString(), documentId);
+        WHERE id = ? AND workspace_id = ?`,
+    ).run(new Date().toISOString(), documentId, scope.workspaceId);
 
     await this.removeFile(document);
-    return findRow(this.db, 'documents', documentId, []);
+    return findRow(this.db, scope, 'documents', documentId, []);
   }
 
   /** Removes staged uploads that were never claimed. */

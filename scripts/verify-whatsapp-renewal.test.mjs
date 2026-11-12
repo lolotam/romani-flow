@@ -58,20 +58,20 @@ test('business erase retains immutable WhatsApp audit and recipients, atomically
  await f.request('/api/whatsapp/recipients',{method:'POST',body:{label:'Another synthetic manager',phone:'+99900000003',enabled:true}});
  f.clock.now=new Date('2026-01-03T08:00:00Z');await f.reminders.schedule();assert.equal(f.reminders.store.due().length,1);
  const recipients=f.db.prepare('SELECT * FROM whatsapp_recipients ORDER BY id').all();
- f.db.exec("CREATE TRIGGER reject_erase_disable BEFORE UPDATE ON settings WHEN NEW.key='whatsapp.enabled' AND NEW.value='false' BEGIN SELECT RAISE(ABORT,'Synthetic erase disable rejection'); END;");
+ f.db.exec("CREATE TRIGGER reject_erase_disable BEFORE UPDATE ON workspace_settings WHEN NEW.workspace_id='ws_legacy' AND NEW.key='whatsapp.enabled' AND NEW.value='false' BEGIN SELECT RAISE(ABORT,'Synthetic erase disable rejection'); END;");
  assert.equal((await f.request('/api/backup/erase',{method:'POST',body:{}})).status,500);
- assert.equal(getBoolean(f.db,'whatsapp.enabled'),true);assert.equal(f.db.prepare('SELECT count(*) n FROM employees').get().n,1);assert.equal(f.reminders.store.due().length,1);
+ assert.equal(getBoolean(f.db, { workspaceId: 'ws_legacy' }, 'whatsapp.enabled'),true);assert.equal(f.db.prepare('SELECT count(*) n FROM employees').get().n,1);assert.equal(f.reminders.store.due().length,1);
  f.db.exec('DROP TRIGGER reject_erase_disable');
  assert.equal((await f.request('/api/backup/erase',{method:'POST',body:{}})).status,200);
- assert.equal(getBoolean(f.db,'whatsapp.enabled'),false);assert.equal(getString(f.db,'whatsapp.last_enqueue_date'),'');
+ assert.equal(getBoolean(f.db, { workspaceId: 'ws_legacy' }, 'whatsapp.enabled'),false);assert.equal(getString(f.db, { workspaceId: 'ws_legacy' }, 'whatsapp.last_enqueue_date'),'');
  assert.equal(f.db.prepare('SELECT count(*) n FROM employees').get().n,0);assert.equal(f.reminders.store.due().length,0);
  assert.deepEqual(f.db.prepare("SELECT * FROM whatsapp_jobs WHERE state IN ('provider_accepted','unknown') ORDER BY id").all(),audit);
  assert.deepEqual(f.db.prepare('SELECT * FROM whatsapp_attempts ORDER BY id').all(),attempts);
  assert.deepEqual(f.db.prepare('SELECT * FROM whatsapp_recipients ORDER BY id').all(),recipients);
  await f.reminders.mutate(()=>{
-  const type=insertRow(f.db,'document_types',{name:'New synthetic'});
-  const employee=insertRow(f.db,'employees',{name:'New synthetic',mobile_no:EMPLOYEE_PHONE,whatsapp_notifications_enabled:true});
-  insertRow(f.db,'documents',{title:'New synthetic',employee_id:employee.id,document_type_id:type.id,expiry_date:'2026-01-01'});
+  const type=insertRow(f.db, { workspaceId: 'ws_legacy' }, 'document_types',{name:'New synthetic'});
+  const employee=insertRow(f.db, { workspaceId: 'ws_legacy' }, 'employees',{name:'New synthetic',mobile_no:EMPLOYEE_PHONE,whatsapp_notifications_enabled:true});
+  insertRow(f.db, { workspaceId: 'ws_legacy' }, 'documents',{title:'New synthetic',employee_id:employee.id,document_type_id:type.id,expiry_date:'2026-01-01'});
  });
  assert.equal(await f.reminders.schedule(),0);assert.equal(await f.reminders.drain(),0);assert.equal(f.calls.length,2);
  await f.reminders.setEnabled(true);assert.equal(await f.reminders.schedule(),3);assert.equal(f.calls.length,2);
@@ -101,8 +101,8 @@ test('legacy opted-in mobile collisions cancel employee work but preserve explic
  await f.request('/api/employees/'+f.employee.id,{method:'PATCH',body:{whatsapp_notifications_enabled:true,residency_expiry_date:null}});
  await f.reminders.schedule();const first=f.db.prepare('SELECT id FROM whatsapp_jobs').get().id;
  await f.reminders.mutate(()=>{
-  const other=insertRow(f.db,'employees',{name:'Legacy synthetic',mobile_no:'00999 0000-0001',whatsapp_notifications_enabled:true,residency_expiry_date:'2026-01-01'});
-  insertRow(f.db,'documents',{title:'Legacy synthetic document',employee_id:other.id,document_type_id:f.type.id,expiry_date:'2026-01-01'});
+  const other=insertRow(f.db, { workspaceId: 'ws_legacy' }, 'employees',{name:'Legacy synthetic',mobile_no:'00999 0000-0001',whatsapp_notifications_enabled:true,residency_expiry_date:'2026-01-01'});
+  insertRow(f.db, { workspaceId: 'ws_legacy' }, 'documents',{title:'Legacy synthetic document',employee_id:other.id,document_type_id:f.type.id,expiry_date:'2026-01-01'});
  });
  assert.equal(f.db.prepare('SELECT state FROM whatsapp_jobs WHERE id=?').get(first).state,'cancelled');
  assert.equal(await f.reminders.drain(),0);assert.equal(f.calls.length,0);
@@ -115,11 +115,11 @@ test('legacy opted-in mobile collisions cancel employee work but preserve explic
 test('disconnected already-enabled settings save succeeds; false-to-true still refuses atomically',()=>reminderApi(async f=>{
  const {getBoolean}=await import('../server/repositories/settings.ts');
  assert.equal((await f.request('/api/settings',{method:'PUT',body:{settings:{'whatsapp.enabled':true,'cron.include_documents':false}}})).status,200);
- assert.equal(getBoolean(f.db,'cron.include_documents'),false);
+ assert.equal(getBoolean(f.db, { workspaceId: 'ws_legacy' }, 'cron.include_documents'),false);
  assert.equal((await f.request('/api/settings',{method:'PUT',body:{settings:{'whatsapp.enabled':false}}})).status,200);
  const rejected=await f.request('/api/settings',{method:'PUT',body:{settings:{'whatsapp.enabled':true,'cron.include_documents':true}}});
  assert.equal(rejected.status,409);assert.equal(rejected.json.error.code,'whatsapp_not_connected');
- assert.equal(getBoolean(f.db,'whatsapp.enabled'),false);assert.equal(getBoolean(f.db,'cron.include_documents'),false);
+ assert.equal(getBoolean(f.db, { workspaceId: 'ws_legacy' }, 'whatsapp.enabled'),false);assert.equal(getBoolean(f.db, { workspaceId: 'ws_legacy' }, 'cron.include_documents'),false);
  assert.equal(f.calls.length,0);assert.equal(f.db.prepare('SELECT count(*) n FROM whatsapp_jobs').get().n,0);
 },{status:async()=>({configured:true,state:'disconnected'}),sendText:async()=>{throw Error('Unexpected synthetic send');}}));
 
@@ -171,9 +171,9 @@ test('log retry availability matches queue capacity for permanent requeue but no
  const claim=f.reminders.store.claim(f.reminders.store.due()[0].id);
  f.reminders.store.finish(claim.job,claim.attemptId,{kind:'permanent_failed',code:'provider_unauthorized'});
  // Fill with valid business recipients so the real retry reconciliation retains them.
- const insert=f.db.prepare("INSERT INTO whatsapp_recipients(id,label,phone,enabled,created_at,updated_at) VALUES(?,?,?,1,'2026-01-01','2026-01-01')");
+ const insert=f.db.prepare("INSERT INTO whatsapp_recipients(id,workspace_id,label,phone,enabled,created_at,updated_at) VALUES(?,'ws_legacy',?,?,1,'2026-01-01','2026-01-01')");
  for(let n=0;n<2000;n++)insert.run('synthetic-'+n,'Synthetic '+n,'+999'+String(n+10).padStart(8,'0'));
- f.reminders.store.enqueue(selectReminders(f.db,'romani',f.clock.now));
+ f.reminders.store.enqueue(selectReminders(f.db, { workspaceId: 'ws_legacy' },'romani',f.clock.now));
  const queued=f.reminders.store.due()[0],retry=f.reminders.store.claim(queued.id);
  f.reminders.store.finish(retry.job,retry.attemptId,{kind:'retryable_failed',code:'provider_connection_failed'});
  const permanent=(await f.request('/api/whatsapp/log?state=permanent_failed')).json.data.items[0];
@@ -239,7 +239,7 @@ test('employee opt-out/deletion and business erase cancel pending work; export r
 test('W5 real CronService selects WhatsApp when email is disabled or already completed',()=>reminderApi(async f=>{
  const {setSetting}=await import('../server/repositories/settings.ts');
  await f.request('/api/employees/'+f.employee.id,{method:'PATCH',body:{whatsapp_notifications_enabled:true,residency_expiry_date:null}});
- setSetting(f.db,'email.enabled',false);setSetting(f.db,'cron.last_run_date',new Date().toISOString().slice(0,10));
+ setSetting(f.db, { workspaceId: 'ws_legacy' }, 'email.enabled',false);setSetting(f.db, { workspaceId: 'ws_legacy' }, 'cron.last_run_date',new Date().toISOString().slice(0,10));
  assert.equal((await f.cron.run()).skipped,'already_run_today');assert.equal(f.reminders.store.due().length,1);assert.equal(await f.reminders.drain(),1);
  assert.equal(f.db.prepare('SELECT COUNT(*) n FROM email_log').get().n,0);
 }));
@@ -247,17 +247,18 @@ test('W5 real CronService selects WhatsApp when email is disabled or already com
 test('PR8 manual email report never enqueues WhatsApp or consumes its daily selection checkpoint',()=>reminderApi(async f=>{
  const {setSetting}=await import('../server/repositories/settings.ts');
  await f.request('/api/employees/'+f.employee.id,{method:'PATCH',body:{whatsapp_notifications_enabled:true,residency_expiry_date:null}});
- setSetting(f.db,'email.enabled',false);setSetting(f.db,'cron.enabled',false);
+ setSetting(f.db, { workspaceId: 'ws_legacy' }, 'email.enabled',false);setSetting(f.db, { workspaceId: 'ws_legacy' }, 'cron.enabled',false);
  const response=await f.request('/api/email/expiry-report',{method:'POST',body:{}});assert.equal(response.status,200);
  assert.equal(f.db.prepare('SELECT count(*) n FROM whatsapp_jobs').get().n,0);
- assert.equal(f.db.prepare("SELECT value FROM settings WHERE key='whatsapp.last_enqueue_date'").get(),undefined);assert.equal(f.calls.length,0);
- await f.cron.run('cron');assert.equal(f.reminders.store.due().length,1);
+ assert.equal(f.db.prepare("SELECT value FROM workspace_settings WHERE workspace_id='ws_legacy' AND key='whatsapp.last_enqueue_date'").get(),undefined);assert.equal(f.calls.length,0);
+ // A scheduled firing only happens while the reminder workspace's schedule is on (D9/D11).
+ setSetting(f.db, { workspaceId: 'ws_legacy' }, 'cron.enabled',true);await f.cron.run('cron');assert.equal(f.reminders.store.due().length,1);
 }));
 
 test('a real isolated cron timer enqueues reminders without changing production cadence',()=>reminderApi(async f=>{
  const {setSetting}=await import('../server/repositories/settings.ts');
  await f.request('/api/employees/'+f.employee.id,{method:'PATCH',body:{whatsapp_notifications_enabled:true,residency_expiry_date:null}});
- setSetting(f.db,'email.enabled',false);setSetting(f.db,'cron.schedule','* * * * * *');f.cron.reschedule();
+ setSetting(f.db, { workspaceId: 'ws_legacy' }, 'email.enabled',false);setSetting(f.db, { platform: true }, 'cron.schedule','* * * * * *');f.cron.reschedule();
  const deadline=Date.now()+3500;while(!f.reminders.store.due().length&&Date.now()<deadline)await new Promise(r=>setTimeout(r,50));
  f.cron.stop();assert.equal(f.reminders.store.due().length,1);assert.equal(f.calls.length,0);
 }));
@@ -265,10 +266,10 @@ test('a real isolated cron timer enqueues reminders without changing production 
 test('a scheduled firing still selects WhatsApp while a manual email report is in flight',()=>reminderApi(async f=>{
  const {CronService}=await import('../server/services/cronService.ts');const {setSetting}=await import('../server/repositories/settings.ts');
  await f.request('/api/employees/'+f.employee.id,{method:'PATCH',body:{whatsapp_notifications_enabled:true,residency_expiry_date:null}});
- setSetting(f.db,'email.enabled',true);setSetting(f.db,'email.recipients',['synthetic@example.invalid']);
+ setSetting(f.db, { workspaceId: 'ws_legacy' }, 'email.enabled',true);setSetting(f.db, { workspaceId: 'ws_legacy' }, 'email.recipients',['synthetic@example.invalid']);
  let release,entered;const blocked=new Promise(r=>release=r),started=new Promise(r=>entered=r);
  const cron=new CronService(f.db,{send:async()=>{entered();await blocked;return{status:'sent',accepted:['synthetic@example.invalid'],rejected:[],messageId:'synthetic-overlap'};}});
- cron.setReminderEnqueue(()=>f.reminders.schedule());const manual=cron.run('manual');
+ cron.setReminderEnqueue({ workspaceId: 'ws_legacy' },()=>f.reminders.schedule());const manual=cron.run('manual', { workspaceId: 'ws_legacy' });
  try{await started;assert.equal(f.reminders.store.due().length,0);
   assert.equal((await cron.run('cron')).skipped,'already_running');assert.equal(f.reminders.store.due().length,1);assert.equal(f.calls.length,0);
  }finally{release();await manual;cron.stop();}
@@ -278,7 +279,7 @@ test('a scheduled firing still selects WhatsApp while a manual email report is i
 test('W5 an email configuration failure cannot suppress a successful independent WhatsApp attempt',()=>reminderApi(async f=>{
  const {setSetting}=await import('../server/repositories/settings.ts');
  await f.request('/api/employees/'+f.employee.id,{method:'PATCH',body:{whatsapp_notifications_enabled:true,residency_expiry_date:null}});
- setSetting(f.db,'email.enabled',true);setSetting(f.db,'email.recipients',['synthetic@example.invalid']);
+ setSetting(f.db, { workspaceId: 'ws_legacy' }, 'email.enabled',true);setSetting(f.db, { workspaceId: 'ws_legacy' }, 'email.recipients',['synthetic@example.invalid']);
  const result=await f.cron.run();assert.equal(result.sent,false);assert.ok(result.error);
  assert.equal(f.db.prepare("SELECT count(*) n FROM email_log WHERE status='failed'").get().n,1);
  assert.equal(await f.reminders.drain(),1);assert.equal(f.calls.length,1);

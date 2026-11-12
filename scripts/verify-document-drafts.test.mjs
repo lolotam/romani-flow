@@ -222,7 +222,7 @@ const ref = (scope, revision) => ({ scope, revision, account: 'admin' });
 const fields = { title: 'Unfinished synthetic', beneficiary_type: 'employee', issue_date: '2028-02-29', expiry_date: '2029-01-01', notes: 'Private unfinished note' };
 
 test('draft API isolates accounts/contexts, validates metadata and keeps CAS tombstones after discard', () => reminderApi(async f => {
-  f.db.prepare("INSERT INTO admin_users(id,email,name,role,password_hash,created_at,updated_at) VALUES('admin2','admin2@example.invalid','Synthetic','admin','unused','x','x')").run();
+  f.db.prepare("INSERT INTO admin_users(workspace_id, id,email,name,role,password_hash,created_at,updated_at) VALUES('ws_legacy', 'admin2','admin2@example.invalid','Synthetic','admin','unused','x','x')").run();
   const a = transport(f), b = transport(f, 'admin2'), scope = 'employee:' + f.employee.id;
   assert.equal((await a(url(scope))).data.revision, 'none');
   const saved = await a(url(scope), { method: 'PUT', body: { revision: 'none', values: { ...fields, employee_id: f.employee.id } } });
@@ -251,15 +251,15 @@ test('document save clears the exact revision atomically; stale create/update pr
   const saved = await api(url(scope), { method: 'PUT', body: { revision: 'none', values: fields } });
   const newer = await api(url(scope), { method: 'PUT', body: { revision: saved.data.revision, values: { ...fields, notes: 'Newer device' } } });
   const file = await f.storage.save(Buffer.from('%PDF-1.4\nSynthetic draft attachment'), 'draft.pdf', 'application/pdf');
-  const staged = f.documents.registerUpload({ fileName: file.fileName, filePath: file.relativePath, fileSize: file.size, mimeType: file.mimeType });
+  const staged = f.documents.registerUpload({ workspaceId: 'ws_legacy' }, { fileName: file.fileName, filePath: file.relativePath, fileSize: file.size, mimeType: file.mimeType });
   const payload = { title: 'Synthetic completed', employee_id: f.employee.id, document_type_id: f.type.id, expiry_date: '2029-01-01', upload_id: staged.uploadId };
   const count = f.db.prepare('SELECT count(*) n FROM documents').get().n;
   assert.equal((await f.request('/api/documents', { method: 'POST', body: { ...payload, draft: ref(scope, saved.data.revision) } })).status, 409);
   assert.equal(f.db.prepare('SELECT count(*) n FROM documents').get().n, count);
-  assert.ok(f.documents.resolveUpload(staged.uploadId));
+  assert.ok(f.documents.resolveUpload({ workspaceId: 'ws_legacy' }, staged.uploadId));
   const result = await f.request('/api/documents', { method: 'POST', body: { ...payload, draft: ref(scope, newer.data.revision) } });
   assert.equal(result.status, 201); assert.equal((await api(url(scope))).data.values, null);
-  assert.equal(f.documents.resolveUpload(staged.uploadId), null);
+  assert.equal(f.documents.resolveUpload({ workspaceId: 'ws_legacy' }, staged.uploadId), null);
   assert.equal((await api(url(scope), { method: 'PUT', body: { revision: newer.data.revision, values: fields } })).error.code, 'draft_conflict');
   const id = result.json.data[0].id, editScope = 'edit:' + id;
   const edit = await api(url(editScope), { method: 'PUT', body: { revision: 'none', values: { notes: 'edit draft' } } });
@@ -351,7 +351,7 @@ for(const failure of ['second-file','registration']) test('staging rolls back al
  t.mock.method(f.storage,'save',async(...args)=>{if(failure==='second-file'&&paths.length)throw Error('Synthetic disk error');const stored=await original(...args);paths.push(stored.relativePath);return stored;});
  if(failure==='registration')f.db.exec("CREATE TRIGGER reject_pending BEFORE INSERT ON pending_uploads BEGIN SELECT RAISE(ABORT,'Synthetic registration error'); END;");
  const file={buffer:Buffer.from('synthetic'),originalname:'synthetic.pdf',mimetype:'application/pdf'};
- await assert.rejects(f.documents.stageUploads([file,file]));
+ await assert.rejects(f.documents.stageUploads({ workspaceId: 'ws_legacy' }, [file,file]),failure==='registration'?/Synthetic registration error/:/Synthetic disk error/);
  assert.equal(f.db.prepare('SELECT count(*) n FROM pending_uploads').get().n,0);
  assert.ok(paths.length);for(const path of paths)assert.equal(f.storage.exists(path),false);
 }));
@@ -362,14 +362,14 @@ for(const registrationFails of [false,true]) test('failed unlink keeps cleanup t
  const remove=t.mock.method(f.storage,'remove',async()=>{throw Error('Synthetic unlink failure');});
  if(registrationFails)f.db.exec("CREATE TRIGGER reject_pending BEFORE INSERT ON pending_uploads BEGIN SELECT RAISE(ABORT,'Original registration failure'); END;");
  const file={buffer:Buffer.from('synthetic'),originalname:'fixture.pdf',mimetype:'application/pdf'};
- await assert.rejects(f.documents.stageUploads([file,file]),registrationFails?/Original registration/:/Original staging/);
+ await assert.rejects(f.documents.stageUploads({ workspaceId: 'ws_legacy' }, [file,file]),registrationFails?/Original registration/:/Original staging/);
  assert.equal(f.db.prepare('SELECT count(*) n FROM upload_cleanup_queue').get().n,1);assert.equal(f.storage.exists(paths[0]),true);
  remove.mock.restore();await f.documents.purgeStaleUploads();
  assert.equal(f.db.prepare('SELECT count(*) n FROM upload_cleanup_queue').get().n,0);assert.equal(f.storage.exists(paths[0]),false);
 }));
 test('pending upload validation follows the current draft without reuploading and denies stale or viewer requests',()=>reminderApi(async f=>{
  const api=transport(f);let saved=await api(url('new'),{method:'PUT',body:{revision:'none',values:{title:'First'}}});
- const [upload]=await f.documents.stageUploads([{buffer:Buffer.from('synthetic'),originalname:'fixture.pdf',mimetype:'application/pdf'}]);
+ const [upload]=await f.documents.stageUploads({ workspaceId: 'ws_legacy' }, [{buffer:Buffer.from('synthetic'),originalname:'fixture.pdf',mimetype:'application/pdf'}]);
  const endpoint='/api/files/uploads/'+upload.uploadId+'/validate';const old=ref('new',saved.data.revision);
  saved=await api(url('new'),{method:'PUT',body:{revision:saved.data.revision,values:{title:'Corrected'}}});
  assert.equal((await f.request(endpoint,{method:'POST',body:{draft:old}})).status,409);
@@ -382,7 +382,7 @@ test('pending upload validation follows the current draft without reuploading an
 
 test('business erase retries queue-only files and retains failures until bytes are removed',t=>reminderApi(async f=>{
  const stored=await f.storage.save(Buffer.from('private synthetic'),'fixture.pdf','application/pdf');
- f.db.prepare('INSERT INTO upload_cleanup_queue(file_path,created_at) VALUES(?,?)').run(stored.relativePath,new Date().toISOString());
+ f.db.prepare('INSERT INTO upload_cleanup_queue(workspace_id, file_path,created_at) VALUES(\'ws_legacy\', ?,?)').run(stored.relativePath,new Date().toISOString());
  const remove=t.mock.method(f.storage,'remove',async()=>{throw Error('Synthetic unlink failure');});
  const failed=await f.request('/api/backup/erase',{method:'POST',body:{}});
  assert.equal(failed.status,200);assert.equal(failed.json.data.filesPendingCleanup,1);assert.equal(f.storage.exists(stored.relativePath),true);

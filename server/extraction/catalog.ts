@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import type { Db } from '../db/connection.js';
+import type { Scope } from '../repositories/base.js';
 import type { CatalogEntry, Catalogs } from '../contracts/documentExtraction.js';
 
 /**
@@ -13,10 +14,10 @@ import type { CatalogEntry, Catalogs } from '../contracts/documentExtraction.js'
  */
 
 /** Reads the catalog rows in a deterministic order. */
-function readEntries(db: Db, table: 'document_types' | 'ministries'): CatalogEntry[] {
+function readEntries(db: Db, scope: Scope, table: 'document_types' | 'ministries'): CatalogEntry[] {
   const rows = db
-    .prepare(`SELECT id, name, name_ar FROM ${table} ORDER BY id ASC`)
-    .all() as unknown as CatalogEntry[];
+    .prepare(`SELECT id, name, name_ar FROM ${table} WHERE workspace_id = ? ORDER BY id ASC`)
+    .all(scope.workspaceId) as unknown as CatalogEntry[];
   return rows.map(row => ({
     id: String(row.id),
     name: String(row.name ?? ''),
@@ -40,9 +41,9 @@ function normalize(entries: CatalogEntry[]): unknown {
  * whenever a type or a ministry is added, renamed or removed, and it never
  * changes for a request that repeats the same catalogs.
  */
-export function readCatalogs(db: Db): Catalogs {
-  const types = readEntries(db, 'document_types');
-  const ministries = readEntries(db, 'ministries');
+export function readCatalogs(db: Db, scope: Scope): Catalogs {
+  const types = readEntries(db, scope, 'document_types');
+  const ministries = readEntries(db, scope, 'ministries');
   const version = createHash('sha256')
     .update(JSON.stringify({ types: normalize(types), ministries: normalize(ministries) }))
     .digest('hex');

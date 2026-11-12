@@ -60,41 +60,41 @@ export async function extractionApi(run, options = {}) {
   // Seed standard admin and viewer users
   for (const role of ['admin', 'viewer']) {
     db.prepare(
-      "INSERT INTO admin_users(id, email, name, role, password_hash, created_at, updated_at) VALUES(?, ?, ?, ?, ?, '2026-01-01', '2026-01-01')"
+      "INSERT INTO admin_users(workspace_id, id, email, name, role, password_hash, created_at, updated_at) VALUES('ws_legacy', ?, ?, ?, ?, ?, '2026-01-01', '2026-01-01')"
     ).run(role, `${role}@example.invalid`, `Synthetic ${role}`, role, 'not-a-login-fixture');
   }
 
   // Seed baseline company, document draft scope and catalogs
-  const company = insertRow(db, 'companies', { name: 'Synthetic Company', name_ar: 'شركة اختبار' });
-  insertRow(db, 'document_types', { id: 'type-civil-id', name: 'Civil ID', name_ar: 'البطاقة المدنية' });
-  insertRow(db, 'ministries', { id: 'min-moi', name: 'Ministry of Interior', name_ar: 'وزارة الداخلية' });
+  const company = insertRow(db, { workspaceId: 'ws_legacy' }, 'companies', { name: 'Synthetic Company', name_ar: 'شركة اختبار' });
+  insertRow(db, { workspaceId: 'ws_legacy' }, 'document_types', { id: 'type-civil-id', name: 'Civil ID', name_ar: 'البطاقة المدنية' });
+  insertRow(db, { workspaceId: 'ws_legacy' }, 'ministries', { id: 'min-moi', name: 'Ministry of Interior', name_ar: 'وزارة الداخلية' });
 
   const validScope = `company:${company.id}`;
   const seedDraftScope = (userId, scope = validScope, revision = globalThis.crypto.randomUUID()) => {
     db.prepare(
-      "INSERT OR REPLACE INTO document_drafts(user_id, scope, revision, values_json, updated_at) VALUES(?, ?, ?, ?, ?)"
+      "INSERT OR REPLACE INTO document_drafts(workspace_id, user_id, scope, revision, values_json, updated_at) VALUES('ws_legacy', ?, ?, ?, ?, ?)"
     ).run(userId, scope, revision, JSON.stringify({}), '2026-01-01T00:00:00.000Z');
   };
   seedDraftScope('admin', validScope);
 
   const seedUser = (id, role = 'admin') => {
     db.prepare(
-      "INSERT OR REPLACE INTO admin_users(id, email, name, role, password_hash, created_at, updated_at) VALUES(?, ?, ?, ?, ?, '2026-01-01', '2026-01-01')"
+      "INSERT OR REPLACE INTO admin_users(workspace_id, id, email, name, role, password_hash, created_at, updated_at) VALUES('ws_legacy', ?, ?, ?, ?, ?, '2026-01-01', '2026-01-01')"
     ).run(id, `${id}@example.invalid`, `Synthetic ${id}`, role, 'hash');
     seedDraftScope(id, validScope);
   };
 
   // Disable external notification transports
-  setSetting(db, 'whatsapp.enabled', false);
-  setSetting(db, 'email.enabled', false);
+  setSetting(db, { workspaceId: 'ws_legacy' }, 'whatsapp.enabled', false);
+  setSetting(db, { workspaceId: 'ws_legacy' }, 'email.enabled', false);
 
   // Seed extraction settings
   const enabled = options.enabled ?? false;
   const provider = options.provider ?? (enabled ? 'openrouter' : '');
   const model = options.model ?? (enabled ? (provider === 'groq' ? MOCK_GROQ_MODEL_ID : MOCK_MODEL_ID) : '');
-  setSetting(db, 'ai_extraction.enabled', enabled);
-  setSetting(db, 'ai_extraction.provider', provider);
-  setSetting(db, 'ai_extraction.model', model);
+  setSetting(db, { workspaceId: 'ws_legacy' }, 'ai_extraction.enabled', enabled);
+  setSetting(db, { workspaceId: 'ws_legacy' }, 'ai_extraction.provider', provider);
+  setSetting(db, { workspaceId: 'ws_legacy' }, 'ai_extraction.model', model);
 
   // Set up explicit extraction config (never trust default process.env)
   const context = options.context ?? 'kw-docs';
@@ -503,8 +503,8 @@ export async function extractionApi(run, options = {}) {
     requestId: '12345678-1234-4234-8234-123456789abc',
     scope: validScope,
     context: config.extraction.context,
-    settingsVersion: settingsVersion(db, config),
-    catalogVersion: readCatalogs(db).version,
+    settingsVersion: settingsVersion(db, { workspaceId: 'ws_legacy' }, config),
+    catalogVersion: readCatalogs(db, { workspaceId: 'ws_legacy' }).version,
     pageCount: 1,
     images: [{ page: 1, mime: 'image/png', base64: VALID_PNG_BASE64 }],
   };

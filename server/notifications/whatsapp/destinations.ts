@@ -1,4 +1,5 @@
 import type { Db } from '../../db/connection.js';
+import type { Scope } from '../../repositories/base.js';
 import { sameReminderItem, type ReminderCandidate } from './contracts.js';
 import { normalizeWhatsAppPhone } from './phone.js';
 import { optedPhoneCounts } from './employeePolicy.js';
@@ -8,15 +9,16 @@ export type DestinationSnapshot = Map<string, Destination>;
 export interface DestinationReplacement { previous: ReminderCandidate; current: ReminderCandidate }
 
 /** Source IDs distinguish a changed number from a newly added audience. */
-export function snapshotDestinations(db: Db, candidates: ReminderCandidate[]): DestinationSnapshot {
+export function snapshotDestinations(db: Db, tenant: Scope, candidates: ReminderCandidate[]): DestinationSnapshot {
+  const ws = tenant.workspaceId;
   const sources: DestinationSnapshot = new Map();
   const managers = new Map<string, string>();
-  for (const row of db.prepare('SELECT id,phone FROM whatsapp_recipients').all()) {
+  for (const row of db.prepare('SELECT id,phone FROM whatsapp_recipients WHERE workspace_id=?').all(ws)) {
     const source = `management:${row.id}`;
     sources.set(source, { phone: String(row.phone), candidates: [] });
     managers.set(String(row.phone), source);
   }
-  const employees = db.prepare('SELECT id,mobile_no,is_active,whatsapp_notifications_enabled FROM employees').all();
+  const employees = db.prepare('SELECT id,mobile_no,is_active,whatsapp_notifications_enabled FROM employees WHERE workspace_id=?').all(ws);
   const counts = optedPhoneCounts(employees);
   const eligible = new Set<string>();
   for (const row of employees) {
@@ -24,7 +26,7 @@ export function snapshotDestinations(db: Db, candidates: ReminderCandidate[]): D
     const phone = normalizeWhatsAppPhone(row.mobile_no);
     if (row.is_active === 1 && row.whatsapp_notifications_enabled === 1 && phone && counts.get(phone) === 1) eligible.add(`employee:${row.id}`);
   }
-  const owners = new Map(db.prepare('SELECT id,employee_id FROM documents').all().map(row => [String(row.id), String(row.employee_id)]));
+  const owners = new Map(db.prepare('SELECT id,employee_id FROM documents WHERE workspace_id=?').all(ws).map(row => [String(row.id), String(row.employee_id)]));
   for (const candidate of candidates) {
     const source = candidate.audience === 'management' ? managers.get(candidate.recipient)
       : `employee:${candidate.item_type === 'employee_residency' ? candidate.item_id : owners.get(candidate.item_id)}`;

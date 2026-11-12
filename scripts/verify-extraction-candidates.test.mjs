@@ -47,7 +47,7 @@ function assertSanitizedEnvelope(res, expectedReason, f) {
 }
 
 function getAllSettings(db) {
-  return db.prepare('SELECT key, value FROM settings ORDER BY key ASC').all();
+  return db.prepare("SELECT key, value FROM settings UNION ALL SELECT workspace_id || ':' || key, value FROM workspace_settings ORDER BY 1 ASC").all();
 }
 
 function getExtractionSettings(db) {
@@ -55,9 +55,9 @@ function getExtractionSettings(db) {
     try { return JSON.parse(raw); } catch { return raw; }
   };
   return {
-    enabled: parseVal(db.prepare("SELECT value FROM settings WHERE key='ai_extraction.enabled'").get()?.value),
-    provider: parseVal(db.prepare("SELECT value FROM settings WHERE key='ai_extraction.provider'").get()?.value),
-    model: parseVal(db.prepare("SELECT value FROM settings WHERE key='ai_extraction.model'").get()?.value),
+    enabled: parseVal(db.prepare("SELECT value FROM workspace_settings WHERE workspace_id='ws_legacy' AND key='ai_extraction.enabled'").get()?.value),
+    provider: parseVal(db.prepare("SELECT value FROM workspace_settings WHERE workspace_id='ws_legacy' AND key='ai_extraction.provider'").get()?.value),
+    model: parseVal(db.prepare("SELECT value FROM workspace_settings WHERE workspace_id='ws_legacy' AND key='ai_extraction.model'").get()?.value),
   };
 }
 
@@ -178,7 +178,7 @@ test('default disabled state yields offline OpenRouter candidate with zero calls
     assert.equal(res.json.data.candidates.length, 1);
     assertSanitizedCandidate(res.json.data.candidates[0], MOCK_MODEL_ID, 'openrouter', 1);
     assert.equal(f.calls.length, 0, 'Must make zero external transport calls');
-    assert.equal(f.db.prepare("SELECT value FROM settings WHERE key='ai_extraction.enabled'").get().value, 'false');
+    assert.equal(f.db.prepare("SELECT value FROM workspace_settings WHERE workspace_id='ws_legacy' AND key='ai_extraction.enabled'").get().value, 'false');
   }, { ...BASE_OR_OPTS, provider: 'openrouter' }));
 
 test('default disabled state yields offline Groq candidate with known capability and zero calls', () =>
@@ -188,7 +188,7 @@ test('default disabled state yields offline Groq candidate with known capability
     assert.equal(res.json.data.candidates.length, 1);
     assertSanitizedCandidate(res.json.data.candidates[0], MOCK_GROQ_MODEL_ID, 'groq', 3);
     assert.equal(f.calls.length, 0, 'Must make zero external transport calls');
-    assert.equal(f.db.prepare("SELECT value FROM settings WHERE key='ai_extraction.enabled'").get().value, 'false');
+    assert.equal(f.db.prepare("SELECT value FROM workspace_settings WHERE workspace_id='ws_legacy' AND key='ai_extraction.enabled'").get().value, 'false');
   }, {
     enabled: false, authorized: true, provider: 'groq', groqKey: 'mock-groq-key',
     groqFreeAccount: true, approvals: [makeMockGroqApproval()],
