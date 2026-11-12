@@ -28,7 +28,8 @@ export async function reminderApi(run,send,pairing={}){
  const request=async(url,{method='GET',body,role='admin',user=role,headers={}}={})=>{
   const cookie=role?{cookie:config.cookieName+'='+signSession(config,{id:user,name:'Synthetic',email:user+'@example.invalid',role})}:{};
   const res=await fetch(base+url,{method,headers:{...cookie,...(body!==undefined?{'content-type':'application/json'}:{}),...headers},body:body===undefined?undefined:JSON.stringify(body)});
-  return {status:res.status,json:await res.json()};
+  // File routes answer with bytes; only JSON bodies are parsed.
+  return {status:res.status,json:(res.headers.get('content-type')??'').includes('application/json')?await res.json():null};
  };
  try{await run({...f,reminders,calls,request,base,config,cron,documents,app,server,mailer,storage});}
  finally{await cron.shutdown();await reminders.stop();server.closeAllConnections();await new Promise(r=>server.close(r));f.close();if(!dir.startsWith(path.join(os.tmpdir(),'romani-wa-api-')))throw Error('Unsafe fixture cleanup');fs.rmSync(dir,{recursive:true,force:true});}

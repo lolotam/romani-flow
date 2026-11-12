@@ -27,7 +27,7 @@ Platform tables: `workspaces, settings, schema_migrations`.
 ## Slices (each one green before the next starts)
 
 **A. Schema and seam.** Users see no change.
-1. Write `010_workspaces.sql`: the `workspaces` table, the `ws_legacy` row (name "Romani", `legacy_claim_email` NULL until the owner provides it), the columns, the backfill, the NULL-guard triggers, `workspace_id`-leading indexes, `workspace_settings` with the tenant keys copied, and the `whatsapp_recipients` rebuild.
+1. Write `010_workspaces.sql`: the `workspaces` table, the `ws_legacy` row (name "Romani", `legacy_claim_email` NULL until the owner provides it), the columns, the backfill, the NULL-guard triggers, `workspace_id`-leading indexes, `workspace_settings` with the tenant keys moved out of `settings`, and the `whatsapp_recipients` rebuild.
 2. Migration test: it builds a database at 009 with synthetic rows in every tenant table, applies 010, and checks that every row is in `ws_legacy`, that a NULL insert is refused, that the 006/008 triggers still fire, and that integrity and foreign-key checks pass.
 3. Seam: `req.tenant` and `tenantOf(req)`. Extend the `reminderApi` fixture with workspaces A and B, each with an admin.
 

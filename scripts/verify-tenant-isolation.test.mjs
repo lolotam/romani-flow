@@ -85,6 +85,8 @@ test("B's interrupted report blocks only B, never the legacy workspace", t => wi
 
 test('B enabling its schedule never queues WhatsApp messages and cannot move the platform schedule', () => reminderApi(async f => {
   const b = addWorkspaceB(f);
+  // The legacy employee is eligible, so only the schedule gate keeps the instance quiet.
+  await f.request('/api/employees/' + f.employee.id, { method: 'PATCH', body: { whatsapp_notifications_enabled: true, residency_expiry_date: null } });
   setSetting(f.db, LEG, 'cron.enabled', false);
   const schedule = getString(f.db, { platform: true }, 'cron.schedule', '0 8 * * *');
 
@@ -98,6 +100,12 @@ test('B enabling its schedule never queues WhatsApp messages and cannot move the
   assert.equal(f.db.prepare('SELECT count(*) n FROM whatsapp_jobs').get().n, 0, 'the instance belongs to the legacy workspace, whose schedule is off');
   assert.equal(f.calls.length, 0);
   assert.equal(f.db.prepare('SELECT count(*) n FROM whatsapp_jobs WHERE item_id=?').get(b.document.id).n, 0);
+
+  // Control: the same firing selects the legacy reminder once legacy's own schedule is on.
+  setSetting(f.db, LEG, 'cron.enabled', true);
+  await f.cron.run();
+  assert.equal(f.reminders.store.due().length, 1);
+  assert.equal(f.db.prepare("SELECT count(*) n FROM whatsapp_jobs WHERE workspace_id <> 'ws_legacy'").get().n, 0);
 }));
 
 test("B's export contains only B's rows, accounts and settings", () => reminderApi(async f => {

@@ -34,6 +34,7 @@ jobs:
       - run: npm run test:email
       - run: npm run test:whatsapp-pairing
       - run: npm run test:whatsapp
+      - run: npm run test:workspace
       - run: npm run verify:api:local
   browser-gates:
     runs-on: ubuntu-latest

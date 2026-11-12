@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import path from 'node:path';
 import { reminderApi } from './fixtures/whatsapp-api.mjs';
 import { addWorkspaceB, asB, LEG } from './fixtures/workspace-b.mjs';
 import { setSetting } from '../server/repositories/settings.ts';
@@ -76,4 +77,50 @@ test('no read route reveals legacy rows, settings or logs to workspace B', () =>
   // The scan above would pass if B saw nothing at all; B must see its own rows, and the boundary holds both ways.
   assert.ok(JSON.stringify((await asB(f, '/api/documents')).json).includes(b.document.id), 'B lists its own document');
   assert.equal((await f.request(`/api/documents/${b.document.id}`)).status, 404, "legacy cannot reach B's document");
+}));
+
+/** Gives the legacy document and employee real files, so a 404 for B means scoping, not a missing file. */
+function plantLegacyFiles(f) {
+  const files = { document: '2026/01/legacy-route.pdf', photo: '2026/01/legacy-photo.png' };
+  for (const rel of Object.values(files)) { fs.mkdirSync(path.dirname(f.storage.resolve(rel)), { recursive: true }); fs.writeFileSync(f.storage.resolve(rel), '%PDF-1.4 synthetic'); }
+  f.db.prepare("UPDATE documents SET file_path=?,file_name='legacy-route.pdf',mime_type='application/pdf' WHERE id=?").run(files.document, f.document.id);
+  f.db.prepare("UPDATE employees SET photo_path=?,photo_mime_type='image/png' WHERE id=?").run(files.photo, f.employee.id);
+}
+
+test('legacy files open for their own workspace and stay hidden from B', () => reminderApi(async f => {
+  addWorkspaceB(f); plantLegacyFiles(f);
+  for (const url of [`/api/files/${f.document.id}`, `/api/files/${f.document.id}/download`, `/api/files/employees/${f.employee.id}/photo`]) {
+    assert.equal((await f.request(url)).status, 200, `legacy reads its own ${url}`);
+    assert.equal((await asB(f, url)).status, 404, `B cannot read ${url}`);
+  }
+}));
+
+test('no write route lets B change, delete or reference legacy rows', () => reminderApi(async f => {
+  const b = addWorkspaceB(f); plantLegacyFiles(f);
+  const legacyState = () => JSON.stringify(['companies', 'employees', 'documents', 'document_types']
+    .map(table => f.db.prepare(`SELECT * FROM "${table}" WHERE workspace_id='ws_legacy' ORDER BY id`).all()));
+  const before = legacyState();
+  const attempts = [
+    ['PATCH', `/api/documents/${f.document.id}`, { title: 'Changed by B' }],
+    ['DELETE', `/api/documents/${f.document.id}`],
+    ['PATCH', `/api/employees/${f.employee.id}`, { name: 'Changed by B' }],
+    ['DELETE', `/api/employees/${f.employee.id}`],
+    ['PATCH', `/api/companies/${f.company.id}`, { name: 'Changed by B' }],
+    ['DELETE', `/api/document-types/${f.type.id}`],
+    ['PUT', `/api/documents/${f.document.id}/file`, { upload_id: 'synthetic-upload' }],
+    ['POST', '/api/documents', { title: 'Points at legacy', employee_id: f.employee.id, document_type_id: f.type.id }],
+    ['POST', '/api/employees', { name: 'Points at legacy', company_id: f.company.id }],
+    ['PATCH', `/api/documents/${b.document.id}`, { employee_id: f.employee.id }],
+    ['POST', '/api/whatsapp/jobs/synthetic/retry', {}],
+  ];
+  for (const [method, url, body] of attempts) {
+    const response = await asB(f, url, { method, body });
+    assert.equal(response.status, 404, `${method} ${url} answered ${response.status}: ${JSON.stringify(response.json).slice(0, 160)}`);
+  }
+  assert.equal(legacyState(), before, 'legacy rows are unchanged');
+  assert.equal(f.db.prepare("SELECT count(*) n FROM documents WHERE workspace_id='ws_b' AND title='Points at legacy'").get().n, 0);
+  assert.equal(f.db.prepare("SELECT count(*) n FROM employees WHERE workspace_id='ws_b' AND name='Points at legacy'").get().n, 0);
+  assert.equal(f.db.prepare('SELECT employee_id FROM documents WHERE id=?').get(b.document.id).employee_id, b.employee.id);
+  // Control: the same write succeeds for the row's own workspace, so the 404s above are the boundary, not a guard on every write.
+  assert.equal((await f.request(`/api/companies/${f.company.id}`, { method: 'PATCH', body: { name: 'Legacy edit' } })).status, 200);
 }));
