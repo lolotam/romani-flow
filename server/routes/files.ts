@@ -56,8 +56,11 @@ export function createFilesRouter(
     res.json({ data: { upload_id: upload.uploadId }, error: null });
   }));
 
+  // Browsers send multipart filenames as raw UTF-8 bytes. Multer's latin1 default
+  // turned Arabic names into mojibake that reached disk, the database and email.
   const upload = multer({
     storage: multer.memoryStorage(),
+    defParamCharset: 'utf8',
     limits: { fileSize: config.maxUploadBytes, files: 20 },
     fileFilter: (_req, file, callback) => {
       if (config.allowedFileTypes.includes(file.mimetype)) {
@@ -72,6 +75,7 @@ export function createFilesRouter(
 
   const photoUpload = multer({
     storage: multer.memoryStorage(),
+    defParamCharset: 'utf8',
     limits: { fileSize: 5 * 1024 * 1024, files: 1 },
     fileFilter: (_req, file, callback) => {
       if (PHOTO_TYPES.has(file.mimetype)) {
