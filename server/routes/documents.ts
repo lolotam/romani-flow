@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import type { Db } from '../db/connection.js';
 import { asyncHandler } from '../middleware/errorHandler.js';
-import { requireAdmin, tenantOf } from '../middleware/auth.js';
+import { requireRole, tenantOf } from '../middleware/auth.js';
 import { parseListOptions } from '../http/query.js';
 import {
   findRow,
@@ -90,7 +90,7 @@ export function createDocumentsRouter(db: Db, documents: DocumentService): Route
 
   router.post(
     '/',
-    requireAdmin,
+    requireRole('editor'),
     asyncHandler(async (req, res) => {
       const payload = readPayload(req.body);
       assertWritable(payload);
@@ -133,7 +133,7 @@ export function createDocumentsRouter(db: Db, documents: DocumentService): Route
 
   router.patch(
     '/:id',
-    requireAdmin,
+    requireRole('editor'),
     asyncHandler(async (req, res) => {
       const payload = readPayload(req.body);
       assertWritable(payload);
@@ -162,7 +162,7 @@ export function createDocumentsRouter(db: Db, documents: DocumentService): Route
 
   router.delete(
     '/:id',
-    requireAdmin,
+    requireRole('editor'),
     asyncHandler(async (req, res) => {
       const deleted = await documents.deleteDocument(tenantOf(req), String(req.params.id));
       if (!deleted) {

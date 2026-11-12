@@ -77,7 +77,7 @@ test('upgrade migration applies 009, leaves existing rows with NULL, and repeat 
     )`).run();
 
     const result = runMigrations(db, migrationsDir);
-    assert.deepEqual(result.applied, ['009_document_number.sql', '010_workspaces.sql'], 'Only the migrations after 008 are applied on upgrade');
+    assert.deepEqual(result.applied, ['009_document_number.sql', '010_workspaces.sql', '011_clerk_identity.sql'], 'Only the migrations after 008 are applied on upgrade');
 
     const appliedVersions = db.prepare('SELECT version FROM schema_migrations WHERE version = ?').all('009');
     assert.equal(appliedVersions.length, 1, 'Migration 009 must be recorded in schema_migrations');

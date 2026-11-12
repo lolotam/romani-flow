@@ -22,11 +22,12 @@ export function listWorkspaceIds(db: Db): string[] {
 }
 
 /** Creates a workspace with its default settings and the generic starter catalog, all or nothing. */
-export function createWorkspace(db: Db, input: { id: string; name: string }): Workspace {
+export function createWorkspace(db: Db, input: { id: string; name: string; clerkOrgId?: string }): Workspace {
   const now = new Date().toISOString();
   const scope = { workspaceId: input.id };
   atomic(db, () => {
-    db.prepare('INSERT INTO workspaces (id, name, created_at, updated_at) VALUES (?, ?, ?, ?)').run(input.id, input.name, now, now);
+    db.prepare('INSERT INTO workspaces (id, name, clerk_org_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?)')
+      .run(input.id, input.name, input.clerkOrgId ?? null, now, now);
     ensureWorkspaceDefaults(db, scope);
     seedStarterCatalog(db, scope);
   });

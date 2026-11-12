@@ -12,7 +12,7 @@ import {
   type Scope,
 } from '../repositories/base.js';
 import { asyncHandler } from '../middleware/errorHandler.js';
-import { requireAdmin, tenantOf } from '../middleware/auth.js';
+import { requireRole, tenantOf } from '../middleware/auth.js';
 import { rememberSubmission } from '../repositories/formDefaults.js';
 import { atomic } from '../notifications/whatsapp/repository.js';
 
@@ -95,7 +95,7 @@ export function createResourceRouter(
 
   router.post(
     '/',
-    requireAdmin,
+    requireRole('editor'),
     asyncHandler(async (req, res) => write(async () => {
       const payload = readPayload(req);
       const records = Array.isArray(payload) ? payload : [payload];
@@ -141,7 +141,7 @@ export function createResourceRouter(
 
   router.patch(
     '/:id',
-    requireAdmin,
+    requireRole('editor'),
     asyncHandler(async (req, res) => write(async () => {
       const payload = readPayload(req);
       assertNoManagedFields(payload, options.managedFields ?? [], tableName);
@@ -174,7 +174,7 @@ export function createResourceRouter(
 
   router.delete(
     '/:id',
-    requireAdmin,
+    requireRole('editor'),
     asyncHandler(async (req, res) => write(async () => {
       const id = String(req.params.id);
       const scope = tenantOf(req);

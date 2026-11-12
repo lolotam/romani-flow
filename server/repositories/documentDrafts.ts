@@ -91,7 +91,7 @@ export function writeDraft(db: Db, tenant: Scope, userId: string, ref: DraftRefe
     throw new RepositoryError('Draft predates business erase. Reload before continuing.', 'draft_conflict', 409);
   }
   const changes = ref.revision.startsWith('none')
-    ? db.prepare('INSERT INTO document_drafts(workspace_id,user_id,scope,revision,values_json,updated_at) VALUES(?,?,?,?,?,?) ON CONFLICT(user_id,scope) DO NOTHING')
+    ? db.prepare('INSERT INTO document_drafts(workspace_id,user_id,scope,revision,values_json,updated_at) VALUES(?,?,?,?,?,?) ON CONFLICT(workspace_id,user_id,scope) DO NOTHING')
       .run(tenant.workspaceId, userId, ref.scope, revision, json, now).changes
     : db.prepare('UPDATE document_drafts SET revision=?,values_json=?,updated_at=? WHERE user_id=? AND scope=? AND revision=? AND workspace_id=?')
       .run(revision, json, now, userId, ref.scope, ref.revision, tenant.workspaceId).changes;

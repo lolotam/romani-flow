@@ -51,7 +51,7 @@ test('010 moves every existing tenant row into the legacy workspace', () => {
   const db = databaseAt009();
   seedEveryTenantTable(db);
   const result = runMigrations(db, migrationsDir);
-  assert.deepEqual(result.applied, ['010_workspaces.sql']);
+  assert.deepEqual(result.applied, ['010_workspaces.sql', '011_clerk_identity.sql']);
 
   assert.deepEqual({ ...db.prepare("SELECT id, name FROM workspaces").get() }, { id: 'ws_legacy', name: 'Romani' });
   for (const table of TENANT_TABLES) {
@@ -114,4 +114,51 @@ test('the 006 and 008 deletion triggers still clear defaults and drafts after 01
   db.prepare("DELETE FROM employees WHERE id='e1'").run();
   assert.equal(db.prepare("SELECT count(*) n FROM form_defaults WHERE source_id='e1'").get().n, 0);
   assert.equal(db.prepare("SELECT values_json FROM document_drafts WHERE scope='employee:e1'").get().values_json, null);
+});
+
+
+test('011 adds Clerk users and idempotent webhook events without changing workspace links', () => {
+  const db = databaseAt009();
+  runMigrations(db, migrationsDir);
+
+  const userColumns = db.prepare('PRAGMA table_info(users)').all().map(column => column.name);
+  assert.deepEqual(userColumns, ['id', 'clerk_user_id', 'email', 'email_verified', 'name', 'deleted_at', 'created_at', 'last_seen_at']);
+  assert.deepEqual(db.prepare('PRAGMA table_info(clerk_webhook_events)').all().map(column => column.name), ['id', 'type', 'received_at']);
+  assert.ok(db.prepare("SELECT 1 FROM pragma_table_info('workspaces') WHERE name='clerk_org_id'").get());
+  const orgIndexes = db.prepare("SELECT name FROM pragma_index_list('workspaces') WHERE [unique]=1").all();
+  assert.ok(orgIndexes.some(index => db.prepare(`SELECT 1 FROM pragma_index_info('${index.name}') WHERE name='clerk_org_id'`).get()));
+
+  const insert = db.prepare("INSERT INTO users(id,clerk_user_id,email,created_at,last_seen_at) VALUES(?,?,?,?,?)");
+  insert.run('local-1', 'clerk-1', 'one@example.invalid', T, T);
+  assert.throws(() => insert.run('local-2', 'clerk-1', 'two@example.invalid', T, T), /UNIQUE/);
+  db.prepare("INSERT INTO clerk_webhook_events(id,type,received_at) VALUES('evt-1','user.created',?)").run(T);
+  assert.throws(() => db.prepare("INSERT INTO clerk_webhook_events(id,type,received_at) VALUES('evt-1','user.updated',?)").run(T), /UNIQUE/);
+
+  db.prepare("INSERT INTO form_defaults(workspace_id,user_id,form_key,source_id,values_json,updated_at) VALUES('ws_legacy','local-1','companies','c1','{}',?)").run(T);
+  db.prepare("INSERT INTO document_drafts(workspace_id,user_id,scope,revision,values_json,updated_at) VALUES('ws_legacy','local-1','new','r2','{}',?)").run(T);
+  db.prepare("INSERT INTO pending_uploads(workspace_id,id,file_name,file_path,file_size,mime_type,created_at,draft_user_id) VALUES('ws_legacy','pu2','f.pdf','ws_legacy/f.pdf',1,'application/pdf',?,'local-1')").run(T);
+  assert.equal(db.prepare('PRAGMA foreign_key_check').all().length, 0, 'legacy ownership rows survive and Clerk ownership ids are accepted');
+});
+
+
+test('011 keys drafts and form defaults by workspace, user and context', () => {
+  const db = databaseAt009();
+  runMigrations(db, migrationsDir);
+  db.prepare("INSERT INTO workspaces(id,name,created_at,updated_at) VALUES('ws_b','B',?,?)").run(T, T);
+
+  for (const [table, context] of [['form_defaults', 'form_key'], ['document_drafts', 'scope']]) {
+    const columns = db.prepare(`PRAGMA table_info(${table})`).all();
+    assert.equal(columns.find(column => column.name === 'workspace_id').notnull, 1, `${table}.workspace_id is required`);
+    const primaryKey = columns.filter(column => column.pk > 0).sort((a, b) => a.pk - b.pk).map(column => column.name);
+    assert.deepEqual(primaryKey, ['workspace_id', 'user_id', context]);
+  }
+
+  const defaultInsert = db.prepare("INSERT INTO form_defaults(workspace_id,user_id,form_key,source_id,values_json,updated_at) VALUES(?,'local-1','companies','c1',?,?)");
+  defaultInsert.run('ws_legacy', '{"name":"A"}', T);
+  defaultInsert.run('ws_b', '{"name":"B"}', T);
+  const draftInsert = db.prepare("INSERT INTO document_drafts(workspace_id,user_id,scope,revision,values_json,updated_at) VALUES(?,'local-1','new',?,?,?)");
+  draftInsert.run('ws_legacy', 'revision-a', '{"title":"A"}', T);
+  draftInsert.run('ws_b', 'revision-b', '{"title":"B"}', T);
+  assert.equal(db.prepare("SELECT values_json FROM form_defaults WHERE workspace_id='ws_legacy'").get().values_json, '{"name":"A"}');
+  assert.equal(db.prepare("SELECT values_json FROM document_drafts WHERE workspace_id='ws_legacy'").get().values_json, '{"title":"A"}');
 });

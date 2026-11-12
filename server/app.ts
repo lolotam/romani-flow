@@ -2,9 +2,14 @@ import path from 'node:path';
 import cookieParser from 'cookie-parser';
 import cronEngine from 'node-cron';
 import express, { type Express, type Request, type Response, type NextFunction } from 'express';
+import { clerkMiddleware } from '@clerk/express';
 import type { AppConfig } from './config.js';
 import type { Db } from './db/connection.js';
-import { requireAuth, requireAdmin, tenantOf } from './middleware/auth.js';
+import { requireAuth, requireAdmin, requireRole, tenantOf } from './middleware/auth.js';
+import { createClerkIdentityResolver } from './auth/clerkIdentity.js';
+import { isPlatformAdmin, requireSignedIn, requireWorkspace } from './auth/middleware.js';
+import type { IdentityResolver } from './auth/types.js';
+import { createClerkWebhookRouter } from './auth/webhook.js';
 import { asyncHandler, errorHandler, notFoundHandler } from './middleware/errorHandler.js';
 import { createAuthRouter } from './routes/auth.js';
 import { createBackupRouter } from './routes/backup.js';
@@ -55,6 +60,8 @@ export interface AppDependencies {
   extractionClock?: ExtractionClock;
   /** The injected image decoder. The native decoder stays the default. */
   decoderFactory?: DecoderFactory;
+  /** Clerk is the only auth boundary replaced by tests. */
+  identityResolver?: IdentityResolver;
 }
 
 export function createApp(deps: AppDependencies): Express {
@@ -63,6 +70,7 @@ export function createApp(deps: AppDependencies): Express {
   documents.configureNotifications({ coordinator: reminders.coordinator, changed: () => reminders.reconcile() });
   cron.setReminderEnqueue(reminders.scope, () => reminders.schedule());
   const app = express();
+  app.locals.identityResolver = deps.identityResolver ?? createClerkIdentityResolver();
 
   // One service per application. The transport is injected, so the pipeline
   // never reaches a provider by accident.
@@ -95,12 +103,25 @@ export function createApp(deps: AppDependencies): Express {
   // The cookie parser runs before the extraction route: the route needs the
   // session, and it brings its own body parser for the prepared document.
   app.use(cookieParser());
+  if (config.authProvider === 'clerk') {
+    app.use('/api', clerkMiddleware({
+      secretKey: config.clerkSecretKey ?? undefined,
+      publishableKey: config.clerkPublishableKey ?? undefined,
+    }));
+  }
+
+  const authenticated = config.authProvider === 'clerk' ? requireWorkspace(db) : requireAuth(config, db);
+  const signedIn = config.authProvider === 'clerk' ? requireSignedIn(db) : requireAuth(config, db);
+
+  if (config.authProvider === 'clerk') {
+    app.use('/api/webhooks/clerk', express.raw({ type: 'application/json', limit: '2mb' }), createClerkWebhookRouter(config, db));
+  }
 
   // The extraction route owns its body parser, so it is mounted before the
   // global parser: the global limit of two megabytes stays untouched.
   app.use(
     '/api/document-extraction',
-    requireAuth(config, db),
+    authenticated,
     requireAdmin,
     createDocumentExtractionRouter(config, db, extraction, deps.decoderFactory),
   );
@@ -113,9 +134,11 @@ export function createApp(deps: AppDependencies): Express {
   app.use('/api/health', createHealthRouter(db));
   app.use('/api/auth', createAuthRouter(config, db));
   app.use('/api/whatsapp/webhook', createPairingWebhook(config.whatsapp));
+  app.get('/api/platform/me', signedIn, (req, res) => {
+    res.json({ data: { isPlatformAdmin: isPlatformAdmin(config, req) }, error: null });
+  });
 
-  // Everything below requires a session.
-  const authenticated = requireAuth(config, db);
+  // Everything below requires a session and a tenant selected by the server.
   app.use('/api/whatsapp', authenticated, createPairingRouter(config.whatsapp, config.env, reminders));
   app.use('/api/whatsapp', authenticated, createReminderRouter(reminders, config.env));
   app.use('/api/form-defaults', authenticated, createFormDefaultsRouter(db));
@@ -186,7 +209,7 @@ export function createApp(deps: AppDependencies): Express {
   app.put(
     '/api/documents/:id/file',
     authenticated,
-    requireAdmin,
+    requireRole('editor'),
     asyncHandler(async (req, res) => {
       const uploadId = typeof req.body?.upload_id === 'string' ? req.body.upload_id : '';
       if (!uploadId) {
@@ -217,7 +240,7 @@ export function createApp(deps: AppDependencies): Express {
   app.delete(
     '/api/documents/:id/file',
     authenticated,
-    requireAdmin,
+    requireRole('editor'),
     asyncHandler(async (req, res) => {
       const updated = await documents.detachFile(tenantOf(req), String(req.params.id));
       if (!updated) {

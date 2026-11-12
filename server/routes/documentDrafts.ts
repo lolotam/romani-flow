@@ -1,15 +1,15 @@
 import { Router } from 'express';
 import type { Db } from '../db/connection.js';
-import { requireAdmin, tenantOf } from '../middleware/auth.js';
+import { requireRole, tenantOf } from '../middleware/auth.js';
 import { asyncHandler } from '../middleware/errorHandler.js';
 import type { NotificationCoordinator } from '../notifications/coordinator.js';
 import { draftReference, readDraft, validateDraftValues, writeDraft } from '../repositories/documentDrafts.js';
 import { RepositoryError } from '../repositories/base.js';
 
-/** Unsaved metadata is private to the current authenticated administrator. */
+/** Unsaved metadata is private to the current authenticated editor account. */
 export function createDocumentDraftsRouter(db: Db, coordinator: NotificationCoordinator): Router {
   const router = Router();
-  router.use(requireAdmin, (req, res, next) => {
+  router.use(requireRole('editor'), (req, res, next) => {
     res.setHeader('Cache-Control', 'no-store');
     if (req.get('x-draft-account') !== req.user!.id) { next(new RepositoryError('Draft account changed.', 'draft_conflict', 409)); return; }
     next();

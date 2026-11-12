@@ -11,7 +11,7 @@ import { addWorkspaceB, asB, B, LEG, plantLegacyFiles } from './fixtures/workspa
  * someone decides how B is kept out of it.
  */
 
-const WRITE_SOURCES = ['app.ts', ...fs.readdirSync('server/routes').map(file => 'routes/' + file), 'whatsapp/routes.ts', 'notifications/whatsapp/routes.ts'];
+const WRITE_SOURCES = ['app.ts', ...fs.readdirSync('server/routes').map(file => 'routes/' + file), 'whatsapp/routes.ts', 'notifications/whatsapp/routes.ts', 'auth/webhook.ts'];
 
 function writeHandlers() {
   const handlers = [];
@@ -35,6 +35,7 @@ const NO_FOREIGN_ROWS = {
   'routes/email.ts POST /expiry-report': 'Reports the caller\'s workspace only; the tick test proves the per-workspace report.',
   'routes/files.ts POST /upload': 'Stages new files into the caller\'s workspace; no row id.',
   'whatsapp/routes.ts POST /': 'Provider webhook without a session; carries no tenant rows.',
+  'auth/webhook.ts POST /': 'Verified Clerk synchronization is covered by signature, replay and suspension tests in verify-clerk-auth.',
   'notifications/whatsapp/routes.ts POST /recipients': 'Refused for B in verify-tenant-isolation.',
 };
 

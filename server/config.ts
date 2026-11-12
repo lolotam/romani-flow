@@ -10,6 +10,7 @@ import { readExtractionConfig, type ExtractionConfig } from './extraction/config
  */
 
 export type NodeEnv = 'development' | 'production' | 'test';
+export type AuthProvider = 'legacy' | 'clerk';
 
 export interface SmtpConfig {
   host: string;
@@ -30,6 +31,12 @@ export interface AppConfig {
   jwtSecret: string | null;
   jwtTtlSeconds: number;
   cookieName: string;
+  authProvider: AuthProvider;
+  /** Clerk secrets stay in this server-only config and are never sent to the SPA. */
+  clerkSecretKey: string | null;
+  clerkPublishableKey: string | null;
+  clerkWebhookSigningSecret: string | null;
+  platformAdminEmails: string[];
   smtp: SmtpConfig;
   whatsapp: PairingConfig;
   maxUploadBytes: number;
@@ -178,6 +185,11 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     jwtSecret: readOptionalString(env, 'JWT_SECRET'),
     jwtTtlSeconds: readInt(env, 'JWT_TTL_SECONDS', 12 * 60 * 60),
     cookieName: readString(env, 'SESSION_COOKIE_NAME', 'romani_session'),
+    authProvider: readString(env, 'AUTH_PROVIDER', 'legacy') as AuthProvider,
+    clerkSecretKey: readOptionalString(env, 'CLERK_SECRET_KEY'),
+    clerkPublishableKey: readOptionalString(env, 'CLERK_PUBLISHABLE_KEY'),
+    clerkWebhookSigningSecret: readOptionalString(env, 'CLERK_WEBHOOK_SIGNING_SECRET'),
+    platformAdminEmails: readList(env, 'PLATFORM_ADMIN_EMAILS', []).map(email => email.toLowerCase()),
     whatsapp: readPairingConfig(env),
     smtp: {
       host: readFirst(env, SMTP_HOST_KEYS, smtpUser || smtpPass || smtpFrom ? 'smtp.gmail.com' : ''),
@@ -217,14 +229,29 @@ export function validateConfig(config: AppConfig): void {
     }
   }
 
-  if (config.env === 'production' && !config.jwtSecret) {
-    problems.push('JWT_SECRET is required in production (set it in the Dokploy environment).');
+  if (config.authProvider !== 'legacy' && config.authProvider !== 'clerk') {
+    problems.push('AUTH_PROVIDER must be either legacy or clerk.');
   }
-  if (!config.jwtSecret && config.env !== 'production') {
-    problems.push('JWT_SECRET is not set — sessions cannot be signed. Set it even in development.');
+  if (config.authProvider === 'clerk') {
+    for (const [key, value] of Object.entries({
+      CLERK_SECRET_KEY: config.clerkSecretKey,
+      CLERK_PUBLISHABLE_KEY: config.clerkPublishableKey,
+      CLERK_WEBHOOK_SIGNING_SECRET: config.clerkWebhookSigningSecret,
+    })) {
+      if (!value) problems.push(`${key} is required when AUTH_PROVIDER=clerk.`);
+    }
   }
-  if (config.jwtSecret && config.jwtSecret.length < 32) {
-    problems.push('JWT_SECRET must be at least 32 characters long.');
+
+  if (config.authProvider === 'legacy') {
+    if (config.env === 'production' && !config.jwtSecret) {
+      problems.push('JWT_SECRET is required in production (set it in the Dokploy environment).');
+    }
+    if (!config.jwtSecret && config.env !== 'production') {
+      problems.push('JWT_SECRET is not set — sessions cannot be signed. Set it even in development.');
+    }
+    if (config.jwtSecret && config.jwtSecret.length < 32) {
+      problems.push('JWT_SECRET must be at least 32 characters long.');
+    }
   }
   if (!config.adminSeedEmails.every((email) => email.includes('@'))) {
     problems.push('ADMIN_SEED_EMAILS must be a comma-separated list of valid email addresses.');

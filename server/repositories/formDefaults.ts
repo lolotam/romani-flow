@@ -25,7 +25,7 @@ export function rememberSubmission(db: Db, scope: Scope, userId: string, formKey
   if (!supportsForm(formKey)) return;
   const values = Object.fromEntries(FIELDS[formKey].filter(key => key in row).map(key => [key, row[key]]));
   db.prepare(`INSERT INTO form_defaults (workspace_id, user_id, form_key, source_id, values_json, updated_at) VALUES (?, ?, ?, ?, ?, ?)
-    ON CONFLICT(user_id, form_key) DO UPDATE SET workspace_id=excluded.workspace_id, source_id=excluded.source_id,
+    ON CONFLICT(workspace_id, user_id, form_key) DO UPDATE SET source_id=excluded.source_id,
       values_json=excluded.values_json, updated_at=excluded.updated_at`)
     .run(scope.workspaceId, userId, formKey, String(row.id), JSON.stringify(values), new Date().toISOString());
 }

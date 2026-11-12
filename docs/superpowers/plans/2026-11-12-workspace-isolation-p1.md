@@ -53,3 +53,12 @@ Platform tables: `workspaces, settings, schema_migrations`.
 - The cron run lock is process-wide: while one workspace's report runs, a manual run in another workspace answers `already_running`.
 - The backup export's `settings` now holds only the caller's `workspace_settings` rows; platform settings are no longer exported. No restore consumes the file today.
 
+
+## P2a — Clerk server seam (behind `AUTH_PROVIDER`)
+
+- `AUTH_PROVIDER` is `legacy` by default, and legacy behaviour is unchanged. `clerk` requires `CLERK_SECRET_KEY`, `CLERK_PUBLISHABLE_KEY` and `CLERK_WEBHOOK_SIGNING_SECRET` at boot. `PLATFORM_ADMIN_EMAILS` is the platform admin allowlist (verified email only).
+- `requireWorkspace` (server/auth/middleware.ts) takes the place of `requireAuth`. The tenant comes from the Clerk organization's link in `workspaces.clerk_org_id`, never from the request. An unlinked organization first tries the legacy claim: a verified email equal to `legacy_claim_email` and `org:owner`, at most once. Otherwise it gets a new workspace with defaults and the generic catalog. Webhooks never provision or claim; they only rename, suspend and sync users, so an early `organization.created` cannot strand the legacy data.
+- Roles: viewer reads only, editor writes tenant data, owner also gets settings, backup, WhatsApp, email and AI extraction. Legacy `admin` counts as owner.
+- Migration 011 adds `users` and `clerk_webhook_events`, and rebuilds `form_defaults`, `document_drafts` and `pending_uploads` without the `admin_users` foreign keys. Drafts and form defaults are keyed by `(workspace_id, user_id, …)`, which completes the D4 key change, since one Clerk user can belong to several workspaces.
+- Proved by `scripts/verify-clerk-auth.test.mjs` (in `test:workspace`). Only Clerk is faked, and webhook payloads are signed with the real verifier.
+- Not yet done: the SPA sign-in (P2b) and removal of the old login (P2c, needs owner approval and the claim email O1).

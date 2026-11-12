@@ -4,6 +4,7 @@ import type { AppConfig } from '../config.js';
 import { findAdminById, type AdminUser } from '../repositories/adminUsers.js';
 import type { Scope } from '../repositories/base.js';
 import type { Db } from '../db/connection.js';
+import type { Identity } from '../auth/types.js';
 
 /** Re-exported so request-bound code can type its scope without a second import. */
 export type { Scope };
@@ -27,8 +28,10 @@ declare global {
   namespace Express {
     interface Request {
       user?: SessionUser;
-      /** Set by requireAuth from the database, never from the token or the request. */
+      /** Set by the selected auth middleware from the database, never from the request. */
       tenant?: Scope;
+      /** Present only for a Clerk-authenticated request; platform checks require its verified email. */
+      identity?: Identity;
       db?: Db;
     }
   }
@@ -124,16 +127,30 @@ export function tenantOf(req: Request): Scope {
   return req.tenant;
 }
 
-/** Restricts a route to administrator accounts. */
+export type WorkspaceRole = 'viewer' | 'editor' | 'owner';
+
+/** The legacy administrator sits at the owner level, so existing sessions keep their access. */
+const ROLE_RANK: Record<WorkspaceRole, number> = { viewer: 1, editor: 2, owner: 3 };
+
+export function requireRole(minimum: WorkspaceRole) {
+  const required = ROLE_RANK[minimum];
+  return (req: Request, res: Response, next: NextFunction): void => {
+    const role = req.user?.role === 'admin' ? 'owner' : req.user?.role;
+    const actual = ROLE_RANK[role as WorkspaceRole] ?? 0;
+    if (actual < required) {
+      res.status(403).json({
+        data: null,
+        error: { message: 'Administrator privileges are required.', code: 'forbidden' },
+      });
+      return;
+    }
+    next();
+  };
+}
+
+/** Restricts a route to owner accounts (legacy admin included). */
 export function requireAdmin(req: Request, res: Response, next: NextFunction): void {
-  if (req.user?.role !== 'admin') {
-    res.status(403).json({
-      data: null,
-      error: { message: 'Administrator privileges are required.', code: 'forbidden' },
-    });
-    return;
-  }
-  next();
+  requireRole('owner')(req, res, next);
 }
 
 export function toSessionUser(admin: AdminUser): SessionUser {

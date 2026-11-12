@@ -2,7 +2,7 @@ import { Router } from 'express';
 import multer from 'multer';
 import type { AppConfig } from '../config.js';
 import type { Db } from '../db/connection.js';
-import { requireAdmin, tenantOf } from '../middleware/auth.js';
+import { requireRole, tenantOf } from '../middleware/auth.js';
 import { asyncHandler } from '../middleware/errorHandler.js';
 import { findRow } from '../repositories/base.js';
 import { assertCurrentDraft, draftReference } from '../repositories/documentDrafts.js';
@@ -40,7 +40,7 @@ export function createFilesRouter(
 ): Router {
   const router = Router();
 
-  router.delete('/uploads/:uploadId', requireAdmin, asyncHandler(async (req, res) => {
+  router.delete('/uploads/:uploadId', requireRole('editor'), asyncHandler(async (req, res) => {
     res.setHeader('Cache-Control', 'no-store');
     const ref = draftReference(req.body?.draft);
     const result = await documents.abandonStagedUpload(tenantOf(req), String(req.params.uploadId), { userId: req.user!.id, scope: ref.scope },
@@ -48,7 +48,7 @@ export function createFilesRouter(
     res.json({ data: result, error: null });
   }));
 
-  router.post('/uploads/:uploadId/validate', requireAdmin, asyncHandler(async (req, res) => {
+  router.post('/uploads/:uploadId/validate', requireRole('editor'), asyncHandler(async (req, res) => {
     res.setHeader('Cache-Control', 'no-store');
     const ref = draftReference(req.body?.draft);
     const upload = await documents.validateStagedUpload(tenantOf(req), String(req.params.uploadId), () => assertCurrentDraft(db, tenantOf(req), req.user!.id, ref),
@@ -90,7 +90,7 @@ export function createFilesRouter(
 
   router.post(
     '/upload',
-    requireAdmin,
+    requireRole('editor'),
     upload.any(),
     asyncHandler(async (req, res) => {
       const files = (req.files as Express.Multer.File[] | undefined) ?? [];
@@ -194,7 +194,7 @@ export function createFilesRouter(
   // Employee photo: staged, claimed, and served through the same protected path.
   router.put(
     '/employees/:employeeId/photo',
-    requireAdmin,
+    requireRole('editor'),
     photoUpload.any(),
     asyncHandler(async (req, res) => {
       const employeeId = String(req.params.employeeId);
@@ -265,7 +265,7 @@ export function createFilesRouter(
 
   router.delete(
     '/employees/:employeeId/photo',
-    requireAdmin,
+    requireRole('editor'),
     asyncHandler(async (req, res) => {
       const employeeId = String(req.params.employeeId);
       const employee = findRow(db, tenantOf(req), 'employees', employeeId, []);

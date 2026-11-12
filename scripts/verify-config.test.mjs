@@ -1,4 +1,4 @@
-﻿import assert from 'node:assert/strict';
+import assert from 'node:assert/strict';
 import test from 'node:test';
 import { randomBytes } from 'node:crypto';
 import { loadConfig, validateConfig, isSmtpConfigured } from '../server/config.ts';
@@ -31,4 +31,32 @@ test('aliases undergo the same validation', () => {
   const config = loadConfig({ ...base, MAIL_USER: mail.SMTP_USER, MAIL_PASS: mail.SMTP_PASS, MAIL_FROM: mail.SMTP_FROM });
   assert.doesNotThrow(() => validateConfig(config));
   assert.equal(isSmtpConfigured(config), true);
+});
+
+test('legacy remains the default auth provider', () => {
+  assert.equal(loadConfig(base).authProvider, 'legacy');
+});
+
+const clerk = {
+  AUTH_PROVIDER: 'clerk',
+  CLERK_SECRET_KEY: 'sk_test_synthetic',
+  CLERK_PUBLISHABLE_KEY: 'pk_test_synthetic',
+  CLERK_WEBHOOK_SIGNING_SECRET: 'whsec_c3ludGhldGlj',
+};
+for (const missing of ['CLERK_SECRET_KEY', 'CLERK_PUBLISHABLE_KEY', 'CLERK_WEBHOOK_SIGNING_SECRET']) {
+  test(`clerk config fails fast when ${missing} is missing`, () => {
+    const env = { ...base, ...clerk };
+    delete env[missing];
+    assert.throws(() => validateConfig(loadConfig(env)), error => {
+      assert.match(error.message, new RegExp(missing));
+      assert.equal(error.message.includes('synthetic'), false, 'the error never includes a key value');
+      return true;
+    });
+  });
+}
+test('clerk config validates and normalizes the platform admin allowlist', () => {
+  const config = loadConfig({ ...base, ...clerk, PLATFORM_ADMIN_EMAILS: ' Owner@Example.com , second@example.com ' });
+  assert.doesNotThrow(() => validateConfig(config));
+  assert.deepEqual(config.platformAdminEmails, ['owner@example.com', 'second@example.com']);
+  assert.deepEqual(loadConfig({ ...base, PLATFORM_ADMIN_EMAILS: ' , ' }).platformAdminEmails, []);
 });

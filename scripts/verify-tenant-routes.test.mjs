@@ -18,6 +18,8 @@ const NO_TENANT_DATA = {
   '/api/auth': 'Sign-in and the caller\'s own identity; the account row yields the workspace.',
   '/api/health': 'Liveness and database reachability only.',
   '/api/whatsapp/webhook': 'Provider callback without a session; it carries no tenant rows.',
+  '/api/webhooks/clerk': 'Verified identity and organization synchronization; never returns tenant rows.',
+  '/api/platform/me': 'Returns only the caller\'s platform-admin boolean, never tenant data.',
   '/api/cron/schedule': 'A write; its platform gate is proved in verify-tenant-isolation.',
   '/api/documents/:id/file': 'A write; the record is looked up through the caller\'s scope first.',
 };

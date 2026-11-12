@@ -282,18 +282,22 @@ export function settingsVersion(db: Db, scope: Scope, config: { extraction: Extr
 }
 
 /**
- * Reports whether the account is still an active administrator.
+ * Re-reads account authority before an outbound extraction call.
  *
- * The role is read from the server on every check, so a revoked role stops
- * the request even when the request was admitted with it.
+ * Legacy roles are checked directly. Clerk's owner role is enforced by the
+ * authenticated route mount; the local user row still proves the account has
+ * not been deleted while a provider call is in flight.
  */
 export function assertAdmin(db: Db, userId: string): void {
   const row = db
     .prepare('SELECT role FROM admin_users WHERE id = ? AND is_active = 1')
     .get(userId) as { role?: string } | undefined;
-  if (!row || row.role !== 'admin') {
-    throw new ExtractionError('forbidden', 403, 'Administrator privileges are required.');
+  if (row?.role === 'admin') return;
+  if (!row) {
+    const clerkUser = db.prepare('SELECT id FROM users WHERE id = ? AND deleted_at IS NULL').get(userId);
+    if (clerkUser) return;
   }
+  throw new ExtractionError('forbidden', 403, 'Administrator privileges are required.');
 }
 
 /**
