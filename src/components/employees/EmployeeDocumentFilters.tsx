@@ -6,6 +6,8 @@ import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Trash2 } from 'lucide-react';
 import type { DocumentType } from '@/types';
+import { useAuth } from '@/hooks/useAuth';
+import { canEdit } from '@/lib/permissions';
 
 export interface EmployeeDocumentFiltersProps {
   searchTerm: string;
@@ -37,6 +39,7 @@ export function EmployeeDocumentFilters({
   onBulkDelete,
   onClearSelection,
 }: EmployeeDocumentFiltersProps) {
+  const editable = canEdit(useAuth().user?.role);
   return (
     <>
       {/* Filters */}
@@ -97,10 +100,10 @@ export function EmployeeDocumentFilters({
           className="flex items-center gap-2 p-4 bg-primary/10 rounded-lg"
         >
           <span className="text-sm font-medium">تم تحديد {selectedCount} وثيقة</span>
-          <Button onClick={onBulkDelete} variant="destructive" size="sm">
+          {editable && <Button onClick={onBulkDelete} variant="destructive" size="sm">
             <Trash2 className="h-4 w-4 ml-2" />
             حذف المحددة
-          </Button>
+          </Button>}
           <Button onClick={onClearSelection} variant="outline" size="sm">
             إلغاء التحديد
           </Button>

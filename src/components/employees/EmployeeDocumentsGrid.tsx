@@ -6,6 +6,8 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { StatusBadge } from '@/components/ui/StatusBadge';
 import { Download, FileText, Trash2 } from 'lucide-react';
 import type { DocumentWithRelations } from '@/types';
+import { useAuth } from '@/hooks/useAuth';
+import { canEdit } from '@/lib/permissions';
 
 export interface EmployeeDocumentsGridProps {
   documents: DocumentWithRelations[];
@@ -23,6 +25,7 @@ export function EmployeeDocumentsGrid({
   onDownload,
   onDelete,
 }: EmployeeDocumentsGridProps) {
+  const editable = canEdit(useAuth().user?.role);
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
       {documents.map((document, index) => (
@@ -94,13 +97,13 @@ export function EmployeeDocumentsGrid({
                     تنزيل
                   </Button>
                 )}
-                <Button
+                {editable && <Button
                   onClick={() => onDelete(document.id)}
                   variant="destructive"
                   size="sm"
                 >
                   <Trash2 className="h-4 w-4" />
-                </Button>
+                </Button>}
               </div>
             </CardContent>
           </Card>

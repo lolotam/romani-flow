@@ -11,6 +11,8 @@ import {
   calculateExpiryStatus,
   formatDateForDisplay,
 } from '@/components/employees/employeeHelpers';
+import { useAuth } from '@/hooks/useAuth';
+import { canEdit } from '@/lib/permissions';
 
 export interface EmployeeViewDialogProps {
   employee: EmployeeWithRelations;
@@ -34,6 +36,7 @@ export function EmployeeViewDialogContent({
   onClose,
 }: EmployeeViewDialogProps) {
   const { t, language } = useLanguage();
+  const editable = canEdit(useAuth().user?.role);
 
   return (
     <div className="space-y-6">
@@ -188,10 +191,10 @@ export function EmployeeViewDialogContent({
           <FileText className="h-4 w-4 ml-2" />
           {t('employees.profile.viewDocuments')}
         </Button>
-        <Button variant="outline" onClick={() => onEdit(employee)}>
+        {editable && <Button variant="outline" onClick={() => onEdit(employee)}>
           <Edit className="h-4 w-4 ml-2" />
           {t('employees.profile.editData')}
-        </Button>
+        </Button>}
         <Button variant="outline" onClick={onClose}>
           {t('employees.profile.close')}
         </Button>

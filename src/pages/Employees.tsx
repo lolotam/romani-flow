@@ -19,6 +19,8 @@ import { EmployeeViewDialogContent } from '@/components/employees/EmployeeViewDi
 import { EMPTY_EMPLOYEE_FORM } from '@/components/employees/employeeTypes';
 import type { EmployeeFormState } from '@/components/employees/employeeTypes';
 import { buildEmployeePayload, employeeSaveErrorKey, formatDateForInput, relationForCompany, toEmployeeFlags } from '@/components/employees/employeeHelpers';
+import { useAuth } from '@/hooks/useAuth';
+import { canEdit } from '@/lib/permissions';
 
 export default function Employees() {
   const [employees, setEmployees] = useState<EmployeeWithRelations[]>([]);
@@ -38,6 +40,7 @@ export default function Employees() {
   const { toast } = useToast();
   const { t } = useLanguage();
   const navigate = useNavigate();
+  const editable = canEdit(useAuth().user?.role);
 
   const handleSort = (field: SortField) => {
     if (sortField === field) {
@@ -349,7 +352,7 @@ export default function Employees() {
                 </DropdownMenuContent>
               </DropdownMenu>
 
-              <EmployeeFormDialog
+              {editable && <EmployeeFormDialog
                 mode="add"
                 open={isAddDialogOpen}
                 onOpenChange={setIsAddDialogOpen}
@@ -358,7 +361,7 @@ export default function Employees() {
                 companies={companies}
                 positions={positions}
                 onSubmit={handleAddEmployee}
-              />
+              />}
             </div>
           </div>
         </motion.div>
@@ -403,7 +406,7 @@ export default function Employees() {
         </motion.div>
 
         {/* Edit Dialog */}
-        <EmployeeFormDialog
+        {editable && <EmployeeFormDialog
           mode="edit"
           open={isEditDialogOpen}
           onOpenChange={setIsEditDialogOpen}
@@ -413,7 +416,7 @@ export default function Employees() {
           positions={positions}
           onSubmit={handleEditEmployee}
           documentCount={selectedEmployee?.document_count || 0}
-        />
+        />}
 
         {/* View Employee Dialog */}
         <Dialog open={isViewDialogOpen} onOpenChange={setIsViewDialogOpen}>

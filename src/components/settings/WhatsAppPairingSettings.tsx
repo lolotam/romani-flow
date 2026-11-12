@@ -6,10 +6,11 @@ import { useLanguage } from '@/contexts/LanguageContext';
 import { whatsappPairing, type WhatsAppPairingStatus } from '@/lib/api/whatsapp';
 import { CheckCircle2, LogOut, QrCode, RefreshCw } from 'lucide-react';
 import { isTransientPairingReadError, startPairingStatusPolling } from '@/lib/whatsappPairingPolling';
+import { isOwner } from '@/lib/permissions';
 
 /** Transient QR only. Never stores credentials, QR codes, chats or session data. */
 export default function WhatsAppPairingSettings({ onDisconnectSettled }: { onDisconnectSettled?: () => void }) {
-  const { user } = useAuth();
+  const { user, workspaceId } = useAuth();
   const { t, isRTL } = useLanguage();
   const [status, setStatus] = useState<WhatsAppPairingStatus | null>(null);
   const [qr, setQr] = useState<string | null>(null);
@@ -22,9 +23,12 @@ export default function WhatsAppPairingSettings({ onDisconnectSettled }: { onDis
   const requestBusy = useRef(false);
   const pollDeadline = useRef(0);
   const [pollingUntil, setPollingUntil] = useState(0);
+  const identity = `${workspaceId ?? ''}:${user?.id ?? ''}`;
+  const currentIdentity = useRef(identity);
+  currentIdentity.current = identity;
 
   const loadConnection = useCallback(async (action: 'status' | 'connect' | 'disconnect') => {
-    if (user?.role !== 'admin' || requestBusy.current) return;
+    if (!isOwner(user?.role) || requestBusy.current) return;
     requestBusy.current = true;
     const id = ++operation.current;
     setBusy(true);
@@ -45,7 +49,7 @@ export default function WhatsAppPairingSettings({ onDisconnectSettled }: { onDis
     };
     try {
       const result = action === 'connect' ? await whatsappPairing.connect() : action === 'disconnect' ? await whatsappPairing.disconnect() : await whatsappPairing.status();
-      if (!mounted.current || id !== operation.current) return;
+      if (!mounted.current || id !== operation.current || currentIdentity.current !== identity) return;
       if (result.error || !result.data) { failed(result.error); return; }
       setStatus({ configured: result.data.configured, state: result.data.state });
       if (result.data.configured && result.data.state === 'connecting') {
@@ -66,7 +70,7 @@ export default function WhatsAppPairingSettings({ onDisconnectSettled }: { onDis
         if (action === 'disconnect') onDisconnectSettled?.();
       }
     }
-  }, [user?.role, user?.id, onDisconnectSettled]);
+  }, [identity, user?.role, onDisconnectSettled]);
 
   useEffect(() => {
     mounted.current = true;
@@ -84,13 +88,13 @@ export default function WhatsAppPairingSettings({ onDisconnectSettled }: { onDis
   }, [qr]);
 
   useEffect(() => {
-    if (user?.role !== 'admin' || !pollingUntil) return;
+    if (!isOwner(user?.role) || !pollingUntil) return;
     const polling = startPairingStatusPolling(pollingUntil, () => { void loadConnection('status'); }, () => !document.hidden);
     document.addEventListener('visibilitychange', polling.check);
     return () => { polling.stop(); document.removeEventListener('visibilitychange', polling.check); };
   }, [pollingUntil, loadConnection, user?.role]);
 
-  if (user?.role !== 'admin') return null;
+  if (!isOwner(user?.role)) return null;
   const stateText = {
     unconfigured: t('settings.whatsapp.unconfigured'),
     disconnected: t('settings.whatsapp.disconnected'),

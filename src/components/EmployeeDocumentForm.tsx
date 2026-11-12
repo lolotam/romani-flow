@@ -18,6 +18,7 @@ import { useDocumentDraft } from '@/hooks/useDocumentDraft';
 import { draftValues, type DocumentDraftSession } from '@/lib/documentDraftSession';
 import { employeeDocumentDraft, nextDocumentFileTitle } from '@/lib/documentFormDrafts';
 import { useAuth } from '@/hooks/useAuth';
+import { isOwner } from '@/lib/permissions';
 import { DocumentDraftStatus } from './documents/DocumentDraftStatus';
 import { DocumentAttachmentPicker } from './documents/DocumentAttachmentPicker';
 import { useLastSubmissionRestore } from '@/hooks/useLastSubmission';
@@ -60,8 +61,9 @@ function EmployeeExtractionBridge({ stateRef, options, disabled }: {
 }
 
 export function EmployeeDocumentForm(props: EmployeeDocumentFormProps) {
-  const { user } = useAuth();
-  return <EmployeeDocumentFormContent key={String(user?.id) + ':' + props.employeeId} {...props} />;
+  const { user, workspaceId } = useAuth();
+  const identity = workspaceId ? `${workspaceId}:${String(user?.id)}` : String(user?.id);
+  return <EmployeeDocumentFormContent key={identity + ':' + props.employeeId} {...props} />;
 }
 
 function EmployeeDocumentFormContent({
@@ -119,7 +121,7 @@ function EmployeeDocumentFormContent({
     draftSessionRef.current?.current?.change(draftValues(next));
   }, [setFormData]);
   const extractionOptions: DocumentExtractionOptions = {
-    account: user?.id ?? null,
+    account: user && isOwner(user.role) ? user.id : null,
     scope: 'employee:' + employeeId,
     context: ['employee:' + employeeId, documentTypes.length, ministries.length].join('|'),
     file: selectedFile,

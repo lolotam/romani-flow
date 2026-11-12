@@ -3,10 +3,13 @@ import { useAuth } from './useAuth';
 import { ApiRequestError, request, type ApiEnvelope } from '@/lib/api/http';
 import type { WhatsAppRecipient, WhatsAppLogItem, WhatsAppLogFilter } from '@/lib/api/whatsapp';
 import { loadWhatsAppReminderSettings } from '@/lib/api/whatsappSettings';
+import { isOwner } from '@/lib/permissions';
 
 export function useWhatsAppSettings(refreshKey = 0) {
-  const { user } = useAuth();
-  const identity = user?.role === 'admin' ? user.id : null;
+  const { user, workspaceId } = useAuth();
+  const identity = user && isOwner(user.role)
+    ? workspaceId ? `${workspaceId}:${user.id}` : user.id
+    : null;
   const active = useRef<string | null>(identity);
   const generation = useRef(0);
   const identityEpoch = useRef(0);

@@ -8,12 +8,13 @@ import { useWhatsAppSettings } from '@/hooks/useWhatsAppSettings';
 import { WhatsAppRecipientsCard } from './WhatsAppRecipientsCard';
 import { WhatsAppLogCard } from './WhatsAppLogCard';
 import { NotificationTemplate } from './NotificationTemplate';
+import { isOwner } from '@/lib/permissions';
 
 export default function WhatsAppSettings({ refreshKey = 0 }: { refreshKey?: number }) {
   const { user } = useAuth();
   const { t, isRTL } = useLanguage();
   const state = useWhatsAppSettings(refreshKey);
-  if (user?.role !== 'admin') return null;
+  if (!isOwner(user?.role)) return null;
   return <div dir={isRTL ? 'rtl' : 'ltr'} className="space-y-5 text-start">
     <Card aria-busy={state.loading}><CardHeader><CardTitle>{t('settings.whatsappReminders.title')}</CardTitle></CardHeader><CardContent className="space-y-3">
       {state.loading && <p role="status">{t('settings.whatsappReminders.loading')}</p>}

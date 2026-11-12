@@ -23,15 +23,20 @@ export interface SessionUser {
   role: string;
 }
 
-interface AuthContextValue {
+export interface AuthContextValue {
   isAuthenticated: boolean;
   isLoading: boolean;
   user: SessionUser | null;
+  provider: 'legacy' | 'clerk';
+  /** The verified Clerk organization, never a client-selected tenant override. */
+  workspaceId: string | null;
+  workspaceRequired: boolean;
+  isPlatformAdmin: boolean;
   login: (email: string, password: string) => Promise<{ success: boolean; error?: string }>;
   logout: () => Promise<void>;
 }
 
-const AuthContext = createContext<AuthContextValue | undefined>(undefined);
+export const AuthContext = createContext<AuthContextValue | undefined>(undefined);
 
 export const useAuth = (): AuthContextValue => {
   const context = useContext(AuthContext);
@@ -101,7 +106,17 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
   }, [applySession]);
 
   const value = useMemo<AuthContextValue>(
-    () => ({ isAuthenticated, isLoading, user, login, logout }),
+    () => ({
+      isAuthenticated,
+      isLoading,
+      user,
+      provider: 'legacy',
+      workspaceId: null,
+      workspaceRequired: false,
+      isPlatformAdmin: false,
+      login,
+      logout,
+    }),
     [isAuthenticated, isLoading, user, login, logout],
   );
 

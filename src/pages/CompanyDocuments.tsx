@@ -1,4 +1,4 @@
-﻿import { useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { ArrowLeft, Building2, Download, FileText, Mail, Trash2 } from 'lucide-react';
@@ -16,6 +16,8 @@ import { useDocumentActions } from '@/hooks/useDocumentActions';
 import { useToast } from '@/hooks/use-toast';
 import { useLanguage } from '@/contexts/LanguageContext';
 import type { DocumentWithRelations } from '@/lib/api';
+import { useAuth } from '@/hooks/useAuth';
+import { canEdit, isOwner } from '@/lib/permissions';
 
 // Remount scoped state when navigating directly between company routes.
 export default function CompanyDocuments() {
@@ -39,6 +41,9 @@ function CompanyNotFound() {
 
 function CompanyDocumentsPage({ companyId }: { companyId: string }) {
   const { t, language, isRTL } = useLanguage();
+  const { user } = useAuth();
+  const editable = canEdit(user?.role);
+  const owner = isOwner(user?.role);
   const { toast } = useToast();
   const navigate = useNavigate();
   const data = useDocuments(undefined, companyId);
@@ -138,17 +143,17 @@ function CompanyDocumentsPage({ companyId }: { companyId: string }) {
               </Button>
             </div>
             <div className="flex flex-wrap gap-2">
-              <Button variant="outline" size="sm" disabled={!canEmailSelection || isDeleting}
-                onClick={() => sendDocuments(data.selectedDocuments)}><Mail className="h-4 w-4 ml-1" />{emailLabel}</Button>
+              {owner && <Button variant="outline" size="sm" disabled={!canEmailSelection || isDeleting}
+                onClick={() => sendDocuments(data.selectedDocuments)}><Mail className="h-4 w-4 ml-1" />{emailLabel}</Button>}
               <Button variant="outline" size="sm" disabled={isDeleting} onClick={async () => {
                 for (const doc of data.selectedDocuments) await downloadDocument(doc);
               }}><Download className="h-4 w-4 ml-1" />{t('documents.bulk.download')}</Button>
-              <Button variant="destructive" size="sm" disabled={isDeleting}
+              {editable && <Button variant="destructive" size="sm" disabled={isDeleting}
                 onClick={() => { void deleteDocuments(data.selectedDocuments.map((doc) => doc.id)); }}>
                 <Trash2 className="h-4 w-4 ml-1" />{t('documents.bulk.delete')}
-              </Button>
+              </Button>}
             </div>
-            {!canEmailSelection && <span className="text-sm text-muted-foreground" role="status">
+            {owner && !canEmailSelection && <span className="text-sm text-muted-foreground" role="status">
               {label('اختر مستندات لها ملفات مرفوعة لإرسالها بالبريد.', 'Select documents with uploaded files to send by email.')}
             </span>}
           </CardContent>

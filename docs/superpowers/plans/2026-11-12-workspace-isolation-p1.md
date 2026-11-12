@@ -62,3 +62,10 @@ Platform tables: `workspaces, settings, schema_migrations`.
 - Migration 011 adds `users` and `clerk_webhook_events`, and rebuilds `form_defaults`, `document_drafts` and `pending_uploads` without the `admin_users` foreign keys. Drafts and form defaults are keyed by `(workspace_id, user_id, …)`, which completes the D4 key change, since one Clerk user can belong to several workspaces.
 - Proved by `scripts/verify-clerk-auth.test.mjs` (in `test:workspace`). Only Clerk is faked, and webhook payloads are signed with the real verifier.
 - Not yet done: the SPA sign-in (P2b) and removal of the old login (P2c, needs owner approval and the claim email O1).
+
+## P2b — Clerk in the SPA
+
+- One build serves both modes: the SPA reads the public `GET /api/auth/config` (`provider`, and `publishableKey` in clerk mode only) before rendering. `npm run build:client` fails if a server-only Clerk value appears in `dist/` (`scripts/verify-client-bundle.mjs`).
+- Clerk mode: `@clerk/react` sign-in at `/login/*` and sign-up at `/sign-up/*`, Arabic/English localization, `OrganizationSwitcher` and `UserButton`. A 403 `workspace_required` shows `OrganizationList`. `/api/auth/me` uses the selected auth middleware; legacy `/api/auth/login` answers 410 `legacy_login_disabled` in clerk mode.
+- Switching organization clears the query cache and re-reads the session; drafts and last-submission state are keyed by workspace and user.
+- UI roles come from `src/lib/permissions.ts` (`canEdit`, `isOwner`); viewers do not see write controls. The server remains the enforcement.

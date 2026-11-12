@@ -6,6 +6,8 @@ import { Download, FileText, Mail } from 'lucide-react';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { calculateDocumentStatus } from '@/lib/statusUtils';
 import { endpoints, type DocumentWithRelations } from '@/lib/api';
+import { useAuth } from '@/hooks/useAuth';
+import { isOwner } from '@/lib/permissions';
 
 interface DocumentPreviewDialogProps {
   document: DocumentWithRelations | null;
@@ -18,6 +20,7 @@ interface DocumentPreviewDialogProps {
 export function DocumentPreviewDialog({ document, onClose, handleDownloadDocument,
   handleEmailDocument, emailLabel }: DocumentPreviewDialogProps) {
   const { t, language } = useLanguage();
+  const { user } = useAuth();
   return <>
     {/* View Document Dialog */}
     <Dialog open={!!document} onOpenChange={(open) => { if (!open) onClose(); }}>
@@ -123,10 +126,10 @@ export function DocumentPreviewDialog({ document, onClose, handleDownloadDocumen
               )}
             </div>
             <div className="flex flex-wrap gap-2 pt-4">
-              <Button variant="outline" disabled={!document.file_path} onClick={() => handleEmailDocument(document)}>
+              {isOwner(user?.role) && <Button variant="outline" disabled={!document.file_path} onClick={() => handleEmailDocument(document)}>
                 <Mail className="h-4 w-4 ml-2" />
                 {emailLabel}
-              </Button>
+              </Button>}
               <Button
                 onClick={() => handleDownloadDocument(document)}
                 className="flex-1"

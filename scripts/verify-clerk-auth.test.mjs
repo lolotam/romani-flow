@@ -282,6 +282,56 @@ test('one Clerk user keeps independent drafts and form defaults in two organizat
   assert.deepEqual(readDraftB.json.data.values, { title: 'Draft B', notes: 'Private B' });
 }));
 
+test('auth/config publishes only the provider and Clerk publishable key', () => clerkApi(async f => {
+  const response = await f.request('/api/auth/config', { role: null });
+  assert.equal(response.status, 200, JSON.stringify(response.json));
+  assert.deepEqual(response.json.data, { provider: 'clerk', publishableKey: clerkEnv.CLERK_PUBLISHABLE_KEY });
+  const serialized = JSON.stringify(response.json);
+  assert.equal(serialized.includes(clerkEnv.CLERK_SECRET_KEY), false);
+  assert.equal(serialized.includes(clerkEnv.CLERK_WEBHOOK_SIGNING_SECRET), false);
+}));
+
+test('legacy auth/config never publishes Clerk keys', () => reminderApi(async f => {
+  const response = await f.request('/api/auth/config', { role: null });
+  assert.equal(response.status, 200, JSON.stringify(response.json));
+  assert.deepEqual(response.json.data, { provider: 'legacy', publishableKey: null });
+  const serialized = JSON.stringify(response.json);
+  assert.equal(serialized.includes(clerkEnv.CLERK_SECRET_KEY), false);
+  assert.equal(serialized.includes(clerkEnv.CLERK_PUBLISHABLE_KEY), false);
+  assert.equal(serialized.includes(clerkEnv.CLERK_WEBHOOK_SIGNING_SECRET), false);
+}, undefined, { ...clerkEnv, AUTH_PROVIDER: 'legacy' }));
+
+test('clerk auth/me returns the local user id and organization role', () => clerkApi(async f => {
+  const response = await f.request('/api/auth/me', { identity: 'editor' });
+  assert.equal(response.status, 200, JSON.stringify(response.json));
+  const local = f.db.prepare("SELECT id FROM users WHERE clerk_user_id='clerk-editor'").get();
+  assert.deepEqual(response.json.data.user, {
+    id: local.id, email: 'editor@example.invalid', name: 'Editor A', role: 'editor',
+  });
+}));
+
+test('clerk auth/me requires an active organization', () => clerkApi(async f => {
+  const response = await f.request('/api/auth/me', { identity: 'noOrg' });
+  assert.equal(response.status, 403);
+  assert.equal(response.json.error.code, 'workspace_required');
+}));
+
+test('clerk mode disables legacy login', () => clerkApi(async f => {
+  const response = await f.request('/api/auth/login', {
+    method: 'POST', role: null, body: { email: 'admin@example.invalid', password: 'not-a-real-password' },
+  });
+  assert.equal(response.status, 410);
+  assert.equal(response.json.error.code, 'legacy_login_disabled');
+}));
+
+test('legacy auth/me keeps the existing session response', () => reminderApi(async f => {
+  const response = await f.request('/api/auth/me');
+  assert.equal(response.status, 200, JSON.stringify(response.json));
+  assert.deepEqual(response.json.data.user, {
+    id: 'admin', email: 'admin@example.invalid', name: 'Synthetic', role: 'admin',
+  });
+}));
+
 for (const missing of ['CLERK_SECRET_KEY', 'CLERK_PUBLISHABLE_KEY', 'CLERK_WEBHOOK_SIGNING_SECRET']) {
   test(`clerk boot validation names missing ${missing}`, () => {
     const env = { NODE_ENV: 'test', JWT_SECRET: 'x'.repeat(32), ...clerkEnv };

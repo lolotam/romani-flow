@@ -7,6 +7,8 @@ import { FileText, Calendar, Eye, Edit, Download, Trash2, Mail } from 'lucide-re
 import { useLanguage } from '@/contexts/LanguageContext';
 import { calculateDocumentStatus } from '@/lib/statusUtils';
 import { endpoints, type DocumentWithRelations } from '@/lib/api';
+import { useAuth } from '@/hooks/useAuth';
+import { canEdit, isOwner } from '@/lib/permissions';
 
 export interface DocumentCardActions {
   handleViewDocument: (doc: DocumentWithRelations) => void;
@@ -29,6 +31,9 @@ export function DocumentCard({ doc, selected, handleViewDocument, handleEditDocu
   handleDownloadDocument, handleDeleteDocument, handleEmailDocument, toggleDocumentSelection,
   emailLabel, isDeleting, showMinistry = false }: DocumentCardProps) {
   const { t, language } = useLanguage();
+  const { user } = useAuth();
+  const editable = canEdit(user?.role);
+  const owner = isOwner(user?.role);
   const isImage = !!doc.file_path && !!doc.mime_type?.startsWith('image/');
   const isPdf = doc.mime_type === 'application/pdf';
   
@@ -87,37 +92,37 @@ export function DocumentCard({ doc, selected, handleViewDocument, handleEditDocu
           >
             <Eye className="h-4 w-4" />
           </Button>
-          <Button 
-            variant="ghost" 
-            size="sm" 
+          {editable && <Button
+            variant="ghost"
+            size="sm"
             className="h-8 w-8 p-0"
             onClick={() => handleEditDocument(doc)}
             aria-label={t('documents.card.editDocument')}
           >
             <Edit className="h-4 w-4" />
-          </Button>
-          <Button 
-            variant="ghost" 
-            size="sm" 
+          </Button>}
+          <Button
+            variant="ghost"
+            size="sm"
             className="h-8 w-8 p-0"
             onClick={() => handleDownloadDocument(doc)}
             aria-label={t('documents.card.downloadDocument')}
           >
             <Download className="h-4 w-4" />
           </Button>
-          <Button variant="ghost" size="sm" className="h-8 w-8 p-0" disabled={!doc.file_path} onClick={() => handleEmailDocument(doc)} aria-label={emailLabel}>
+          {owner && <Button variant="ghost" size="sm" className="h-8 w-8 p-0" disabled={!doc.file_path} onClick={() => handleEmailDocument(doc)} aria-label={emailLabel}>
             <Mail className="h-4 w-4" />
-          </Button>
-          <Button 
+          </Button>}
+          {editable && <Button
             disabled={isDeleting}
-            variant="ghost" 
-            size="sm" 
+            variant="ghost"
+            size="sm"
             className="h-8 w-8 p-0 hover:bg-destructive hover:text-destructive-foreground"
             onClick={() => handleDeleteDocument(doc.id)}
             aria-label={t('documents.card.deleteDocument')}
           >
             <Trash2 className="h-4 w-4" />
-          </Button>
+          </Button>}
         </div>
       </div>
     </CardContent>

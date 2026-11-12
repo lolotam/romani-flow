@@ -1,4 +1,4 @@
-﻿import { useState } from 'react';
+import { useState } from 'react';
 import { motion } from 'framer-motion';
 import { Building2, Download, Mail, Trash2, User } from 'lucide-react';
 import { Layout } from '@/components/Layout';
@@ -15,9 +15,14 @@ import { useDocuments } from '@/hooks/useDocuments';
 import { useDocumentActions } from '@/hooks/useDocumentActions';
 import { useLanguage } from '@/contexts/LanguageContext';
 import type { DocumentWithRelations } from '@/lib/api';
+import { useAuth } from '@/hooks/useAuth';
+import { canEdit, isOwner } from '@/lib/permissions';
 
 export default function Documents() {
   const { t, language } = useLanguage();
+  const { user } = useAuth();
+  const editable = canEdit(user?.role);
+  const owner = isOwner(user?.role);
   const data = useDocuments();
   const { isDeleting, deleteDocuments, downloadDocument, emailLabel } = useDocumentActions(data.removeDocuments);
   const [isUploadDialogOpen, setIsUploadDialogOpen] = useState(false);
@@ -106,18 +111,18 @@ export default function Documents() {
                 </Button>
               </div>
               <div className="flex flex-wrap gap-2">
-                <Button variant="outline" size="sm" onClick={() => setEmailDocuments(data.selectedDocuments)} disabled={isDeleting}>
+                {owner && <Button variant="outline" size="sm" onClick={() => setEmailDocuments(data.selectedDocuments)} disabled={isDeleting}>
                   <Mail className="h-4 w-4 ml-1" />{emailLabel}
-                </Button>
+                </Button>}
                 <Button variant="outline" size="sm" onClick={async () => {
                   for (const document of data.selectedDocuments) await downloadDocument(document);
                 }} disabled={isDeleting}>
                   <Download className="h-4 w-4 ml-1" />{t('documents.bulk.download')}
                 </Button>
-                <Button variant="destructive" size="sm" disabled={isDeleting}
+                {editable && <Button variant="destructive" size="sm" disabled={isDeleting}
                   onClick={() => { void deleteDocuments(data.selectedDocuments.map((document) => document.id)); }}>
                   <Trash2 className="h-4 w-4 ml-1" />{t('documents.bulk.delete')}
-                </Button>
+                </Button>}
               </div>
             </CardContent>
           </Card>

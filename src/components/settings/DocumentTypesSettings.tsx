@@ -8,6 +8,7 @@ import type { DocumentType } from './types';
 
 interface DocumentTypesSettingsProps {
   documentTypes: DocumentType[];
+  canEdit: boolean;
   newDocType: { name: string; name_ar: string };
   onNewDocTypeChange: (value: { name: string; name_ar: string }) => void;
   onAdd: () => void;
@@ -16,7 +17,7 @@ interface DocumentTypesSettingsProps {
 }
 
 export default function DocumentTypesSettings({
-  documentTypes, newDocType, onNewDocTypeChange, onAdd, onEdit, onDelete
+  documentTypes, canEdit, newDocType, onNewDocTypeChange, onAdd, onEdit, onDelete
 }: DocumentTypesSettingsProps) {
   const { t } = useLanguage();
 
@@ -30,7 +31,7 @@ export default function DocumentTypesSettings({
         <CardDescription>{t('settings.documentTypes.description')}</CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        {canEdit && <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           <div>
             <Label htmlFor="doctype_name_ar">{t('settings.documentTypes.nameArabic')}</Label>
             <Input
@@ -52,7 +53,7 @@ export default function DocumentTypesSettings({
           <div className="flex items-end">
             <Button onClick={onAdd} className="w-full">{t('settings.documentTypes.addNew')}</Button>
           </div>
-        </div>
+        </div>}
 
         <div className="pt-4 border-t">
           <h3 className="font-semibold mb-3">{t('settings.documentTypes.currentTypesCount', { count: documentTypes.length })}</h3>
@@ -63,14 +64,14 @@ export default function DocumentTypesSettings({
                   <p className="font-medium">{docType.name_ar}</p>
                   <p className="text-sm text-muted-foreground">{docType.name}</p>
                 </div>
-                <div className="flex gap-2">
+                {canEdit && <div className="flex gap-2">
                   <Button size="sm" variant="outline" onClick={() => onEdit(docType)}>
                     <Pencil className="h-4 w-4" />
                   </Button>
                   <Button size="sm" variant="outline" onClick={() => onDelete(docType)}>
                     <Trash2 className="h-4 w-4" />
                   </Button>
-                </div>
+                </div>}
               </div>
             ))}
           </div>

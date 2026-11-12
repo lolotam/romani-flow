@@ -27,6 +27,7 @@ import {
   useExtractionSettings,
   type ExtractionProvider,
 } from '@/hooks/useExtractionSettings';
+import { isOwner } from '@/lib/permissions';
 
 /** The props of the settings card. */
 export interface DocumentExtractionSettingsProps {
@@ -40,10 +41,11 @@ export interface DocumentExtractionSettingsProps {
  * The backend checks the same authority again when the settings are written.
  */
 export function DocumentExtractionSettings({ refreshKey = 0 }: DocumentExtractionSettingsProps) {
-  const { user } = useAuth();
+  const { user, workspaceId } = useAuth();
   const { t, isRTL } = useLanguage();
-  const admin = user?.role === 'admin';
-  const state = useExtractionSettings(admin ? (user?.id ?? null) : null, refreshKey);
+  const owner = isOwner(user?.role);
+  const accountId = user && owner ? workspaceId ? `${workspaceId}:${user.id}` : user.id : null;
+  const state = useExtractionSettings(accountId, refreshKey);
 
   /**
    * The saved model is kept for display only when the current catalogue does
@@ -60,7 +62,7 @@ export function DocumentExtractionSettings({ refreshKey = 0 }: DocumentExtractio
     [state.candidates, state.candidateReason, state.editor.model, state.editor.provider],
   );
 
-  if (!admin) return null;
+  if (!owner) return null;
 
   return (
     <div dir={isRTL ? 'rtl' : 'ltr'} className="space-y-4 text-start">

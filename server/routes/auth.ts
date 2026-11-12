@@ -1,10 +1,9 @@
-import { Router } from 'express';
+import { Router, type RequestHandler } from 'express';
 import type { AppConfig } from '../config.js';
 import type { Db } from '../db/connection.js';
 import { asyncHandler } from '../middleware/errorHandler.js';
 import {
   clearSessionCookie,
-  requireAuth,
   setSessionCookie,
   signSession,
   toSessionUser,
@@ -18,8 +17,8 @@ import {
 /**
  * Authentication routes.
  *
- * Login issues a signed session cookie; no token is ever exposed to page
- * JavaScript.
+ * Legacy login issues a signed session cookie; Clerk sessions stay in Clerk's
+ * own httpOnly cookie. Neither scheme exposes a token to page JavaScript.
  */
 
 const MAX_ATTEMPTS = 8;
@@ -44,12 +43,30 @@ function clearAttempts(key: string): void {
   attempts.delete(key);
 }
 
-export function createAuthRouter(config: AppConfig, db: Db): Router {
+export function createAuthRouter(config: AppConfig, db: Db, authenticated: RequestHandler): Router {
   const router = Router();
+
+  router.get('/config', (_req, res) => {
+    res.json({
+      data: {
+        provider: config.authProvider,
+        publishableKey: config.authProvider === 'clerk' ? config.clerkPublishableKey : null,
+      },
+      error: null,
+    });
+  });
 
   router.post(
     '/login',
     asyncHandler(async (req, res) => {
+      if (config.authProvider === 'clerk') {
+        res.status(410).json({
+          data: null,
+          error: { message: 'Legacy login is disabled.', code: 'legacy_login_disabled' },
+        });
+        return;
+      }
+
       const key = req.ip ?? 'unknown';
       if (isRateLimited(key)) {
         res.status(429).json({
@@ -96,7 +113,7 @@ export function createAuthRouter(config: AppConfig, db: Db): Router {
     res.json({ data: { loggedOut: true }, error: null });
   });
 
-  router.get('/me', requireAuth(config, db), (req, res) => {
+  router.get('/me', authenticated, (req, res) => {
     res.json({ data: { user: req.user }, error: null });
   });
 

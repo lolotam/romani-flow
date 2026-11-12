@@ -5,6 +5,8 @@ import { Badge } from '@/components/ui/badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Clock, User, Building2, Trash2, Pin, PinOff } from 'lucide-react';
 import type { ExpiringItem } from '@/types';
+import { useAuth } from '@/hooks/useAuth';
+import { canEdit } from '@/lib/permissions';
 
 interface RemindersTableProps {
   items: ExpiringItem[];
@@ -25,6 +27,7 @@ export function RemindersTable({
   language,
   t,
 }: RemindersTableProps) {
+  const editable = canEdit(useAuth().user?.role);
   const filteredItems = items
     .filter(item => !deletedItems.includes(item.id))
     .map(item => ({
@@ -121,7 +124,7 @@ export function RemindersTable({
                               <Pin className="h-3 w-3" />
                             )}
                           </Button>
-                          <Button
+                          {editable && <Button
                             variant="ghost"
                             size="sm"
                             className="h-8 w-8 p-0 hover:bg-destructive hover:text-destructive-foreground"
@@ -129,7 +132,7 @@ export function RemindersTable({
                             title={t('dashboard.reminders.actions.delete')}
                           >
                             <Trash2 className="h-3 w-3" />
-                          </Button>
+                          </Button>}
                         </div>
                       </TableCell>
                     </TableRow>

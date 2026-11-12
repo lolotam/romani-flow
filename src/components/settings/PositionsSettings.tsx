@@ -8,6 +8,7 @@ import type { Position } from './types';
 
 interface PositionsSettingsProps {
   positions: Position[];
+  canEdit: boolean;
   newPosition: { name: string; name_ar: string; value: string };
   onNewPositionChange: (value: { name: string; name_ar: string; value: string }) => void;
   onAdd: () => void;
@@ -16,7 +17,7 @@ interface PositionsSettingsProps {
 }
 
 export default function PositionsSettings({
-  positions, newPosition, onNewPositionChange, onAdd, onEdit, onDelete
+  positions, canEdit, newPosition, onNewPositionChange, onAdd, onEdit, onDelete
 }: PositionsSettingsProps) {
   const { t } = useLanguage();
 
@@ -30,7 +31,7 @@ export default function PositionsSettings({
         <CardDescription>{t('settings.positions.description')}</CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+        {canEdit && <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
           <div>
             <Label htmlFor="position_name_ar">{t('settings.positions.nameArabic')}</Label>
             <Input
@@ -61,7 +62,7 @@ export default function PositionsSettings({
           <div className="flex items-end">
             <Button onClick={onAdd} className="w-full">{t('settings.positions.addNew')}</Button>
           </div>
-        </div>
+        </div>}
 
         <div className="pt-4 border-t">
           <h3 className="font-semibold mb-3">{t('settings.positions.currentPositionsCount', { count: positions.length })}</h3>
@@ -72,14 +73,14 @@ export default function PositionsSettings({
                   <p className="font-medium">{position.name_ar}</p>
                   <p className="text-sm text-muted-foreground">{position.name} - {position.value}</p>
                 </div>
-                <div className="flex gap-2">
+                {canEdit && <div className="flex gap-2">
                   <Button size="sm" variant="outline" onClick={() => onEdit(position)}>
                     <Pencil className="h-4 w-4" />
                   </Button>
                   <Button size="sm" variant="outline" onClick={() => onDelete(position)}>
                     <Trash2 className="h-4 w-4" />
                   </Button>
-                </div>
+                </div>}
               </div>
             ))}
           </div>

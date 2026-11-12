@@ -3,6 +3,7 @@ import { useAuth } from '@/hooks/useAuth';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { request } from '@/lib/api/http';
 import { Label } from '@/components/ui/label';
+import { isOwner } from '@/lib/permissions';
 
 type Language = 'ar' | 'en';
 interface Sample { kind: string; subject?: string; text: string }
@@ -12,11 +13,13 @@ export function NotificationTemplate({ channel, language, disabled, onChange }: 
   channel: 'whatsapp' | 'email'; language: Language | null; disabled: boolean;
   onChange: (value: Language) => void;
 }) {
-  const { user } = useAuth();
+  const { user, workspaceId } = useAuth();
   const { language: uiLanguage } = useLanguage();
   const ar = uiLanguage === 'ar';
   const id = useId();
-  const key = user?.role === 'admin' && language ? `${user.id}:${channel}:${language}` : '';
+  const key = user && isOwner(user.role) && language
+    ? `${workspaceId ? `${workspaceId}:` : ''}${user.id}:${channel}:${language}`
+    : '';
   const [preview, setPreview] = useState<{ key: string; samples: Sample[]; failed: boolean } | null>(null);
   useEffect(() => {
     if (!key) return;
