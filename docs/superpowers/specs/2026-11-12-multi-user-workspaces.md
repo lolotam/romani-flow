@@ -18,7 +18,7 @@ Today the app is single-tenant: one shared dataset, `admin_users` with email/pas
 | Spam protection | Email verification, sign-up/login rate limits (Clerk bot protection + app limits), per-workspace quotas. |
 | Lists | Fully separate per workspace: companies, ministries, document types, positions. |
 | Privacy | Fully private. Nobody outside a workspace can see its documents, including the platform admin. |
-| Platform admin | The owner's Google account (configured via `PLATFORM_ADMIN_EMAILS`, not hard-coded) keeps admin access to an **admin dashboard with counts only**: users, workspaces, documents per workspace. |
+| Platform admin | The owner's Google account (configured via `PLATFORM_ADMIN_EMAILS`, not hard-coded) keeps admin access to an **admin dashboard**: counts per workspace (users, workspaces, documents), plus control of the platform report schedule and the notification policy (section 7). It never sees workspace content. |
 | Teams | A workspace can have members with roles **Owner / Editor / Viewer**. |
 | Quotas (defaults, adjustable per workspace) | 1 GB storage, 2,000 documents, 500 WhatsApp reminders per month, 5 members. |
 | WhatsApp | Per-workspace sender: each workspace owner scans their own QR. The app may hold the Evolution master key server-side to provision instances. |
@@ -83,8 +83,9 @@ workspace_usage(workspace_id, month TEXT, whatsapp_sent INTEGER, PRIMARY KEY(wor
 - Totals: users, workspaces, documents, storage used, WhatsApp reminders this month.
 - Per workspace: workspace name, owner email, member count, document count, storage used, WhatsApp sent this month, created date, last activity, quota status.
 - Actions: adjust a workspace's quotas, suspend/unsuspend a workspace.
+- Platform controls (owner decision 2026-11-12): the daily report schedule, and the notification policy. The admin enables or hides expiry offsets from a fixed list (90, 60, 30, 15, 7, 1 days). Each document and employee card picks which enabled offsets apply to it; a record without a choice uses all enabled offsets. The same offsets drive email and WhatsApp. Workspace users cannot change the schedule or the offset list.
 
-It **cannot** list document titles, employees, files, recipients or settings, and there is no "log in as user". The endpoints run fixed aggregate queries (`COUNT`, `SUM`) grouped by workspace and return no row content. A test asserts that no document/employee field ever appears in a platform response.
+It **cannot** list document titles, employees, files, recipients or a workspace's own settings, and there is no "log in as user". The endpoints run fixed aggregate queries (`COUNT`, `SUM`) grouped by workspace and return no row content. A test asserts that no document/employee field ever appears in a platform response.
 
 ## 8. Quotas and abuse limits
 
