@@ -1,0 +1,106 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
+import { runMigrations } from '../server/db/migrator.ts';
+
+const migrationsDir = path.resolve('server/db/migrations');
+const T = '2026-11-01T00:00:00.000Z';
+
+/** Builds a database exactly as production has it before migration 010. */
+function databaseAt009() {
+  const staging = fs.mkdtempSync(path.join(process.env.TEMP ?? '/tmp', 'ws-mig-'));
+  for (const file of fs.readdirSync(migrationsDir)) {
+    if (file.endsWith('.sql') && Number(file.slice(0, 3)) <= 9) fs.copyFileSync(path.join(migrationsDir, file), path.join(staging, file));
+  }
+  const db = new DatabaseSync(':memory:');
+  db.exec('PRAGMA foreign_keys=ON;');
+  runMigrations(db, staging);
+  fs.rmSync(staging, { recursive: true, force: true });
+  return db;
+}
+
+function seedEveryTenantTable(db) {
+  db.prepare("INSERT INTO admin_users(id,email,name,password_hash,role,created_at,updated_at) VALUES('u1','a@example.invalid','A','x','admin',?,?)").run(T, T);
+  db.prepare("INSERT INTO companies(id,name,created_at,updated_at) VALUES('c1','Co',?,?)").run(T, T);
+  db.prepare("INSERT INTO ministries(id,name,created_at,updated_at) VALUES('m1','Min',?,?)").run(T, T);
+  db.prepare("INSERT INTO document_types(id,name,created_at,updated_at) VALUES('t1','Type',?,?)").run(T, T);
+  db.prepare("INSERT INTO positions(id,name,value,created_at,updated_at) VALUES('p1','Pos','pos',?,?)").run(T, T);
+  db.prepare("INSERT INTO employees(id,name,company_id,created_at,updated_at) VALUES('e1','Emp','c1',?,?)").run(T, T);
+  db.prepare("INSERT INTO documents(id,title,document_type_id,employee_id,created_at,updated_at) VALUES('d1','Doc','t1','e1',?,?)").run(T, T);
+  db.prepare("INSERT INTO email_log(id,kind,recipients,status,created_at) VALUES('l1','expiry','x@example.invalid','sent',?)").run(T);
+  db.prepare("INSERT INTO expiry_notifications(id,item_type,item_id,expiry_date,interval_days,recipient,notified_at) VALUES('n1','document','d1','2026-12-01',30,'x',?)").run(T);
+  db.prepare("INSERT INTO pending_uploads(id,file_name,file_path,file_size,mime_type,created_at) VALUES('pu1','f.pdf','2026/11/f.pdf',1,'application/pdf',?)").run(T);
+  db.prepare("INSERT INTO form_defaults(user_id,form_key,source_id,values_json,updated_at) VALUES('u1','employees','e1','{}',?)").run(T);
+  db.prepare("INSERT INTO document_drafts(user_id,scope,revision,values_json,updated_at) VALUES('u1','employee:e1','r1','{\"employee_id\":\"e1\"}',?)").run(T);
+  db.prepare("INSERT INTO whatsapp_recipients(id,label,phone,enabled,created_at,updated_at) VALUES('r1','Boss','+96550000000',1,?,?)").run(T, T);
+  db.prepare(`INSERT INTO whatsapp_jobs(id,instance,item_type,item_id,expiry_date,bucket,recipient,recipient_label,audience,item_name,owner_name,text,next_attempt_at,created_at,updated_at)
+    VALUES('j1','inst','document','d1','2026-12-01',30,'+96550000000','Boss','management','Doc','Emp','hi',?,?,?)`).run(T, T, T);
+  db.prepare(`INSERT INTO whatsapp_attempts(id,job_id,attempt,recipient,recipient_label,audience,item_name,owner_name,expiry_date,text,state,started_at)
+    VALUES('a1','j1',1,'+96550000000','Boss','management','Doc','Emp','2026-12-01','hi','provider_accepted',?)`).run(T);
+  db.prepare("INSERT INTO settings(key,value,updated_at) VALUES('email.recipients','[\"x@example.invalid\"]',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").run(T);
+  db.prepare("INSERT INTO settings(key,value,updated_at) VALUES('cron.schedule','\"0 8 * * *\"',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").run(T);
+}
+
+const TENANT_TABLES = ['admin_users', 'companies', 'ministries', 'document_types', 'positions', 'employees', 'documents',
+  'email_log', 'expiry_notifications', 'pending_uploads', 'form_defaults', 'document_drafts', 'whatsapp_recipients',
+  'whatsapp_jobs', 'whatsapp_attempts'];
+
+test('010 moves every existing tenant row into the legacy workspace', () => {
+  const db = databaseAt009();
+  seedEveryTenantTable(db);
+  const result = runMigrations(db, migrationsDir);
+  assert.deepEqual(result.applied, ['010_workspaces.sql']);
+
+  assert.deepEqual({ ...db.prepare("SELECT id, name FROM workspaces").get() }, { id: 'ws_legacy', name: 'Romani' });
+  for (const table of TENANT_TABLES) {
+    const counts = db.prepare(`SELECT count(*) total, sum(workspace_id = 'ws_legacy') legacy FROM "${table}"`).get();
+    assert.ok(counts.total > 0, `${table} should keep its synthetic row`);
+    assert.equal(counts.legacy, counts.total, `every ${table} row belongs to ws_legacy`);
+  }
+  assert.equal(db.prepare('PRAGMA integrity_check').get().integrity_check, 'ok');
+  assert.equal(db.prepare('PRAGMA foreign_key_check').all().length, 0);
+});
+
+test('010 copies tenant settings and leaves platform settings where they are', () => {
+  const db = databaseAt009();
+  seedEveryTenantTable(db);
+  runMigrations(db, migrationsDir);
+  const copied = db.prepare("SELECT value FROM workspace_settings WHERE workspace_id='ws_legacy' AND key='email.recipients'").get();
+  assert.equal(copied.value, '["x@example.invalid"]');
+  assert.equal(db.prepare("SELECT count(*) n FROM workspace_settings WHERE key='cron.schedule'").get().n, 0);
+});
+
+test('a tenant row written without a workspace is refused', () => {
+  const db = databaseAt009();
+  runMigrations(db, migrationsDir);
+  for (const sql of [
+    "INSERT INTO companies(id,name,created_at,updated_at) VALUES('c2','Co',?,?)",
+    "INSERT INTO documents(id,title,document_type_id,created_at,updated_at) VALUES('d2','Doc','none',?,?)",
+  ]) {
+    assert.throws(() => db.prepare(sql).run(T, T), /workspace_required/);
+  }
+  db.prepare("INSERT INTO companies(id,name,workspace_id,created_at,updated_at) VALUES('c3','Co','ws_legacy',?,?)").run(T, T);
+  assert.throws(() => db.prepare("UPDATE companies SET workspace_id=NULL WHERE id='c3'").run(), /workspace_required/);
+});
+
+test('a recipient phone is unique per workspace, not across workspaces', () => {
+  const db = databaseAt009();
+  runMigrations(db, migrationsDir);
+  db.prepare("INSERT INTO workspaces(id,name,created_at,updated_at) VALUES('ws_b','B',?,?)").run(T, T);
+  const add = db.prepare("INSERT INTO whatsapp_recipients(id,workspace_id,label,phone,enabled,created_at,updated_at) VALUES(?,?,'L','+96550000000',1,?,?)");
+  add.run('r1', 'ws_legacy', T, T);
+  add.run('r2', 'ws_b', T, T);
+  assert.throws(() => add.run('r3', 'ws_b', T, T), /UNIQUE/);
+});
+
+test('the 006 and 008 deletion triggers still clear defaults and drafts after 010', () => {
+  const db = databaseAt009();
+  seedEveryTenantTable(db);
+  runMigrations(db, migrationsDir);
+  db.prepare("DELETE FROM documents WHERE id='d1'").run();
+  db.prepare("DELETE FROM employees WHERE id='e1'").run();
+  assert.equal(db.prepare("SELECT count(*) n FROM form_defaults WHERE source_id='e1'").get().n, 0);
+  assert.equal(db.prepare("SELECT values_json FROM document_drafts WHERE scope='employee:e1'").get().values_json, null);
+});
