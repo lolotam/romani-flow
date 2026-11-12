@@ -1,3 +1,5 @@
+import fs from 'node:fs';
+import path from 'node:path';
 import { insertRow } from '../../server/repositories/base.ts';
 import { createWorkspace } from '../../server/repositories/workspaces.ts';
 
@@ -19,3 +21,11 @@ export function addWorkspaceB(f) {
 
 /** A request signed in as workspace B's administrator. */
 export const asB = (f, url, options = {}) => f.request(url, { ...options, user: 'admin-b' });
+
+/** Gives the legacy document and employee real files, so a 404 for B means scoping, not a missing file. */
+export function plantLegacyFiles(f) {
+  const files = { document: '2026/01/legacy-route.pdf', photo: '2026/01/legacy-photo.png' };
+  for (const rel of Object.values(files)) { fs.mkdirSync(path.dirname(f.storage.resolve(rel)), { recursive: true }); fs.writeFileSync(f.storage.resolve(rel), '%PDF-1.4 synthetic'); }
+  f.db.prepare("UPDATE documents SET file_path=?,file_name='legacy-route.pdf',mime_type='application/pdf' WHERE id=?").run(files.document, f.document.id);
+  f.db.prepare("UPDATE employees SET photo_path=?,photo_mime_type='image/png' WHERE id=?").run(files.photo, f.employee.id);
+}

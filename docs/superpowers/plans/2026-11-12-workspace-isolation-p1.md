@@ -35,7 +35,7 @@ Platform tables: `workspaces, settings, schema_migrations`.
 1. Write `scripts/verify-tenant-isolation.test.mjs` and the route inventory first, and watch them fail.
 2. `base.ts`: add `Scope` to every helper. Fix all call sites the compiler reports, then the raw SQL in services and repositories, then add the D8 guard.
 3. Settings repository: read tenant keys from `workspace_settings`.
-4. Pulled forward from C: expiry service, cron and WhatsApp enqueue per workspace (D9, D11), and scoped backup export and erase (D10). Proved by `verify-tenant-isolation` and `verify-tenant-routes` (`npm run test:workspace`).
+4. Pulled forward from C: expiry service, cron and WhatsApp enqueue per workspace (D9, D11), and scoped backup export and erase (D10). Proved by `verify-tenant-isolation`, `verify-tenant-routes` and `verify-tenant-writes` (`npm run test:workspace`); the last two fail when a new read or write handler is added without a decision on how workspace B is kept out.
 
 **C. Files, jobs and backup.**
 1. Per-workspace upload prefix (D5). File routes look the record up through scope first.
