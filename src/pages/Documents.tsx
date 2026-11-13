@@ -79,8 +79,8 @@ export default function Documents() {
           <h1 className="text-3xl font-bold text-gradient text-slate-950">{t('documents.title')}</h1>
           <p className="text-muted-foreground">{t('documents.viewAndManage', { count: data.documents.length })}</p>
         </div>
-        <DocumentUploadDialog open={isUploadDialogOpen} onOpenChange={setIsUploadDialogOpen}
-          onFilesAccepted={handleFilesAccepted} />
+        {editable && <DocumentUploadDialog open={isUploadDialogOpen} onOpenChange={setIsUploadDialogOpen}
+          onFilesAccepted={handleFilesAccepted} />}
       </motion.div>
 
       {data.error && (
@@ -154,7 +154,7 @@ export default function Documents() {
       </motion.div>
 
       {/* Document Form Dialog */}
-      {(uploadedFile || editingDocument) && (
+      {editable && (uploadedFile || editingDocument) && (
         <DocumentEditorDialog uploadedFile={uploadedFile} fileName={uploadedFile?.name ?? editingDocument?.file_name ?? ''}
           onClose={handleDocumentFormClose} onSuccess={data.reload} documentTypes={data.documentTypes}
           companies={data.companies} employees={data.employees} ministries={data.ministries} editingDocument={editingDocument} />

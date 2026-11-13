@@ -7,12 +7,22 @@ import { atomic } from '../notifications/whatsapp/repository.js';
 import { upsertLocalUser } from './users.js';
 import { syncOrganization, suspendOrganization } from './workspaces.js';
 
+function forgetDeletedUser(db: Db, clerkUserId: string): void {
+  const now = new Date().toISOString();
+  const user = db.prepare('SELECT id FROM users WHERE clerk_user_id = ?').get(clerkUserId) as { id: string } | undefined;
+  db.prepare('UPDATE users SET deleted_at = ?, last_seen_at = ? WHERE clerk_user_id = ?').run(now, now, clerkUserId);
+  if (!user) return;
+  // Migration 011 dropped the admin_users foreign keys. These three statements
+  // restore that cascade for a platform identity: drafts and defaults go away,
+  // and staged uploads stay without a deleted owner.
+  db.prepare('DELETE FROM document_drafts WHERE user_id = ?').run(user.id);
+  db.prepare('DELETE FROM form_defaults WHERE user_id = ?').run(user.id);
+  db.prepare('UPDATE pending_uploads SET draft_user_id = NULL WHERE draft_user_id = ?').run(user.id);
+}
+
 function syncUserEvent(db: Db, event: WebhookEvent): void {
   if (event.type === 'user.deleted') {
-    if (event.data.id) {
-      const now = new Date().toISOString();
-      db.prepare('UPDATE users SET deleted_at = ?, last_seen_at = ? WHERE clerk_user_id = ?').run(now, now, event.data.id);
-    }
+    if (event.data.id) forgetDeletedUser(db, event.data.id);
     return;
   }
   if (event.type !== 'user.created' && event.type !== 'user.updated') return;

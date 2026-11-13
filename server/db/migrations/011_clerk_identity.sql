@@ -71,6 +71,7 @@ SELECT user_id, scope, revision, values_json, updated_at, workspace_id FROM docu
 DROP TABLE document_drafts;
 ALTER TABLE document_drafts_v2 RENAME TO document_drafts;
 CREATE INDEX document_drafts_scope ON document_drafts(scope);
+CREATE INDEX document_drafts_workspace_scope ON document_drafts(workspace_id, scope);
 CREATE INDEX document_drafts_employee ON document_drafts(json_extract(values_json,'$.employee_id'));
 CREATE INDEX document_drafts_company ON document_drafts(json_extract(values_json,'$.company_id'));
 CREATE TRIGGER ws_required_document_drafts_i BEFORE INSERT ON document_drafts WHEN NEW.workspace_id IS NULL BEGIN SELECT RAISE(ABORT, 'workspace_required'); END;

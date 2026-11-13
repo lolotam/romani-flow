@@ -4,7 +4,7 @@ import type { Db } from '../db/connection.js';
 import { asyncHandler } from '../middleware/errorHandler.js';
 import type { Identity, IdentityResolver } from './types.js';
 import { upsertLocalUser, type LocalUser } from './users.js';
-import { resolveWorkspace } from './workspaces.js';
+import { LEGACY_CLAIM_PENDING, resolveWorkspace } from './workspaces.js';
 
 function fail(res: Response, status: number, code: string, message: string): void {
   res.status(status).json({ data: null, error: { message, code } });
@@ -64,6 +64,10 @@ export function requireWorkspace(db: Db): RequestHandler {
     }
 
     const workspace = resolveWorkspace(db, { ...identity, orgId: identity.orgId });
+    if (workspace === LEGACY_CLAIM_PENDING) {
+      fail(res, 503, 'legacy_claim_pending', 'The legacy workspace claim address is not configured.');
+      return;
+    }
     if (!workspace) {
       if (identity.profileFresh === false) {
         fail(res, 503, 'workspace_not_ready', 'Workspace identity could not be refreshed. Retry.');

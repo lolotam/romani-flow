@@ -38,19 +38,32 @@ export function isWorkspaceSuspended(db: Db, workspaceId: string): boolean {
 /**
  * Points the legacy workspace at the address that may claim it.
  *
- * The address comes from the environment, so it is written once at boot and
- * never logged. A workspace that is already linked to an organization keeps its
- * link: the claim belongs to the owner who already took it.
+ * The address comes from the environment and is never logged. While the
+ * workspace is still unlinked, a later boot may replace it, so a corrected
+ * environment value overwrites a typo. Once an organization is linked the
+ * claim belongs to that owner and the stored address is left untouched.
+ * Returns whether the stored address changed.
  */
 export function applyLegacyClaimEmail(db: Db, email: string): boolean {
   const normalized = email.trim().toLowerCase();
   if (!normalized) return false;
-  const now = new Date().toISOString();
+  const current = db.prepare(
+    'SELECT legacy_claim_email FROM workspaces WHERE id = ? AND clerk_org_id IS NULL',
+  ).get(LEGACY_WORKSPACE_ID) as { legacy_claim_email: string | null } | undefined;
+  if (!current || current.legacy_claim_email === normalized) return false;
   const written = db.prepare(
     `UPDATE workspaces SET legacy_claim_email = ?, updated_at = ?
-     WHERE id = ? AND clerk_org_id IS NULL AND legacy_claim_email IS NULL`,
-  ).run(normalized, now, LEGACY_WORKSPACE_ID);
+     WHERE id = ? AND clerk_org_id IS NULL`,
+  ).run(normalized, new Date().toISOString(), LEGACY_WORKSPACE_ID);
   return written.changes === 1;
+}
+
+/** True while the legacy workspace exists, is unlinked, and has no claim address. */
+export function legacyClaimIsUnconfigured(db: Db): boolean {
+  const row = db.prepare(
+    'SELECT clerk_org_id, legacy_claim_email FROM workspaces WHERE id = ?',
+  ).get(LEGACY_WORKSPACE_ID) as { clerk_org_id: string | null; legacy_claim_email: string | null } | undefined;
+  return Boolean(row && row.clerk_org_id === null && row.legacy_claim_email === null);
 }
 
 /** Creates a workspace with its default settings and the generic starter catalog, all or nothing. */

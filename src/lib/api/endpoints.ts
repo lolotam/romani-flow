@@ -38,7 +38,8 @@ export interface ExpiryPreview {
 
 export interface CronStatus {
   enabled: boolean;
-  schedule: string;
+  /** Omitted when this workspace cannot see the platform schedule. */
+  schedule?: string;
   running: boolean;
   lastRunAt: string;
   lastRunResult: string;

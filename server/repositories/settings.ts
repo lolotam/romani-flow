@@ -180,7 +180,12 @@ export function setSettings(db: Db, scope: SettingScope, values: Record<string, 
 /** Every known setting with its current value for one workspace, for the Settings screen. */
 export function readAllSettings(db: Db, scope: Scope): Record<string, SettingValue> {
   const result: Record<string, SettingValue> = {};
+  // D11: the shared schedule is visible only to the legacy workspace, the same
+  // rule as mayChangeSchedule. The id is inlined so this module does not import
+  // the workspace repository (that repository imports settings).
+  const includeSchedule = scope.workspaceId === 'ws_legacy';
   for (const definition of SETTING_DEFINITIONS) {
+    if (definition.key === 'cron.schedule' && !includeSchedule) continue;
     result[definition.key] = getSetting(db, scope, definition.key);
   }
   return result;

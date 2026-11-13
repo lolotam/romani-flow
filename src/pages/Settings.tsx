@@ -37,7 +37,18 @@ export default function Settings() {
   const editable = canEdit(user?.role);
   const showWhatsApp = owner && whatsappAvailable;
   const [activeTab, setActiveTab] = useState(owner ? 'email' : 'appearance');
-  const selectedTab = !showWhatsApp && activeTab === 'whatsapp' ? (owner ? 'email' : 'appearance') : activeTab;
+  const visibleTabs = [
+    ...(owner ? ['email'] : []),
+    ...(showWhatsApp ? ['whatsapp'] : []),
+    ...(owner ? ['extraction'] : []),
+    'appearance',
+    'companies',
+    'positions',
+    'documents',
+    'ministries',
+    ...(owner ? ['backup'] : []),
+  ];
+  const selectedTab = visibleTabs.includes(activeTab) ? activeTab : visibleTabs[0];
   const [whatsappRefreshKey, setWhatsAppRefreshKey] = useState(0);
   const refreshWhatsAppSettings = useCallback(() => setWhatsAppRefreshKey(value => value + 1), []);
   const [isLoading, setIsLoading] = useState(true);

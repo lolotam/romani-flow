@@ -24,7 +24,6 @@ import {
 import { Button } from "@/components/ui/button";
 import { UserButton } from '@clerk/react';
 import { useAuth } from "@/hooks/useAuth";
-import { isOwner } from "@/lib/permissions";
 import { useLanguage } from "@/contexts/LanguageContext";
 import { ThemeToggle } from "@/components/ThemeToggle";
 
@@ -39,7 +38,7 @@ export function AppSidebar() {
     { title: t('nav.dashboard'), url: "/dashboard", icon: LayoutDashboard },
     { title: t('nav.employees'), url: "/employees", icon: Users },
     { title: t('nav.documents'), url: "/documents", icon: FileText },
-    ...(isOwner(user?.role) ? [{ title: t('nav.settings'), url: "/settings", icon: Settings }] : []),
+    ...(user ? [{ title: t('nav.settings'), url: "/settings", icon: Settings }] : []),
   ];
 
   const isActive = (path: string) => location.pathname === path;

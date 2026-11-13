@@ -26,7 +26,8 @@ import {
 
 export interface CronStatus {
   enabled: boolean;
-  schedule: string;
+  /** Present only when this workspace may read the platform schedule. */
+  schedule?: string;
   running: boolean;
   lastRunAt: string;
   lastRunResult: string;
@@ -176,14 +177,15 @@ export class CronService {
   }
 
   status(scope: Scope): CronStatus {
-    return {
+    const status: CronStatus = {
       enabled: getBoolean(this.db, scope, 'cron.enabled'),
-      schedule: this.currentSchedule(),
       running: this.activeRuns.size > 0,
       lastRunAt: getString(this.db, scope, 'cron.last_run_at'),
       lastRunResult: getString(this.db, scope, 'cron.last_run_result'),
       nextRun: getBoolean(this.db, scope, 'cron.enabled') ? (this.task?.getNextRun()?.toISOString() ?? null) : null,
     };
+    if (mayChangeSchedule(scope)) status.schedule = this.currentSchedule();
+    return status;
   }
 
   stop(): void {

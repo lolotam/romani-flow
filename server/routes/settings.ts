@@ -262,11 +262,6 @@ export function createSettingsRouter(
         settings: readAllSettings(db, tenantOf(req)),
         smtp: {
           configured: Boolean(config.smtp.host && config.smtp.user && config.smtp.pass),
-          host: config.smtp.host,
-          port: config.smtp.port,
-          user: config.smtp.user,
-          secure: config.smtp.secure,
-          from: config.smtp.from,
         },
       },
       error: null,

@@ -1,7 +1,7 @@
 import { randomBytes } from 'node:crypto';
 import type { Db } from '../db/connection.js';
 import { atomic } from '../notifications/whatsapp/repository.js';
-import { createWorkspace } from '../repositories/workspaces.js';
+import { createWorkspace, legacyClaimIsUnconfigured } from '../repositories/workspaces.js';
 import type { Identity } from './types.js';
 
 export interface WorkspaceLink {
@@ -25,8 +25,8 @@ function linkedWorkspace(db: Db, orgId: string): WorkspaceLink | null {
 /**
  * Hands the unsaved work of the legacy administrator to the claiming account.
  *
- * The drafts and the remembered form defaults belong to the account that wrote
- * them. The legacy administrator and the claiming Clerk user are the same
+ * The drafts, the remembered form defaults, and staged uploads belong to the
+ * account that wrote them. The legacy administrator and the claiming Clerk user are the same
  * person, so the rows move to the local user id of the claim. Both tables are
  * keyed by workspace, user and context, so a row that already exists for the
  * new account is a conflict: the newer row wins and the older one is dropped.
@@ -59,6 +59,10 @@ function handOverOwnership(db: Db, workspaceId: string, fromUserId: string, toUs
         .run(toUserId, workspaceId, fromUserId, row.context);
     }
   }
+  // Staged files are not unique per user, so the draft owner simply moves.
+  db.prepare(
+    'UPDATE pending_uploads SET draft_user_id = ? WHERE workspace_id = ? AND draft_user_id = ?',
+  ).run(toUserId, workspaceId, fromUserId);
 }
 
 function claimLegacyWorkspace(db: Db, identity: WorkspaceIdentity): WorkspaceLink | null {
@@ -101,10 +105,15 @@ function provisionWorkspace(db: Db, identity: WorkspaceIdentity): WorkspaceLink 
   return linkedWorkspace(db, identity.orgId)!;
 }
 
+/** The legacy workspace cannot be claimed or replaced until a claim address is configured. */
+export const LEGACY_CLAIM_PENDING = 'legacy_claim_pending';
+
 /** Maps a verified organization to its workspace, claiming legacy data or provisioning JIT. */
-export function resolveWorkspace(db: Db, identity: WorkspaceIdentity): WorkspaceLink | null {
+export function resolveWorkspace(db: Db, identity: WorkspaceIdentity): WorkspaceLink | typeof LEGACY_CLAIM_PENDING | null {
   const linked = linkedWorkspace(db, identity.orgId);
   if (linked) return linked;
+  // No address is stored yet, so claiming is impossible and a new workspace must not be created.
+  if (legacyClaimIsUnconfigured(db)) return LEGACY_CLAIM_PENDING;
   // Stale profile: do not claim and do not provision. The caller asks the user to retry.
   if (identity.profileFresh === false) return null;
   if (!isWorkspaceOwner(identity)) return null;

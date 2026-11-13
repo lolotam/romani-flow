@@ -87,7 +87,7 @@ function toForm(settings: Record<string, unknown>): EmailForm {
       .map((entry) => Number.parseInt(entry, 10))
       .filter((entry) => (REMINDER_INTERVALS as readonly number[]).includes(entry)),
     cronEnabled: asBoolean(settings['cron.enabled'], EMPTY_FORM.cronEnabled),
-    cronSchedule: String(settings['cron.schedule'] ?? EMPTY_FORM.cronSchedule),
+    cronSchedule: typeof settings['cron.schedule'] === 'string' ? settings['cron.schedule'] : EMPTY_FORM.cronSchedule,
     cronDays: asNumber(settings['cron.days'], EMPTY_FORM.cronDays),
     includeEmployees: asBoolean(settings['cron.include_employees'], true),
     includeDocuments: asBoolean(settings['cron.include_documents'], true),
@@ -95,8 +95,12 @@ function toForm(settings: Record<string, unknown>): EmailForm {
 }
 
 export function useEmailSettings() {
-  const { user, scheduleEditable } = useAuth();
+  const { user, workspaceId, scheduleEditable } = useAuth();
   const owner = isOwner(user?.role);
+  const identity = `${workspaceId ?? ''}:${user?.id ?? ''}`;
+  // Compared after each await so a response for the previous workspace cannot land.
+  const identityRef = useRef(identity);
+  identityRef.current = identity;
   const [form, setForm] = useState<EmailForm>(EMPTY_FORM);
   const [smtp, setSmtp] = useState<SmtpStatus | null>(null);
   const [cron, setCron] = useState<CronStatus | null>(null);
@@ -108,18 +112,21 @@ export function useEmailSettings() {
   const ready = useRef(false);
 
   const loadStatus = useCallback(async () => {
+    const requested = identity;
     if (!owner) return;
     const [cronResult, previewResult, logResult] = await Promise.all([
       endpoints.cron.status(),
       endpoints.email.expiryPreview(),
       endpoints.email.log(),
     ]);
+    if (identityRef.current !== requested) return;
     setCron(cronResult.data);
     setPreview(previewResult.data);
     setLog(logResult.data ?? []);
-  }, [owner]);
+  }, [identity, owner]);
 
   const load = useCallback(async () => {
+    const requested = identity;
     if (!owner) {
       ready.current = false;
       setSettingsReady(false);
@@ -132,6 +139,7 @@ export function useEmailSettings() {
       endpoints.settings.read(),
       endpoints.email.status(),
     ]);
+    if (identityRef.current !== requested) return;
     if (forbidden(error)) {
       setIsLoading(false);
       return;
@@ -145,8 +153,19 @@ export function useEmailSettings() {
       ready.current = true; setSettingsReady(true);
     }
     await loadStatus();
+    if (identityRef.current !== requested) return;
     setIsLoading(false);
-  }, [loadStatus, owner]);
+  }, [identity, loadStatus, owner]);
+
+  useEffect(() => {
+    setForm(EMPTY_FORM);
+    setSmtp(null);
+    setCron(null);
+    setPreview(null);
+    setLog([]);
+    ready.current = false;
+    setSettingsReady(false);
+  }, [identity]);
 
   useEffect(() => {
     void load();

@@ -45,7 +45,11 @@ process.env.CLERK_SECRET_KEY = clerkEnv.CLERK_SECRET_KEY;
 /** Only the identity boundary is faked; every application and database path is real. */
 function clerkApi(run) {
   const identityResolver = req => identities[req.get('x-synthetic-identity')] ?? null;
-  return reminderApi(run, undefined, clerkEnv, { identityResolver });
+  return reminderApi(async f => {
+    // A configured claim address is the normal boot state. Tests of the unconfigured gate clear it.
+    f.db.prepare("UPDATE workspaces SET legacy_claim_email='configured@example.invalid' WHERE id='ws_legacy' AND clerk_org_id IS NULL AND legacy_claim_email IS NULL").run();
+    return run(f);
+  }, undefined, clerkEnv, { identityResolver });
 }
 
 const workspaceFor = (f, orgId) => f.db.prepare('SELECT * FROM workspaces WHERE clerk_org_id=?').get(orgId) ?? null;
@@ -250,6 +254,27 @@ test('a valid user webhook upserts the primary verified email and a replay is id
   assert.ok(f.db.prepare("SELECT deleted_at FROM users WHERE clerk_user_id='clerk-webhook-user'").get().deleted_at);
 }));
 
+test('user.deleted drops that user\'s drafts and form defaults and detaches pending uploads', () => clerkApi(async f => {
+  assert.equal((await sendWebhook(f, userEvent())).status, 200);
+  const userId = f.db.prepare("SELECT id FROM users WHERE clerk_user_id='clerk-webhook-user'").get().id;
+  const stamp = '2026-01-01T00:00:00.000Z';
+  f.db.prepare("INSERT INTO document_drafts(workspace_id,user_id,scope,revision,values_json,updated_at) VALUES('ws_legacy',?,'new','r1','{}',?)").run(userId, stamp);
+  f.db.prepare("INSERT INTO form_defaults(workspace_id,user_id,form_key,source_id,values_json,updated_at) VALUES('ws_legacy',?,'companies','c1','{}',?)").run(userId, stamp);
+  f.db.prepare("INSERT INTO pending_uploads(id,file_name,file_path,file_size,mime_type,created_at,draft_user_id,workspace_id) VALUES('up-del','a.pdf','ws_legacy/a.pdf',1,'application/pdf',?,?,'ws_legacy')").run(stamp, userId);
+  f.db.prepare("INSERT INTO users(id,clerk_user_id,email,email_verified,name,created_at,last_seen_at) VALUES('other-local','clerk-other-user','other@example.invalid',1,'Other',?,?)").run(stamp, stamp);
+  f.db.prepare("INSERT INTO document_drafts(workspace_id,user_id,scope,revision,values_json,updated_at) VALUES('ws_legacy','other-local','new','r2','{}',?)").run(stamp);
+
+  const deleted = await sendWebhook(f, { type: 'user.deleted', data: { id: 'clerk-webhook-user', deleted: true } });
+  assert.equal(deleted.status, 200, JSON.stringify(deleted.json));
+  assert.ok(f.db.prepare("SELECT deleted_at FROM users WHERE clerk_user_id='clerk-webhook-user'").get().deleted_at);
+  assert.equal(f.db.prepare('SELECT count(*) n FROM document_drafts WHERE user_id=?').get(userId).n, 0);
+  assert.equal(f.db.prepare('SELECT count(*) n FROM form_defaults WHERE user_id=?').get(userId).n, 0);
+  assert.equal(f.db.prepare("SELECT draft_user_id FROM pending_uploads WHERE id='up-del'").get().draft_user_id, null);
+  assert.equal(f.db.prepare("SELECT count(*) n FROM pending_uploads WHERE id='up-del'").get().n, 1);
+  assert.equal(f.db.prepare("SELECT count(*) n FROM document_drafts WHERE user_id='other-local'").get().n, 1);
+  assert.equal(f.db.prepare("SELECT deleted_at FROM users WHERE id='other-local'").get().deleted_at, null);
+}));
+
 test('organization webhooks only rename linked workspaces and suspend without deleting tenant data', () => clerkApi(async f => {
   const created = await sendWebhook(f, { type: 'organization.created', data: { id: 'org-a', name: 'Webhook Workspace' } });
   assert.equal(created.status, 200, JSON.stringify(created.json));
@@ -414,6 +439,31 @@ test('a stale profile still serves an already-linked workspace', () => clerkApi(
   assert.equal(workspaceFor(f, 'org-a').id, workspace.id);
 }));
 
+test('a non-legacy owner settings read hides smtp credentials and the platform schedule', () => clerkApi(async f => {
+  assert.equal((await f.request('/api/companies', { identity: 'owner' })).status, 200);
+  const settings = await f.request('/api/settings', { identity: 'owner' });
+  assert.equal(settings.status, 200, JSON.stringify(settings.json));
+  assert.deepEqual(Object.keys(settings.json.data.smtp).sort(), ['configured']);
+  for (const field of ['host', 'port', 'user', 'secure', 'from']) {
+    assert.equal(field in settings.json.data.smtp, false, field);
+  }
+  assert.equal('cron.schedule' in settings.json.data.settings, false);
+  const cron = await f.request('/api/cron/status', { identity: 'owner' });
+  assert.equal(cron.status, 200, JSON.stringify(cron.json));
+  assert.equal('schedule' in cron.json.data, false);
+  assert.equal(typeof cron.json.data.enabled, 'boolean');
+}));
+
+test('the legacy workspace still receives the platform schedule and no smtp credentials', () => reminderApi(async f => {
+  const settings = await f.request('/api/settings');
+  assert.equal(settings.status, 200, JSON.stringify(settings.json));
+  assert.equal(typeof settings.json.data.settings['cron.schedule'], 'string');
+  assert.deepEqual(Object.keys(settings.json.data.smtp).sort(), ['configured']);
+  const cron = await f.request('/api/cron/status');
+  assert.equal(cron.status, 200, JSON.stringify(cron.json));
+  assert.equal(typeof cron.json.data.schedule, 'string');
+}));
+
 test('auth/me hides the schedule and WhatsApp outside the legacy workspace', () => clerkApi(async f => {
   assert.equal((await f.request('/api/companies', { identity: 'owner' })).status, 200);
   const response = await f.request('/api/auth/me', { identity: 'owner' });
@@ -424,15 +474,49 @@ test('auth/me hides the schedule and WhatsApp outside the legacy workspace', () 
   assert.equal(response.json.data.whatsappAvailable, false);
 }));
 
-test('the legacy claim address is stored only while the workspace is unlinked', () => reminderApi(async f => {
+test('the legacy claim address is replaced while the workspace is unlinked and kept after it is linked', () => reminderApi(async f => {
   assert.equal(applyLegacyClaimEmail(f.db, ' Legacy@Example.invalid '), true);
   assert.equal(f.db.prepare("SELECT legacy_claim_email FROM workspaces WHERE id='ws_legacy'").get().legacy_claim_email, 'legacy@example.invalid');
-  assert.equal(applyLegacyClaimEmail(f.db, 'other@example.invalid'), false, 'an address already stored is left alone');
-  assert.equal(f.db.prepare("SELECT legacy_claim_email FROM workspaces WHERE id='ws_legacy'").get().legacy_claim_email, 'legacy@example.invalid');
+  assert.equal(applyLegacyClaimEmail(f.db, 'legacy@example.invalid'), false, 'storing the same address is not a change');
+  assert.equal(applyLegacyClaimEmail(f.db, 'other@example.invalid'), true, 'a corrected address replaces a typo');
+  assert.equal(f.db.prepare("SELECT legacy_claim_email FROM workspaces WHERE id='ws_legacy'").get().legacy_claim_email, 'other@example.invalid');
 
   f.db.prepare("UPDATE workspaces SET clerk_org_id='org-legacy', legacy_claim_email=NULL WHERE id='ws_legacy'").run();
   assert.equal(applyLegacyClaimEmail(f.db, 'legacy@example.invalid'), false);
   assert.equal(f.db.prepare("SELECT clerk_org_id, legacy_claim_email FROM workspaces WHERE id='ws_legacy'").get().legacy_claim_email, null);
+}));
+
+test('an unconfigured legacy claim does not provision a workspace', () => clerkApi(async f => {
+  f.db.prepare("UPDATE workspaces SET legacy_claim_email=NULL WHERE id='ws_legacy'").run();
+  const before = f.db.prepare('SELECT count(*) n FROM workspaces').get().n;
+  const response = await f.request('/api/companies', { identity: 'owner' });
+  assert.equal(response.status, 503, JSON.stringify(response.json));
+  assert.equal(response.json.error.code, 'legacy_claim_pending');
+  assert.match(response.json.error.message, /claim address is not configured/i);
+  assert.equal(f.db.prepare('SELECT count(*) n FROM workspaces').get().n, before);
+  assert.equal(workspaceFor(f, 'org-a'), null);
+
+  f.db.prepare("UPDATE workspaces SET legacy_claim_email='configured@example.invalid' WHERE id='ws_legacy'").run();
+  const ready = await f.request('/api/companies', { identity: 'owner' });
+  assert.equal(ready.status, 200, JSON.stringify(ready.json));
+  assert.ok(workspaceFor(f, 'org-a'));
+}));
+
+test('a legacy claim moves pending uploads onto the new user', () => clerkApi(async f => {
+  const adminId = 'legacy-admin-upload';
+  const otherId = 'legacy-other-upload';
+  const stamp = '2026-01-01T00:00:00.000Z';
+  f.db.prepare("INSERT INTO admin_users(workspace_id,id,email,name,role,password_hash,created_at,updated_at) VALUES('ws_legacy',?,'legacy@example.invalid','Legacy','admin','not-a-login-fixture',?,?)").run(adminId, stamp, stamp);
+  f.db.prepare("INSERT INTO pending_uploads(id,file_name,file_path,file_size,mime_type,created_at,draft_user_id,draft_scope,workspace_id) VALUES('up-legacy','a.pdf','ws_legacy/a.pdf',1,'application/pdf',?,?,'new','ws_legacy')").run(stamp, adminId);
+  f.db.prepare("INSERT INTO pending_uploads(id,file_name,file_path,file_size,mime_type,created_at,draft_user_id,draft_scope,workspace_id) VALUES('up-other','b.pdf','ws_legacy/b.pdf',1,'application/pdf',?,?,'new','ws_legacy')").run(stamp, otherId);
+  f.db.prepare("UPDATE workspaces SET legacy_claim_email='legacy@example.invalid' WHERE id='ws_legacy'").run();
+
+  const claimed = await f.request('/api/documents', { identity: 'legacyOwner' });
+  assert.equal(claimed.status, 200, JSON.stringify(claimed.json));
+  const userId = f.db.prepare("SELECT id FROM users WHERE clerk_user_id='clerk-legacy-owner'").get().id;
+  assert.notEqual(userId, adminId);
+  assert.equal(f.db.prepare("SELECT draft_user_id FROM pending_uploads WHERE id='up-legacy'").get().draft_user_id, userId);
+  assert.equal(f.db.prepare("SELECT draft_user_id FROM pending_uploads WHERE id='up-other'").get().draft_user_id, otherId);
 }));
 
 test('a legacy claim moves drafts and form defaults onto the new user', () => clerkApi(async f => {
