@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { Router } from 'express';
 import { verifyWebhook, type WebhookEvent } from '@clerk/express/webhooks';
 import type { AppConfig } from '../config.js';
@@ -9,9 +10,17 @@ import { syncOrganization, suspendOrganization } from './workspaces.js';
 
 function forgetDeletedUser(db: Db, clerkUserId: string): void {
   const now = new Date().toISOString();
-  const user = db.prepare('SELECT id FROM users WHERE clerk_user_id = ?').get(clerkUserId) as { id: string } | undefined;
-  db.prepare('UPDATE users SET deleted_at = ?, last_seen_at = ? WHERE clerk_user_id = ?').run(now, now, clerkUserId);
-  if (!user) return;
+  // The event may arrive before the first request stored the user, so a
+  // tombstone is written either way. A later sign-in upsert keeps deleted_at
+  // and is refused; the stored email and name are removed.
+  db.prepare(`
+    INSERT INTO users (id, clerk_user_id, email, email_verified, name, deleted_at, created_at, last_seen_at)
+    VALUES (?, ?, NULL, 0, NULL, ?, ?, ?)
+    ON CONFLICT(clerk_user_id) DO UPDATE SET
+      email = NULL, email_verified = 0, name = NULL,
+      deleted_at = excluded.deleted_at, last_seen_at = excluded.last_seen_at
+  `).run(`usr_${randomUUID()}`, clerkUserId, now, now, now);
+  const user = db.prepare('SELECT id FROM users WHERE clerk_user_id = ?').get(clerkUserId) as { id: string };
   // Migration 011 dropped the admin_users foreign keys. These three statements
   // restore that cascade for a platform identity: drafts and defaults go away,
   // and staged uploads stay without a deleted owner.

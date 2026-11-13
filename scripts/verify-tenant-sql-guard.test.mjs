@@ -218,6 +218,19 @@ function valuesBindWorkspace(columnsInner, valuesInner) {
   return isBoundWorkspaceValue(splitTopLevel(trimmed)[index] ?? '');
 }
 
+/** The inner text of each `(...)` tuple of a VALUES list, starting at its first parenthesis. */
+function valueTuples(sql, openIndex) {
+  const tuples = [];
+  let next = openIndex;
+  for (;;) {
+    const tuple = readParen(sql, next);
+    tuples.push(tuple.inner);
+    const more = /^\s*,\s*\(/.exec(sql.slice(tuple.end));
+    if (!more) return tuples;
+    next = tuple.end + more[0].length - 1;
+  }
+}
+
 /** INSERT targets whose workspace_id value is a placeholder. One entry per such INSERT. */
 function coveredInserts(sql) {
   const covered = [];
@@ -230,11 +243,12 @@ function coveredInserts(sql) {
     const rest = sql.slice(columns.end);
     const valuesMatch = /^\s*VALUES\s*\(/i.exec(rest);
     const selectMatch = /^\s*SELECT\b/i.exec(rest);
-    let list = null;
-    if (valuesMatch) list = readParen(sql, columns.end + valuesMatch[0].length - 1).inner;
-    else if (selectMatch) list = selectList(rest.slice(selectMatch[0].length));
+    let lists = [];
+    if (valuesMatch) lists = valueTuples(sql, columns.end + valuesMatch[0].length - 1);
+    else if (selectMatch) lists = [selectList(rest.slice(selectMatch[0].length))];
     else continue;
-    if (valuesBindWorkspace(columns.inner, list)) covered.push(name);
+    // Every row of a multi-row VALUES list must bind the workspace.
+    if (lists.every(list => valuesBindWorkspace(columns.inner, list))) covered.push(name);
   }
   return covered;
 }
@@ -347,7 +361,40 @@ function orBypassesWorkspace(sql) {
 }
 
 /** Predicates that sit in a WHERE or ON clause, plus each `${tenant.sql}` helper fragment. */
-function boundPredicates(sql) {
+/**
+ * Blanks the contents of SQL string literals and comments, keeping offsets and
+ * the quotes themselves. A `workspace_id = ?` written inside a string is text,
+ * not a predicate. Double-quoted identifiers are kept.
+ */
+function maskLiteralsAndComments(sql) {
+  let out = '';
+  let i = 0;
+  while (i < sql.length) {
+    if (sql[i] === "'") {
+      let j = i + 1;
+      while (j < sql.length && !(sql[j] === "'" && sql[j + 1] !== "'")) j += sql[j] === "'" ? 2 : 1;
+      out += "'" + ' '.repeat(Math.max(0, j - i - 1)) + (j < sql.length ? "'" : '');
+      i = j + 1;
+    } else if (sql.startsWith('--', i)) {
+      const end = sql.indexOf('\n', i);
+      const stop = end < 0 ? sql.length : end;
+      out += ' '.repeat(stop - i);
+      i = stop;
+    } else if (sql.startsWith('/*', i)) {
+      const end = sql.indexOf('*/', i + 2);
+      const stop = end < 0 ? sql.length : end + 2;
+      out += ' '.repeat(stop - i);
+      i = stop;
+    } else {
+      out += sql[i];
+      i += 1;
+    }
+  }
+  return out;
+}
+
+function boundPredicates(rawSql) {
+  const sql = maskLiteralsAndComments(rawSql);
   const predicates = [];
   BOUND_PREDICATE.lastIndex = 0;
   for (const match of sql.matchAll(BOUND_PREDICATE)) {
@@ -487,6 +534,10 @@ test('a workspace_id column is not a workspace predicate', () => {
   assert.deepEqual(unboundTables('SELECT id FROM workspace_usage WHERE id=?'), ['workspace_usage']);
   assert.deepEqual(unboundTables('SELECT id FROM documents WHERE id=? AND workspace_id=?'), []);
   assert.deepEqual(unboundTables('INSERT INTO documents (id, workspace_id) VALUES (?, ?)'), []);
+  assert.deepEqual(unboundTables("INSERT INTO companies (id, workspace_id) VALUES (?, ?), (?, 'ws_legacy')"), ['companies']);
+  assert.deepEqual(unboundTables('INSERT INTO companies (id, workspace_id) VALUES (?, ?), (?, ?)'), []);
+  assert.deepEqual(unboundTables("SELECT id FROM documents WHERE title = 'workspace_id = ?'"), ['documents']);
+  assert.deepEqual(unboundTables('SELECT id FROM documents WHERE id = ? -- AND workspace_id = ?'), ['documents']);
   assert.deepEqual(unboundTables('SELECT id FROM documents WHERE id=?${tenant.sql}'), []);
   assert.deepEqual(unboundTables('SELECT id FROM documents WHERE workspace_id = ? OR id = ?'), ['documents']);
   assert.deepEqual(unboundTables('SELECT id FROM documents WHERE (workspace_id = ? OR id = ?)'), ['documents']);

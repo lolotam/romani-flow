@@ -254,6 +254,25 @@ test('a valid user webhook upserts the primary verified email and a replay is id
   assert.ok(f.db.prepare("SELECT deleted_at FROM users WHERE clerk_user_id='clerk-webhook-user'").get().deleted_at);
 }));
 
+test('user.deleted before the first request leaves a tombstone that refuses the account', () => clerkApi(async f => {
+  const deleted = await sendWebhook(f, { type: 'user.deleted', data: { id: 'clerk-owner', deleted: true } });
+  assert.equal(deleted.status, 200);
+  const response = await f.request('/api/companies', { identity: 'owner' });
+  assert.equal(response.status, 401);
+  const row = f.db.prepare("SELECT email, name, deleted_at FROM users WHERE clerk_user_id='clerk-owner'").get();
+  assert.ok(row.deleted_at);
+  assert.equal(row.email, null, 'a later sign-in does not store the deleted account email again');
+  assert.equal(row.name, null);
+}));
+
+test('user.deleted removes the stored email and name of an existing account', () => clerkApi(async f => {
+  assert.equal((await f.request('/api/companies', { identity: 'owner' })).status, 200);
+  assert.equal((await sendWebhook(f, { type: 'user.deleted', data: { id: 'clerk-owner', deleted: true } })).status, 200);
+  const row = f.db.prepare("SELECT email, name FROM users WHERE clerk_user_id='clerk-owner'").get();
+  assert.deepEqual({ ...row }, { email: null, name: null });
+  assert.equal((await f.request('/api/companies', { identity: 'owner' })).status, 401);
+}));
+
 test('user.deleted drops that user\'s drafts and form defaults and detaches pending uploads', () => clerkApi(async f => {
   assert.equal((await sendWebhook(f, userEvent())).status, 200);
   const userId = f.db.prepare("SELECT id FROM users WHERE clerk_user_id='clerk-webhook-user'").get().id;

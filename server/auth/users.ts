@@ -24,6 +24,7 @@ export function upsertLocalUser(db: Db, identity: Pick<Identity, 'userId' | 'ema
       email_verified = excluded.email_verified,
       name = excluded.name,
       last_seen_at = excluded.last_seen_at
+    WHERE users.deleted_at IS NULL
   `).run(`usr_${randomUUID()}`, identity.userId, identity.email?.trim() || null,
     identity.emailVerified ? 1 : 0, identity.name, now, now);
   return db.prepare('SELECT * FROM users WHERE clerk_user_id = ?').get(identity.userId) as unknown as LocalUser;
