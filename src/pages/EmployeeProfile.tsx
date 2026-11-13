@@ -18,11 +18,14 @@ import { EmployeeProfileHeader } from '@/components/employees/EmployeeProfileHea
 import { EmployeeDocumentFilters } from '@/components/employees/EmployeeDocumentFilters';
 import { EmployeeDocumentsGrid } from '@/components/employees/EmployeeDocumentsGrid';
 import { Plus, FileText, ArrowRight, DownloadCloud } from 'lucide-react';
+import { useAuth } from '@/hooks/useAuth';
+import { canEdit } from '@/lib/permissions';
 
 export default function EmployeeProfile() {
   const { employeeId } = useParams<{ employeeId: string }>();
   const navigate = useNavigate();
   const { toast } = useToast();
+  const editable = canEdit(useAuth().user?.role);
 
   const [employee, setEmployee] = useState<EmployeeWithRelations | null>(null);
   const [documents, setDocuments] = useState<DocumentWithRelations[]>([]);
@@ -371,13 +374,13 @@ export default function EmployeeProfile() {
                 <DownloadCloud className="h-4 w-4 ml-2" />
                 تنزيل {selectedDocuments.length > 0 ? 'المحددة' : 'الكل'}
               </Button>
-              <Button
+              {editable && <Button
                 onClick={() => setIsDocumentFormOpen(true)}
                 className="shadow-elegant hover:shadow-glow transition-all"
               >
                 <Plus className="h-4 w-4 ml-2" />
                 إضافة وثيقة
-              </Button>
+              </Button>}
             </div>
           </div>
 
@@ -415,21 +418,21 @@ export default function EmployeeProfile() {
                   ? 'لا توجد وثائق تطابق معايير البحث'
                   : 'لم يتم إضافة أي وثائق بعد'}
               </p>
-              <Button onClick={() => setIsDocumentFormOpen(true)}>
+              {editable && <Button onClick={() => setIsDocumentFormOpen(true)}>
                 <Plus className="h-4 w-4 ml-2" />
                 إضافة أول وثيقة
-              </Button>
+              </Button>}
             </motion.div>
           )}
         </motion.div>
 
         {/* Upload Dropzone */}
-        <UploadDropzone
+        {editable && <UploadDropzone
           onFilesAccepted={handleFilesAccepted}
           acceptedFileTypes={[]}
           maxFiles={1}
           className="border-2 border-dashed border-muted-foreground/25 hover:border-primary/50 transition-colors p-8 rounded-lg bg-muted/10"
-        />
+        />}
 
         {/* Document Form Dialog */}
         <EmployeeDocumentForm

@@ -6,6 +6,8 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, Di
 import { UploadDropzone } from '@/components/ui/UploadDropzone';
 import { DocumentForm } from '@/components/DocumentForm';
 import { useLanguage } from '@/contexts/LanguageContext';
+import { useAuth } from '@/hooks/useAuth';
+import { canEdit } from '@/lib/permissions';
 
 interface DocumentUploadDialogProps {
   open: boolean;
@@ -16,6 +18,8 @@ interface DocumentUploadDialogProps {
 
 export function DocumentUploadDialog({ open, onOpenChange, onFilesAccepted, copy }: DocumentUploadDialogProps) {
   const { t } = useLanguage();
+  const { user } = useAuth();
+  if (!canEdit(user?.role)) return null;
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogTrigger asChild>

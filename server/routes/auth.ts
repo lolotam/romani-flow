@@ -1,12 +1,12 @@
-import { Router } from 'express';
+import { Router, type RequestHandler } from 'express';
 import type { AppConfig } from '../config.js';
 import type { Db } from '../db/connection.js';
 import { asyncHandler } from '../middleware/errorHandler.js';
 import {
   clearSessionCookie,
-  requireAuth,
   setSessionCookie,
   signSession,
+  tenantOf,
   toSessionUser,
 } from '../middleware/auth.js';
 import {
@@ -14,12 +14,15 @@ import {
   touchLastLogin,
   verifyPassword,
 } from '../repositories/adminUsers.js';
+import { mayChangeSchedule } from '../services/cronService.js';
+import { getNumber } from '../repositories/settings.js';
+import { LEGACY_WORKSPACE_ID } from '../repositories/workspaces.js';
 
 /**
  * Authentication routes.
  *
- * Login issues a signed session cookie; no token is ever exposed to page
- * JavaScript.
+ * Legacy login issues a signed session cookie; Clerk sessions stay in Clerk's
+ * own httpOnly cookie. Neither scheme exposes a token to page JavaScript.
  */
 
 const MAX_ATTEMPTS = 8;
@@ -44,12 +47,36 @@ function clearAttempts(key: string): void {
   attempts.delete(key);
 }
 
-export function createAuthRouter(config: AppConfig, db: Db): Router {
+export function createAuthRouter(
+  config: AppConfig,
+  db: Db,
+  authenticated: RequestHandler,
+  /** The workspace that owns the WhatsApp instance (D9). */
+  whatsappWorkspaceId: string = LEGACY_WORKSPACE_ID,
+): Router {
   const router = Router();
+
+  router.get('/config', (_req, res) => {
+    res.json({
+      data: {
+        provider: config.authProvider,
+        publishableKey: config.authProvider === 'clerk' ? config.clerkPublishableKey : null,
+      },
+      error: null,
+    });
+  });
 
   router.post(
     '/login',
     asyncHandler(async (req, res) => {
+      if (config.authProvider === 'clerk') {
+        res.status(410).json({
+          data: null,
+          error: { message: 'Legacy login is disabled.', code: 'legacy_login_disabled' },
+        });
+        return;
+      }
+
       const key = req.ip ?? 'unknown';
       if (isRateLimited(key)) {
         res.status(429).json({
@@ -86,8 +113,16 @@ export function createAuthRouter(config: AppConfig, db: Db): Router {
 
       const user = toSessionUser(admin);
       setSessionCookie(config, res, signSession(config, user));
+      const scope = { workspaceId: admin.workspace_id };
 
-      res.json({ data: { user }, error: null });
+      res.json({
+        data: {
+          user,
+          workspaceId: scope.workspaceId,
+          expiryWarningDays: getNumber(db, scope, 'expiry_warning_days', 30),
+        },
+        error: null,
+      });
     }),
   );
 
@@ -96,8 +131,21 @@ export function createAuthRouter(config: AppConfig, db: Db): Router {
     res.json({ data: { loggedOut: true }, error: null });
   });
 
-  router.get('/me', requireAuth(config, db), (req, res) => {
-    res.json({ data: { user: req.user }, error: null });
+  router.get('/me', authenticated, (req, res) => {
+    const scope = tenantOf(req);
+    // The two capabilities the server enforces on its own: the shared schedule
+    // belongs to the legacy workspace, and the WhatsApp instance belongs to the
+    // workspace that owns it.
+    res.json({
+      data: {
+        user: req.user,
+        workspaceId: scope.workspaceId,
+        expiryWarningDays: getNumber(db, scope, 'expiry_warning_days', 30),
+        scheduleEditable: mayChangeSchedule(scope),
+        whatsappAvailable: scope.workspaceId === whatsappWorkspaceId,
+      },
+      error: null,
+    });
   });
 
   return router;

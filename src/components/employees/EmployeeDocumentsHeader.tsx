@@ -1,4 +1,4 @@
-﻿import { useRef, useState } from 'react';
+import { useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ArrowLeft, Camera, User, UserCheck, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -8,6 +8,8 @@ import { UploadDropzone } from '@/components/ui/UploadDropzone';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { useToast } from '@/hooks/use-toast';
 import { endpoints, type EmployeeWithRelations } from '@/lib/api';
+import { useAuth } from '@/hooks/useAuth';
+import { canEdit } from '@/lib/permissions';
 
 interface EmployeeDocumentsHeaderProps {
   employee: EmployeeWithRelations;
@@ -17,6 +19,7 @@ interface EmployeeDocumentsHeaderProps {
 
 export function EmployeeDocumentsHeader({ employee, documentCount, onPhotoChange }: EmployeeDocumentsHeaderProps) {
   const { t, language } = useLanguage();
+  const editable = canEdit(useAuth().user?.role);
   const { toast } = useToast();
   const navigate = useNavigate();
   const [photoOpen, setPhotoOpen] = useState(false);
@@ -59,11 +62,11 @@ export function EmployeeDocumentsHeader({ employee, documentCount, onPhotoChange
           alt={employee.name} className="w-full h-full object-cover" />
           : <div className="w-full h-full flex items-center justify-center"><User className="h-10 w-10 text-primary/60" /></div>}
       </div>
-      <Button size="icon" className="absolute -bottom-1 -right-1 h-8 w-8 rounded-full"
+      {editable && <Button size="icon" className="absolute -bottom-1 -right-1 h-8 w-8 rounded-full"
         disabled={isSaving} onClick={() => setPhotoOpen(true)} aria-label={label('رفع صورة الموظف', 'Upload employee photo')}>
         <Camera className="h-4 w-4" />
-      </Button>
-      {employee.photo_path && <Button size="icon" variant="destructive"
+      </Button>}
+      {editable && employee.photo_path && <Button size="icon" variant="destructive"
         className="absolute -top-1 -left-1 h-6 w-6 rounded-full" disabled={isSaving}
         onClick={() => { void changePhoto(); }} aria-label={label('حذف صورة الموظف', 'Remove employee photo')}>
         <X className="h-3 w-3" />

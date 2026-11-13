@@ -7,6 +7,7 @@ import { closeDatabase, openDatabase } from './db/connection.js';
 import { runMigrations } from './db/migrator.js';
 import { defaultSeedFile, seedDatabase } from './db/seed.js';
 import { applyOwnerCatalogs } from './db/ownerCatalogs.js';
+import { applyLegacyClaimEmail, legacyClaimIsUnconfigured } from './repositories/workspaces.js';
 import { CronService } from './services/cronService.js';
 import { DocumentService } from './services/documentService.js';
 import { Mailer } from './services/mailer.js';
@@ -70,6 +71,15 @@ async function main(): Promise<void> {
   const migrations = runMigrations(db, path.join(projectRoot, 'server', 'db', 'migrations'));
   if (migrations.applied.length > 0) {
     console.log(`[server] applied migrations: ${migrations.applied.join(', ')}`);
+  }
+
+  // The address that may claim the legacy workspace comes from the environment
+  // and is never logged: only the fact that it was written is reported.
+  if (config.legacyClaimEmail && applyLegacyClaimEmail(db, config.legacyClaimEmail)) {
+    console.log('[server] legacy workspace claim address configured');
+  }
+  if (config.authProvider === 'clerk' && legacyClaimIsUnconfigured(db)) {
+    console.warn('[server] WARNING: the legacy workspace is unlinked and its claim address is not configured');
   }
 
   const storage = new StorageService(config.uploadsDir);

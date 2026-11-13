@@ -9,9 +9,13 @@ export function validEmailSettings(value: unknown): value is Record<string, unkn
   const addresses = ['email.recipients', 'email.cc'];
   if (!addresses.every(key => Array.isArray(settings[key]) && (settings[key] as unknown[]).every(item => typeof item === 'string' && /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(item)))) return false;
   const intervals = settings['email.notification_intervals'];
+  const schedule = settings['cron.schedule'];
+  // A non-legacy workspace does not receive the platform schedule at all.
+  const scheduleOk = schedule === undefined
+    || (typeof schedule === 'string' && schedule.trim().split(/\s+/).length === 5);
   return typeof settings['email.from_name'] === 'string'
     && (settings['email.language'] === 'ar' || settings['email.language'] === 'en')
-    && typeof settings['cron.schedule'] === 'string' && settings['cron.schedule'].trim().split(/\s+/).length === 5
+    && scheduleOk
     && typeof settings['cron.days'] === 'number' && Number.isFinite(settings['cron.days']) && settings['cron.days'] >= 1 && settings['cron.days'] <= 365
     && Array.isArray(intervals) && intervals.every(item => (typeof item === 'string' || typeof item === 'number') && ['90', '30', '15', '7', '1'].includes(String(item)));
 }

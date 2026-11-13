@@ -6,6 +6,7 @@ import ts from 'typescript';
 import { employeeDocumentDraft, newDocumentDefaults, nextDocumentFileTitle } from '../src/lib/documentFormDrafts.ts';
 import { restoreFormDate } from '../src/lib/formDefaults.ts';
 import { draftValues } from '../src/lib/documentDraftSession.ts';
+import { isOwner } from '../src/lib/permissions.ts';
 
 // Exercise the real component callbacks at the hook boundary, without a browser.
 // Defaults are already pending when a newly created cross-device draft arrives.
@@ -26,7 +27,8 @@ function formCallbacks(kind = 'employee', status = 'saved', overrides = {}) {
   const modules = {
     react,
     '@/lib/utils': { cn: (...classes) => classes.filter(Boolean).join(' ') },
-    '@/hooks/useAuth': { useAuth: () => ({ user: { id: 'synthetic-admin' } }) },
+    '@/hooks/useAuth': { useAuth: () => ({ user: { id: 'synthetic-admin', role: 'admin' } }) },
+    '@/lib/permissions': { isOwner },
     '@/contexts/LanguageContext': { useLanguage: () => ({ t: key => key, isRTL: false }) },
     '@/lib/documentFormDrafts': { employeeDocumentDraft, nextDocumentFileTitle },
     '@/lib/formDefaults': { restoreFormDate },

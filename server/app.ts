@@ -2,9 +2,14 @@ import path from 'node:path';
 import cookieParser from 'cookie-parser';
 import cronEngine from 'node-cron';
 import express, { type Express, type Request, type Response, type NextFunction } from 'express';
+import { clerkMiddleware } from '@clerk/express';
 import type { AppConfig } from './config.js';
 import type { Db } from './db/connection.js';
-import { requireAuth, requireAdmin } from './middleware/auth.js';
+import { requireAuth, requireAdmin, requireRole, tenantOf } from './middleware/auth.js';
+import { createClerkIdentityResolver } from './auth/clerkIdentity.js';
+import { isPlatformAdmin, requireSignedIn, requireWorkspace } from './auth/middleware.js';
+import type { IdentityResolver } from './auth/types.js';
+import { createClerkWebhookRouter } from './auth/webhook.js';
 import { asyncHandler, errorHandler, notFoundHandler } from './middleware/errorHandler.js';
 import { createAuthRouter } from './routes/auth.js';
 import { createBackupRouter } from './routes/backup.js';
@@ -16,7 +21,7 @@ import { createResourceRouter } from './routes/resources.js';
 import { createSettingsRouter } from './routes/settings.js';
 import { createFormDefaultsRouter } from './routes/formDefaults.js';
 import { createPairingRouter, createPairingWebhook } from './whatsapp/routes.js';
-import type { CronService } from './services/cronService.js';
+import { mayChangeSchedule, type CronService } from './services/cronService.js';
 import type { DocumentService } from './services/documentService.js';
 import type { Mailer } from './services/mailer.js';
 import type { StorageService } from './services/storageService.js';
@@ -30,6 +35,7 @@ import { createDefaultTransport, type ExtractionTransport } from './extraction/h
 import type { DecoderFactory } from './extraction/images.js';
 import { assertCurrentDraft, draftReference } from './repositories/documentDrafts.js';
 import { RepositoryError } from './repositories/base.js';
+import { PLATFORM, setSetting } from './repositories/settings.js';
 import { prepareEmployee } from './notifications/whatsapp/employeePolicy.js';
 
 /**
@@ -54,14 +60,17 @@ export interface AppDependencies {
   extractionClock?: ExtractionClock;
   /** The injected image decoder. The native decoder stays the default. */
   decoderFactory?: DecoderFactory;
+  /** Clerk is the only auth boundary replaced by tests. */
+  identityResolver?: IdentityResolver;
 }
 
 export function createApp(deps: AppDependencies): Express {
   const { config, db, mailer, cron, storage, documents, staticDir } = deps;
   const reminders = deps.reminders ?? createReminderRuntime(db, config.whatsapp);
   documents.configureNotifications({ coordinator: reminders.coordinator, changed: () => reminders.reconcile() });
-  cron.setReminderEnqueue(() => reminders.schedule());
+  cron.setReminderEnqueue(reminders.scope, () => reminders.schedule());
   const app = express();
+  app.locals.identityResolver = deps.identityResolver ?? createClerkIdentityResolver();
 
   // One service per application. The transport is injected, so the pipeline
   // never reaches a provider by accident.
@@ -94,12 +103,25 @@ export function createApp(deps: AppDependencies): Express {
   // The cookie parser runs before the extraction route: the route needs the
   // session, and it brings its own body parser for the prepared document.
   app.use(cookieParser());
+  if (config.authProvider === 'clerk') {
+    app.use('/api', clerkMiddleware({
+      secretKey: config.clerkSecretKey ?? undefined,
+      publishableKey: config.clerkPublishableKey ?? undefined,
+    }));
+  }
+
+  const authenticated = config.authProvider === 'clerk' ? requireWorkspace(db) : requireAuth(config, db);
+  const signedIn = config.authProvider === 'clerk' ? requireSignedIn(db) : requireAuth(config, db);
+
+  if (config.authProvider === 'clerk') {
+    app.use('/api/webhooks/clerk', express.raw({ type: 'application/json', limit: '2mb' }), createClerkWebhookRouter(config, db));
+  }
 
   // The extraction route owns its body parser, so it is mounted before the
   // global parser: the global limit of two megabytes stays untouched.
   app.use(
     '/api/document-extraction',
-    requireAuth(config, db),
+    authenticated,
     requireAdmin,
     createDocumentExtractionRouter(config, db, extraction, deps.decoderFactory),
   );
@@ -110,11 +132,13 @@ export function createApp(deps: AppDependencies): Express {
   // Public endpoints.
   app.use('/health', createRootHealthRouter(db, () => mailer.isConfigured()));
   app.use('/api/health', createHealthRouter(db));
-  app.use('/api/auth', createAuthRouter(config, db));
+  app.use('/api/auth', createAuthRouter(config, db, authenticated, reminders.scope.workspaceId));
   app.use('/api/whatsapp/webhook', createPairingWebhook(config.whatsapp));
+  app.get('/api/platform/me', signedIn, (req, res) => {
+    res.json({ data: { isPlatformAdmin: isPlatformAdmin(config, req) }, error: null });
+  });
 
-  // Everything below requires a session.
-  const authenticated = requireAuth(config, db);
+  // Everything below requires a session and a tenant selected by the server.
   app.use('/api/whatsapp', authenticated, createPairingRouter(config.whatsapp, config.env, reminders));
   app.use('/api/whatsapp', authenticated, createReminderRouter(reminders, config.env));
   app.use('/api/form-defaults', authenticated, createFormDefaultsRouter(db));
@@ -128,8 +152,8 @@ export function createApp(deps: AppDependencies): Express {
   app.get(
     '/api/cron/status',
     authenticated,
-    (_req: Request, res: Response) => {
-      res.json({ data: cron.status(), error: null });
+    (req: Request, res: Response) => {
+      res.json({ data: cron.status(tenantOf(req)), error: null });
     },
   );
 
@@ -160,19 +184,20 @@ export function createApp(deps: AppDependencies): Express {
         return;
       }
 
-      db.prepare(
-        `INSERT INTO settings (key, value, updated_at) VALUES (?, ?, ?)
-         ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`,
-      ).run('cron.schedule', JSON.stringify(schedule), new Date().toISOString());
-
-      if (enabled !== undefined) {
-        db.prepare(
-          `INSERT INTO settings (key, value, updated_at) VALUES (?, ?, ?)
-           ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`,
-        ).run('cron.enabled', JSON.stringify(enabled), new Date().toISOString());
+      const scope = tenantOf(req);
+      const current = cron.currentSchedule();
+      if (schedule !== current && !mayChangeSchedule(scope)) {
+        res.status(403).json({
+          data: null,
+          error: { message: 'The reminder schedule is managed by the platform.', code: 'schedule_platform_managed' },
+        });
+        return;
       }
+      if (schedule !== current) setSetting(db, PLATFORM, 'cron.schedule', schedule);
+      if (enabled !== undefined) setSetting(db, scope, 'cron.enabled', enabled);
 
-      res.json({ data: cron.reschedule(), error: null });
+      cron.reschedule();
+      res.json({ data: cron.status(scope), error: null });
     },
   );
 
@@ -184,7 +209,7 @@ export function createApp(deps: AppDependencies): Express {
   app.put(
     '/api/documents/:id/file',
     authenticated,
-    requireAdmin,
+    requireRole('editor'),
     asyncHandler(async (req, res) => {
       const uploadId = typeof req.body?.upload_id === 'string' ? req.body.upload_id : '';
       if (!uploadId) {
@@ -195,12 +220,12 @@ export function createApp(deps: AppDependencies): Express {
         return;
       }
 
-      const scope = 'edit:' + String(req.params.id);
+      const draftScope = 'edit:' + String(req.params.id);
       const draft = req.body?.draft === undefined ? undefined : draftReference(req.body.draft);
-      if (draft && draft.scope !== scope) throw new RepositoryError('Draft does not match this document.', 'invalid_draft', 400);
-      const updated = await documents.replaceFile(String(req.params.id), uploadId,
-        draft ? { userId: req.user!.id, scope } : undefined,
-        draft ? () => assertCurrentDraft(db, req.user!.id, draft) : undefined);
+      if (draft && draft.scope !== draftScope) throw new RepositoryError('Draft does not match this document.', 'invalid_draft', 400);
+      const updated = await documents.replaceFile(tenantOf(req), String(req.params.id), uploadId,
+        draft ? { userId: req.user!.id, scope: draftScope } : undefined,
+        draft ? () => assertCurrentDraft(db, tenantOf(req), req.user!.id, draft) : undefined);
       if (!updated) {
         res.status(404).json({
           data: null,
@@ -215,9 +240,9 @@ export function createApp(deps: AppDependencies): Express {
   app.delete(
     '/api/documents/:id/file',
     authenticated,
-    requireAdmin,
+    requireRole('editor'),
     asyncHandler(async (req, res) => {
-      const updated = await documents.detachFile(String(req.params.id));
+      const updated = await documents.detachFile(tenantOf(req), String(req.params.id));
       if (!updated) {
         res.status(404).json({
           data: null,
@@ -235,7 +260,7 @@ export function createApp(deps: AppDependencies): Express {
     createResourceRouter(db, 'employees', {
       defaultRelations: ['companies'],
       managedFields: ['photo_path', 'photo_mime_type'],
-      transformWrite: (payload, db, existing) => prepareEmployee(payload, db, existing),
+      transformWrite: (payload, db, scope, existing) => prepareEmployee(payload, db, scope, existing),
       aroundWrite: action => reminders.aroundWrite(action),
       afterWrite: () => reminders.reconcile(),
       transformRead: (row) => ({

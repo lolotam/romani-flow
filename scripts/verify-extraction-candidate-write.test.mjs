@@ -12,7 +12,7 @@ import {
 
 function getDbSnapshot(db) {
   return {
-    settings: db.prepare('SELECT key, value FROM settings ORDER BY key ASC').all(),
+    settings: db.prepare("SELECT key, value FROM settings UNION ALL SELECT workspace_id || ':' || key, value FROM workspace_settings ORDER BY 1 ASC").all(),
     whatsapp_jobs: db.prepare('SELECT * FROM whatsapp_jobs ORDER BY id ASC').all(),
     whatsapp_attempts: db.prepare('SELECT * FROM whatsapp_attempts ORDER BY id ASC').all(),
     whatsapp_recipients: db.prepare('SELECT * FROM whatsapp_recipients ORDER BY id ASC').all(),
@@ -30,9 +30,9 @@ function getExtractionSettings(db) {
     }
   };
   return {
-    enabled: parseVal(db.prepare("SELECT value FROM settings WHERE key='ai_extraction.enabled'").get()?.value),
-    provider: parseVal(db.prepare("SELECT value FROM settings WHERE key='ai_extraction.provider'").get()?.value),
-    model: parseVal(db.prepare("SELECT value FROM settings WHERE key='ai_extraction.model'").get()?.value),
+    enabled: parseVal(db.prepare("SELECT value FROM workspace_settings WHERE workspace_id='ws_legacy' AND key='ai_extraction.enabled'").get()?.value),
+    provider: parseVal(db.prepare("SELECT value FROM workspace_settings WHERE workspace_id='ws_legacy' AND key='ai_extraction.provider'").get()?.value),
+    model: parseVal(db.prepare("SELECT value FROM workspace_settings WHERE workspace_id='ws_legacy' AND key='ai_extraction.model'").get()?.value),
   };
 }
 
@@ -165,7 +165,7 @@ async function runQueuedCoordinatorTest({ name, expectSuccess, mutate }) {
             model: MOCK_MODEL_ID,
           });
           assert.equal(
-            f.db.prepare("SELECT value FROM settings WHERE key='email.enabled'").get()?.value,
+            f.db.prepare("SELECT value FROM workspace_settings WHERE workspace_id='ws_legacy' AND key='email.enabled'").get()?.value,
             'true'
           );
         } else {
@@ -275,7 +275,7 @@ async function runWhatsAppEnableTest({ name, expectSuccess, mutate }) {
             model: MOCK_MODEL_ID,
           });
           assert.equal(
-            f.db.prepare("SELECT value FROM settings WHERE key='whatsapp.enabled'").get()?.value,
+            f.db.prepare("SELECT value FROM workspace_settings WHERE workspace_id='ws_legacy' AND key='whatsapp.enabled'").get()?.value,
             'true'
           );
         } else {

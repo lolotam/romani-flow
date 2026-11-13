@@ -8,6 +8,7 @@ import type { Ministry } from './types';
 
 interface MinistriesSettingsProps {
   ministries: Ministry[];
+  canEdit: boolean;
   newMinistry: { name: string; name_ar: string };
   onNewMinistryChange: (value: { name: string; name_ar: string }) => void;
   onAdd: () => void;
@@ -16,7 +17,7 @@ interface MinistriesSettingsProps {
 }
 
 export default function MinistriesSettings({
-  ministries, newMinistry, onNewMinistryChange, onAdd, onEdit, onDelete
+  ministries, canEdit, newMinistry, onNewMinistryChange, onAdd, onEdit, onDelete
 }: MinistriesSettingsProps) {
   const { t } = useLanguage();
 
@@ -30,7 +31,7 @@ export default function MinistriesSettings({
         <CardDescription>{t('settings.ministries.description')}</CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        {canEdit && <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           <div>
             <Label htmlFor="ministry_name_ar">{t('settings.ministries.nameArabic')}</Label>
             <Input
@@ -52,7 +53,7 @@ export default function MinistriesSettings({
           <div className="flex items-end">
             <Button onClick={onAdd} className="w-full">{t('settings.ministries.addNew')}</Button>
           </div>
-        </div>
+        </div>}
 
         <div className="pt-4 border-t">
           <h3 className="font-semibold mb-3">{t('settings.ministries.currentMinistriesCount', { count: ministries.length })}</h3>
@@ -63,14 +64,14 @@ export default function MinistriesSettings({
                   <p className="font-medium">{ministry.name_ar}</p>
                   <p className="text-sm text-muted-foreground">{ministry.name}</p>
                 </div>
-                <div className="flex gap-2">
+                {canEdit && <div className="flex gap-2">
                   <Button size="sm" variant="outline" onClick={() => onEdit(ministry)}>
                     <Pencil className="h-4 w-4" />
                   </Button>
                   <Button size="sm" variant="outline" onClick={() => onDelete(ministry)}>
                     <Trash2 className="h-4 w-4" />
                   </Button>
-                </div>
+                </div>}
               </div>
             ))}
           </div>

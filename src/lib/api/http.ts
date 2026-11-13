@@ -23,10 +23,20 @@ export interface ApiEnvelope<T> {
   error: Error | null;
 }
 
-/** The envelope as it arrives on the wire. */
+/** The envelope as it arrives on the wire. `error` may be a code string. */
 interface WireEnvelope<T> {
   data: T | null;
-  error: ApiErrorPayload | null;
+  error: ApiErrorPayload | string | null;
+}
+
+/** A 409 `{ error: 'draft_workspace_mismatch' }` or the usual `{ message, code }` object. */
+function errorFromPayload(raw: ApiErrorPayload | string | null | undefined, status: number): ApiRequestError {
+  if (typeof raw === 'string') {
+    return new ApiRequestError(raw, raw, status, { message: raw, code: raw });
+  }
+  const message = raw?.message ?? `Request failed (${status}).`;
+  const code = raw?.code ?? 'http_error';
+  return new ApiRequestError(message, code, status, raw ?? undefined);
 }
 
 const DEFAULT_TIMEOUT_MS = 30_000;
@@ -37,6 +47,8 @@ export interface RequestOptions {
   signal?: AbortSignal;
   timeoutMs?: number;
   draftAccount?: string;
+  /** Workspace the open form was created for. Sent as `x-draft-workspace`. */
+  draftWorkspace?: string;
   keepalive?: boolean;
 }
 
@@ -88,6 +100,7 @@ export async function request<T>(
       headers: {
         ...(options.body === undefined ? {} : { 'Content-Type': 'application/json' }),
         ...(options.draftAccount ? { 'x-draft-account': options.draftAccount } : {}),
+        ...(options.draftWorkspace ? { 'x-draft-workspace': options.draftWorkspace } : {}),
       },
       body: options.body === undefined ? undefined : JSON.stringify(options.body),
       signal: controller.signal,
@@ -101,12 +114,7 @@ export async function request<T>(
     const payload = text ? (JSON.parse(text) as WireEnvelope<T>) : null;
 
     if (!response.ok) {
-      const message = payload?.error?.message ?? `Request failed (${response.status}).`;
-      const code = payload?.error?.code ?? 'http_error';
-      return {
-        data: null,
-        error: new ApiRequestError(message, code, response.status, payload?.error ?? undefined),
-      };
+      return { data: null, error: errorFromPayload(payload?.error, response.status) };
     }
 
     return {
@@ -164,6 +172,12 @@ export async function uploadFiles<T>(
     const payload = text ? (JSON.parse(text) as WireEnvelope<T>) : null;
 
     if (!response.ok) {
+      if (typeof payload?.error === 'string') {
+        return {
+          data: null,
+          error: new ApiRequestError(payload.error, payload.error, response.status, { message: payload.error, code: payload.error }),
+        };
+      }
       const message = payload?.error?.message ?? `Upload failed (${response.status}).`;
       return {
         data: null,

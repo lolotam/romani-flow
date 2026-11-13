@@ -1,4 +1,5 @@
 import type { Db } from '../db/connection.js';
+import type { Scope } from '../repositories/base.js';
 
 /**
  * The email log.
@@ -28,15 +29,16 @@ export interface EmailLogEntry extends EmailLogDraft {
   status: string;
 }
 
-function insert(db: Db, entry: EmailLogEntry, status: string): string {
+function insert(db: Db, scope: Scope, entry: EmailLogEntry, status: string): string {
   const id = globalThis.crypto.randomUUID();
 
   db.prepare(
     `INSERT INTO email_log
-       (id, kind, recipients, subject, status, error, attachment_count, attachment_bytes, trigger_source, details, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       (id, workspace_id, kind, recipients, subject, status, error, attachment_count, attachment_bytes, trigger_source, details, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     id,
+    scope.workspaceId,
     entry.kind,
     entry.recipients.join(', '),
     entry.subject,
@@ -58,25 +60,27 @@ function insert(db: Db, entry: EmailLogEntry, status: string): string {
  * The row is written before the message is handed to SMTP, so a crash can never
  * hide the attempt.
  */
-export function startEmailAttempt(db: Db, entry: EmailLogDraft): string {
-  return insert(db, { ...entry, status: 'sending' }, 'sending');
+export function startEmailAttempt(db: Db, scope: Scope, entry: EmailLogDraft): string {
+  return insert(db, scope, { ...entry, status: 'sending' }, 'sending');
 }
 
 /** Completes a send attempt with its final outcome. */
 export function finishEmailAttempt(
   db: Db,
+  scope: Scope,
   logId: string,
   outcome: { status: string; error?: string; details?: unknown },
 ): void {
-  db.prepare('UPDATE email_log SET status = ?, error = ?, details = COALESCE(?, details) WHERE id = ?').run(
+  db.prepare('UPDATE email_log SET status = ?, error = ?, details = COALESCE(?, details) WHERE id = ? AND workspace_id = ?').run(
     outcome.status,
     outcome.error ?? null,
     outcome.details === undefined ? null : JSON.stringify(outcome.details),
     logId,
+    scope.workspaceId,
   );
 }
 
 /** Records an attempt that never reached SMTP. */
-export function writeEmailLog(db: Db, entry: EmailLogEntry): void {
-  insert(db, entry, entry.status);
+export function writeEmailLog(db: Db, scope: Scope, entry: EmailLogEntry): void {
+  insert(db, scope, entry, entry.status);
 }

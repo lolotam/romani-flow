@@ -23,7 +23,7 @@ const accounts=['actor-a','actor-b'].map((id,i)=>({id,email:`actor${i}@example.i
 let base,server;
 before(async()=>{
  runMigrations(db,path.resolve('server/db/migrations'));writeSeedMarker(db);applyOwnerCatalogs(db);
- for(const user of accounts)db.prepare('INSERT INTO admin_users (id,email,name,role,password_hash,created_at,updated_at) VALUES (?,?,?,?,?,?,?)').run(user.id,user.email,user.name,user.role,'unused-fixture-hash','2026-01-01','2026-01-01');
+ for(const user of accounts)db.prepare('INSERT INTO admin_users (workspace_id, id,email,name,role,password_hash,created_at,updated_at) VALUES (\'ws_legacy\', ?,?,?,?,?,?,?)').run(user.id,user.email,user.name,user.role,'unused-fixture-hash','2026-01-01','2026-01-01');
  const storage=new StorageService(dir);storage.ensureDirectories();const mailer=new Mailer(config);const cron=new CronService(db,mailer);const documents=new DocumentService(db,storage);
  server=createApp({config,db,mailer,cron,storage,documents,staticDir:dir}).listen(0,'127.0.0.1');
  await new Promise(r=>server.on('listening',r));base=`http://127.0.0.1:${server.address().port}`;
@@ -60,7 +60,7 @@ test('only the latest successful creation is remembered; failures and edits leav
  assert.equal(db.prepare('SELECT count(*) n FROM form_defaults WHERE user_id=? AND form_key=?').get(accounts[0].id,'employees').n,1);
 });
 test('document defaults omit files and dates, including legacy values, without changing stored documents',async()=>{
- const type=insertRow(db,'document_types',{name:'Fixture type',name_ar:'نوع اختباري'});
+ const type=insertRow(db, { workspaceId: 'ws_legacy' }, 'document_types',{name:'Fixture type',name_ar:'نوع اختباري'});
  const created=await call('/api/documents',{method:'POST',body:{title:'Fixture document',document_type_id:type.id,issue_date:'2029-01-01',expiry_date:'2030-01-01'}});assert.equal(created.status,201);
  const before=(await call('/api/form-defaults/documents')).payload.data;assert.equal(before.title,'Fixture document');
  for(const k of ['file_name','file_path','file_size','mime_type','upload_id','id','status','issue_date','expiry_date'])assert.equal(k in before,false);
@@ -77,7 +77,7 @@ test('catalog setup preserves a previously imported owner row',()=>{
  const other=new DatabaseSync(':memory:');try{
  runMigrations(other,path.resolve('server/db/migrations'));
  writeSeedMarker(other);
- const old=insertRow(other,'companies',{name:'curemed',name_ar:'Existing owner label',description:'Keep this description'});
+ const old=insertRow(other, { workspaceId: 'ws_legacy' }, 'companies',{name:'curemed',name_ar:'Existing owner label',description:'Keep this description'});
  applyOwnerCatalogs(other);
  assert.equal(other.prepare('SELECT count(*) n FROM companies').get().n,2);
  assert.equal(other.prepare('SELECT name_ar FROM companies WHERE id=?').get(old.id).name_ar,'Existing owner label');
@@ -95,12 +95,19 @@ test('a defaults storage failure rolls back the creation itself',async()=>{
  }finally{db.exec('DROP TRIGGER fixture_reject_default');}
 });
 test('deleted catalog references are not restored into a new document form',async()=>{
- const ministry=insertRow(db,'ministries',{name:'Temporary fixture ministry',name_ar:'Temporary fixture'});
+ const ministry=insertRow(db, { workspaceId: 'ws_legacy' }, 'ministries',{name:'Temporary fixture ministry',name_ar:'Temporary fixture'});
  const type=db.prepare('SELECT id FROM document_types LIMIT 1').get().id;
  assert.equal((await call('/api/documents',{method:'POST',body:{title:'Reference fixture',document_type_id:type,ministry_id:ministry.id}})).status,201);
  db.prepare('DELETE FROM ministries WHERE id=?').run(ministry.id);
  const defaults=(await call('/api/form-defaults/documents')).payload.data;
  assert.equal('ministry_id' in defaults,false);assert.equal(defaults.title,'Reference fixture');
+});
+test('a custom ministry choice is remembered for the next document form',async()=>{
+ const type=db.prepare('SELECT id FROM document_types LIMIT 1').get().id;
+ assert.equal((await call('/api/documents',{method:'POST',body:{title:'Custom ministry fixture',document_type_id:type,ministry_id:'other',entity_name:'Fixture custom ministry'}})).status,201);
+ // The sentinel is resolved to a real ministry before the defaults are stored, so the choice survives.
+ const custom=db.prepare("SELECT id FROM ministries WHERE name_ar='Fixture custom ministry'").get();
+ assert.equal((await call('/api/form-defaults/documents')).payload.data.ministry_id,custom.id);
 });
 test('all catalog add request objects are accepted and remembered',async()=>{
  const payloads={companies:{name:'Fixture company',name_ar:'Fixture company AR'},ministries:{name:'Fixture ministry',name_ar:'Fixture ministry AR'},positions:{name:'Fixture position',name_ar:'Fixture position AR',value:'fixture-position'},document_types:{name:'Fixture document type',name_ar:'Fixture document type AR'}};

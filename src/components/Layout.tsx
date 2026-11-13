@@ -5,6 +5,8 @@ import { Menu } from "lucide-react";
 import { LanguageToggle } from "@/components/ui/LanguageToggle";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { useLanguage } from "@/contexts/LanguageContext";
+import { OrganizationSwitcher } from '@clerk/react';
+import { useAuth } from '@/hooks/useAuth';
 
 interface LayoutProps {
   children: ReactNode;
@@ -12,15 +14,17 @@ interface LayoutProps {
 
 export function Layout({ children }: LayoutProps) {
   const { t, language } = useLanguage();
+  const { provider } = useAuth();
 
   return (
     <SidebarProvider defaultOpen={true}>
       <div className="min-h-screen flex w-full bg-background" dir={language === 'ar' ? 'rtl' : 'ltr'}>
         <AppSidebar />
         <div className="flex-1 flex flex-col min-w-0">
-          <header className="h-14 flex items-center justify-between border-b border-border bg-card px-4">
+          <header className="min-h-14 flex items-center justify-between gap-2 border-b border-border bg-card px-4 py-2">
             <h1 className="text-lg font-semibold text-foreground text-center flex-1 lg:text-start lg:flex-none">{t('header.title')}</h1>
             <div className="flex items-center gap-2">
+              {provider === 'clerk' && <OrganizationSwitcher hidePersonal />}
               <ThemeToggle />
               <LanguageToggle />
               <SidebarTrigger className="ml-2">

@@ -2,7 +2,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import type { Db } from '../db/connection.js';
 import { createAdmin, findAdminByEmail } from '../repositories/adminUsers.js';
-import { ensureSetting, getSetting, setSetting, SETTING_DEFINITIONS } from '../repositories/settings.js';
+import { LEGACY_WORKSPACE_ID } from '../repositories/workspaces.js';
+import { ensureSetting, ensureWorkspaceDefaults, getSetting, isTenantSetting, PLATFORM, setSetting, SETTING_DEFINITIONS } from '../repositories/settings.js';
 
 /**
  * First-boot seed.
@@ -27,8 +28,8 @@ const SEED_MARKER_KEY = 'system.seed_version';
 export function writeSeedMarker(db: Db): void {
   db.exec('SAVEPOINT bootstrap_seed_marker');
   try {
-    setSetting(db, 'document_drafts.bootstrap_active', true);
-    setSetting(db, SEED_MARKER_KEY, SEED_VERSION);
+    setSetting(db, PLATFORM, 'document_drafts.bootstrap_active', true);
+    setSetting(db, PLATFORM, SEED_MARKER_KEY, SEED_VERSION);
     db.prepare("DELETE FROM settings WHERE key='document_drafts.bootstrap_active'").run();
     db.exec('RELEASE bootstrap_seed_marker');
   } catch (error) {
@@ -104,6 +105,8 @@ function insertPreservingHistory(
   }
   values.set('created_at', created);
   values.set('updated_at', updated);
+  // The first-boot import is the existing business data: it belongs to the legacy workspace.
+  values.set('workspace_id', LEGACY_WORKSPACE_ID);
 
   db.prepare(
     `INSERT INTO "${table}" (${[...values.keys()].map((column) => `"${column}"`).join(', ')}) VALUES (${[...values.keys()].map(() => '?').join(', ')})`,
@@ -135,7 +138,7 @@ export async function seedDatabase(db: Db, options: SeedOptions): Promise<SeedRe
 
   for (const table of TABLES) result.imported[table] = 0;
 
-  const marker = getSetting(db, SEED_MARKER_KEY);
+  const marker = getSetting(db, PLATFORM, SEED_MARKER_KEY);
 
   if (marker === SEED_VERSION) {
     result.seedSkippedReason = 'already imported';
@@ -185,9 +188,10 @@ export async function seedDatabase(db: Db, options: SeedOptions): Promise<SeedRe
     }
   }
 
-  // Settings defaults.
+  // Settings defaults: tenant keys for the legacy workspace, the rest once for the platform.
+  ensureWorkspaceDefaults(db, { workspaceId: LEGACY_WORKSPACE_ID });
   for (const definition of SETTING_DEFINITIONS) {
-    ensureSetting(db, definition.key);
+    if (!isTenantSetting(definition.key)) ensureSetting(db, PLATFORM, definition.key);
   }
 
   // Admin accounts — never overwritten once they exist. The password comes only
@@ -210,6 +214,8 @@ export async function seedDatabase(db: Db, options: SeedOptions): Promise<SeedRe
       name: displayNameFromEmail(email),
       password: adminPassword,
       role: 'admin',
+      // Seeded logins work in the legacy workspace until the Clerk switch (P2).
+      workspaceId: LEGACY_WORKSPACE_ID,
     });
     result.adminsCreated.push(email);
   }

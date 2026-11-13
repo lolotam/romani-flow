@@ -1,7 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { endpoints, rejectedSettings } from '@/lib/api';
 import type { CronStatus, EmailLogEntry, ExpiryPreview, SmtpStatus } from '@/lib/api';
+import { ApiRequestError } from '@/lib/api/http';
 import { validEmailSettings, writeLoadedEmailSettings } from '@/lib/emailSettingsWrite';
+import { useAuth } from './useAuth';
+import { isOwner } from '@/lib/permissions';
 
 /**
  * State and actions of the e-mail settings screen.
@@ -69,6 +72,10 @@ export function splitAddresses(value: string): string[] {
     .filter((entry) => entry.length > 0);
 }
 
+function forbidden(error: Error | null): boolean {
+  return error instanceof ApiRequestError && error.status === 403;
+}
+
 function toForm(settings: Record<string, unknown>): EmailForm {
   return {
     enabled: asBoolean(settings['email.enabled'], EMPTY_FORM.enabled),
@@ -80,7 +87,7 @@ function toForm(settings: Record<string, unknown>): EmailForm {
       .map((entry) => Number.parseInt(entry, 10))
       .filter((entry) => (REMINDER_INTERVALS as readonly number[]).includes(entry)),
     cronEnabled: asBoolean(settings['cron.enabled'], EMPTY_FORM.cronEnabled),
-    cronSchedule: String(settings['cron.schedule'] ?? EMPTY_FORM.cronSchedule),
+    cronSchedule: typeof settings['cron.schedule'] === 'string' ? settings['cron.schedule'] : EMPTY_FORM.cronSchedule,
     cronDays: asNumber(settings['cron.days'], EMPTY_FORM.cronDays),
     includeEmployees: asBoolean(settings['cron.include_employees'], true),
     includeDocuments: asBoolean(settings['cron.include_documents'], true),
@@ -88,6 +95,12 @@ function toForm(settings: Record<string, unknown>): EmailForm {
 }
 
 export function useEmailSettings() {
+  const { user, workspaceId, scheduleEditable } = useAuth();
+  const owner = isOwner(user?.role);
+  const identity = `${workspaceId ?? ''}:${user?.id ?? ''}`;
+  // Compared after each await so a response for the previous workspace cannot land.
+  const identityRef = useRef(identity);
+  identityRef.current = identity;
   const [form, setForm] = useState<EmailForm>(EMPTY_FORM);
   const [smtp, setSmtp] = useState<SmtpStatus | null>(null);
   const [cron, setCron] = useState<CronStatus | null>(null);
@@ -99,28 +112,60 @@ export function useEmailSettings() {
   const ready = useRef(false);
 
   const loadStatus = useCallback(async () => {
+    const requested = identity;
+    if (!owner) return;
     const [cronResult, previewResult, logResult] = await Promise.all([
       endpoints.cron.status(),
       endpoints.email.expiryPreview(),
       endpoints.email.log(),
     ]);
+    if (identityRef.current !== requested) return;
     setCron(cronResult.data);
     setPreview(previewResult.data);
     setLog(logResult.data ?? []);
-  }, []);
+  }, [identity, owner]);
 
   const load = useCallback(async () => {
+    const requested = identity;
+    if (!owner) {
+      ready.current = false;
+      setSettingsReady(false);
+      setIsLoading(false);
+      return;
+    }
     setIsLoading(true);
     ready.current = false; setSettingsReady(false);
-    const { data, error } = await endpoints.settings.read();
+    const [{ data, error }, status] = await Promise.all([
+      endpoints.settings.read(),
+      endpoints.email.status(),
+    ]);
+    if (identityRef.current !== requested) return;
+    if (forbidden(error)) {
+      setIsLoading(false);
+      return;
+    }
     if (!error && validEmailSettings(data?.settings)) {
       setForm(toForm(data.settings));
-      setSmtp(data.smtp);
+      const configured = typeof status.data?.configured === 'boolean'
+        ? status.data.configured
+        : data.smtp?.configured === true;
+      setSmtp({ configured });
       ready.current = true; setSettingsReady(true);
     }
     await loadStatus();
+    if (identityRef.current !== requested) return;
     setIsLoading(false);
-  }, [loadStatus]);
+  }, [identity, loadStatus, owner]);
+
+  useEffect(() => {
+    setForm(EMPTY_FORM);
+    setSmtp(null);
+    setCron(null);
+    setPreview(null);
+    setLog([]);
+    ready.current = false;
+    setSettingsReady(false);
+  }, [identity]);
 
   useEffect(() => {
     void load();
@@ -145,7 +190,9 @@ export function useEmailSettings() {
       'email.language': form.language,
       'email.notification_intervals': form.intervals,
       'cron.enabled': form.cronEnabled,
-      'cron.schedule': form.cronSchedule.trim(),
+      // A workspace that cannot edit the platform schedule must not send it:
+      // a changed value would reject the whole save.
+      ...(scheduleEditable ? { 'cron.schedule': form.cronSchedule.trim() } : {}),
       'cron.days': form.cronDays,
       'cron.include_employees': form.includeEmployees,
       'cron.include_documents': form.includeDocuments,

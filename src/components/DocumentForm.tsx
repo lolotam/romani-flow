@@ -21,6 +21,7 @@ import { useDocumentDraft } from '@/hooks/useDocumentDraft';
 import { draftValues, type DocumentDraftSession } from '@/lib/documentDraftSession';
 import { restoreFormDate } from '@/lib/formDefaults';
 import { useAuth } from '@/hooks/useAuth';
+import { isOwner } from '@/lib/permissions';
 import { DocumentDraftStatus } from './documents/DocumentDraftStatus';
 import { useLastSubmissionRestore } from '@/hooks/useLastSubmission';
 import { newDocumentDefaults, nextDocumentFileTitle } from '@/lib/documentFormDrafts';
@@ -50,9 +51,10 @@ export function DocumentExtractionBridge({ stateRef, options, disabled }: {
 }
 
 export function DocumentForm(props: DocumentFormProps) {
-  const { user } = useAuth();
+  const { user, workspaceId } = useAuth();
   const scope = props.editingDocument ? 'edit:' + props.editingDocument.id : props.preselectedEmployeeId ? 'employee:' + props.preselectedEmployeeId : props.preselectedCompanyId ? 'company:' + props.preselectedCompanyId : 'new';
-  return <DocumentFormContent key={String(user?.id) + ':' + scope} {...props} scope={scope} />;
+  const identity = workspaceId ? `${workspaceId}:${String(user?.id)}` : String(user?.id);
+  return <DocumentFormContent key={identity + ':' + scope} {...props} scope={scope} />;
 }
 
 function DocumentFormContent({
@@ -130,7 +132,7 @@ function DocumentFormContent({
     draftSessionRef.current?.current?.change(draftValues(form.getValues()));
   }, [form]);
   const extractionOptions: DocumentExtractionOptions = {
-    account: user?.id ?? null,
+    account: user && isOwner(user.role) ? user.id : null,
     scope,
     context: [scope, beneficiaryType, watchedCompanyId, watchedEmployeeId, documentTypes.length, ministries.length].join('|'),
     file: selectedFile,

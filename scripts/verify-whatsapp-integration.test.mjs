@@ -14,7 +14,7 @@ import {buildEmployeePayload} from '../src/components/employees/employeeHelpers.
 import {EMPTY_EMPLOYEE_FORM} from '../src/components/employees/employeeTypes.ts';
 
 test('stale metadata forms preserve another admin consent and destination changes unless explicitly edited',t=>reminderApi(async f=>{
- f.db.prepare("INSERT INTO admin_users(id,email,name,role,password_hash,created_at,updated_at) VALUES('second-admin','second@example.invalid','Synthetic','admin','unused','2026-01-01','2026-01-01')").run();
+ f.db.prepare("INSERT INTO admin_users(workspace_id, id,email,name,role,password_hash,created_at,updated_at) VALUES('ws_legacy', 'second-admin','second@example.invalid','Synthetic','admin','unused','2026-01-01','2026-01-01')").run();
  const cookie=f.config.cookieName+'='+signSession(f.config,{id:'second-admin',role:'admin',name:'Synthetic',email:'second@example.invalid'});
  const nativeFetch=globalThis.fetch;
  // Only browser-relative URL/auth resolution is adapted; both admins use the real API/SQLite.
@@ -78,7 +78,7 @@ test('business erase with invalid sending config cancels only its unsent namespa
  }
  const {selectReminders}=await import('../server/notifications/whatsapp/selection.ts');
  const other=new WhatsAppReminders(f.db,'other-isolated-fixture',{status:async()=>({configured:false,state:'unconfigured'}),sendText:async()=>{throw Error('No handoff allowed');}},()=>f.clock.now);
- other.store.enqueue(selectReminders(f.db,other.instance,f.clock.now));
+ other.store.enqueue(selectReminders(f.db, { workspaceId: 'ws_legacy' },other.instance,f.clock.now));
  const original=f.db.prepare('SELECT * FROM whatsapp_jobs ORDER BY id').all(),attempts=f.db.prepare('SELECT * FROM whatsapp_attempts ORDER BY id').all();
  const invalid=createReminderRuntime(f.db,{url:'',apiKey:'',instance:'',webhookSecret:''});
  const app=createApp({config:f.config,db:f.db,mailer:f.mailer,cron:f.cron,storage:f.storage,documents:f.documents,reminders:invalid,staticDir:f.config.dataDir});
@@ -89,10 +89,10 @@ test('business erase with invalid sending config cancels only its unsent namespa
   f.db.exec("CREATE TRIGGER reject_invalid_erase BEFORE UPDATE ON whatsapp_jobs BEGIN SELECT RAISE(ABORT,'Synthetic cancellation rejection'); END;");
   assert.equal((await erase()).status,500);assert.deepEqual(f.db.prepare('SELECT * FROM whatsapp_jobs ORDER BY id').all(),original);
   assert.equal(f.db.prepare('SELECT count(*) n FROM employees').get().n,1);
-  assert.equal(f.db.prepare("SELECT value FROM settings WHERE key='whatsapp.enabled'").get().value,'true');
+  assert.equal(f.db.prepare("SELECT value FROM workspace_settings WHERE workspace_id='ws_legacy' AND key='whatsapp.enabled'").get().value,'true');
   f.db.exec('DROP TRIGGER reject_invalid_erase');
   assert.equal((await erase()).status,200);assert.equal(f.db.prepare('SELECT count(*) n FROM employees').get().n,0);
-  assert.equal(f.db.prepare("SELECT value FROM settings WHERE key='whatsapp.enabled'").get().value,'false');
+  assert.equal(f.db.prepare("SELECT value FROM workspace_settings WHERE workspace_id='ws_legacy' AND key='whatsapp.enabled'").get().value,'false');
   assert.equal(f.db.prepare("SELECT count(*) n FROM whatsapp_jobs WHERE state='cancelled'").get().n,1);
   assert.deepEqual(f.db.prepare("SELECT * FROM whatsapp_jobs WHERE instance!='romani' OR state IN ('provider_accepted','unknown') ORDER BY id").all(),original.filter(job=>job.instance!=='romani'||['provider_accepted','unknown'].includes(job.state)));
   assert.deepEqual(f.db.prepare('SELECT * FROM whatsapp_attempts ORDER BY id').all(),attempts);
@@ -118,7 +118,7 @@ for(const initialState of ['pending','permanent_failed'])test(`invalid configura
  }
  const retained=f.db.prepare('SELECT * FROM whatsapp_jobs ORDER BY id').all();
  assert.equal((await f.request('/api/whatsapp/log')).json.data.items[0].retry_allowed,initialState==='permanent_failed');
- f.db.prepare("DELETE FROM settings WHERE key='whatsapp.last_enqueue_date'").run();
+ f.db.prepare("DELETE FROM workspace_settings WHERE workspace_id='ws_legacy' AND key='whatsapp.last_enqueue_date'").run();
  for(const config of [{...e.config,instance:'romani_test'},{...e.config,url:e.config.url+'/prefix'}]){
   const invalid=createReminderRuntime(f.db,config);assert.equal(invalid.instance,'');
   assert.equal(await invalid.schedule(),0);
@@ -136,7 +136,7 @@ for(const initialState of ['pending','permanent_failed'])test(`invalid configura
    const retry=await fetch('http://127.0.0.1:'+server.address().port+'/api/whatsapp/jobs/'+original[0].id+'/retry',{method:'POST',headers:{cookie}});
    assert.equal(retry.status,409);assert.equal(f.db.prepare('SELECT total_changes() n').get().n,before);
   }finally{server.closeAllConnections();await new Promise(resolve=>server.close(resolve));}
-  assert.equal(f.db.prepare("SELECT value FROM settings WHERE key='whatsapp.last_enqueue_date'").get(),undefined);
+  assert.equal(f.db.prepare("SELECT value FROM workspace_settings WHERE workspace_id='ws_legacy' AND key='whatsapp.last_enqueue_date'").get(),undefined);
   assert.deepEqual(f.db.prepare('SELECT * FROM whatsapp_jobs ORDER BY id').all(),retained);
  }
  assert.equal(e.requests.length,0);assert.equal(e.sends.length,0);
@@ -149,11 +149,11 @@ test('reminder enablement refuses pairing-compatible prefixes, aliases and nonca
  for(const config of [{...e.config,url:e.config.url+'/prefix'},{...e.config,instance:'romani_test'},{...e.config,url:e.config.url.replace('http:','HTTP:')}]){
   const transport=new MessageClient(config);
   await reminderApi(async f=>{
-   setSetting(f.db,'whatsapp.enabled',false);
+   setSetting(f.db, { workspaceId: 'ws_legacy' }, 'whatsapp.enabled',false);
    assert.deepEqual(await transport.status(),{configured:false,state:'unconfigured'});
    const response=await f.request('/api/settings',{method:'PUT',body:{settings:{'whatsapp.enabled':true}}});
    assert.equal(response.status,409);
-   assert.equal(f.db.prepare("SELECT value FROM settings WHERE key='whatsapp.enabled'").get().value,'false');
+   assert.equal(f.db.prepare("SELECT value FROM workspace_settings WHERE workspace_id='ws_legacy' AND key='whatsapp.enabled'").get().value,'false');
    assert.deepEqual(await transport.sendText(MANAGER_PHONE,'Synthetic'),{kind:'permanent_failed',code:'whatsapp_not_configured'});
    assert.equal(f.db.prepare('SELECT count(*) n FROM whatsapp_jobs').get().n,0);
   },transport,e.env);
@@ -162,7 +162,7 @@ test('reminder enablement refuses pairing-compatible prefixes, aliases and nonca
 }));
 
 test('assembled API/cron/SQLite/real HTTP adapter hands off fixed text once; days/restart/reconnect do not duplicate',()=>loopbackEvolution(async e=>reminderApi(async f=>{
- setSetting(f.db,'whatsapp.enabled',false);setSetting(f.db,'email.enabled',false);
+ setSetting(f.db, { workspaceId: 'ws_legacy' }, 'whatsapp.enabled',false);setSetting(f.db, { workspaceId: 'ws_legacy' }, 'email.enabled',false);
  assert.equal((await f.request('/api/settings',{method:'PUT',body:{settings:{'whatsapp.enabled':true}}})).status,200);
  assert.equal((await f.request('/api/whatsapp/status')).json.data.state,'connected');
  await f.request('/api/whatsapp/recipients',{method:'POST',body:{label:'Synthetic manager',phone:MANAGER_PHONE,enabled:true}});

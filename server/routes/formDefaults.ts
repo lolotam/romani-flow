@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import type { Db } from '../db/connection.js';
+import { tenantOf } from '../middleware/auth.js';
 import { readSubmission, supportsForm } from '../repositories/formDefaults.js';
 
 export function createFormDefaultsRouter(db: Db): Router {
@@ -11,7 +12,7 @@ export function createFormDefaultsRouter(db: Db): Router {
       res.status(400).json({ data: null, error: { code: 'unknown_form', message: 'Unknown form.' } });
       return;
     }
-    res.json({ data: readSubmission(db, req.user!.id, form), error: null });
+    res.json({ data: readSubmission(db, tenantOf(req), req.user!.id, form), error: null });
   });
   return router;
 }

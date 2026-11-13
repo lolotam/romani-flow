@@ -6,7 +6,7 @@ type Values = Record<string, unknown>;
 /** Restore only successful server submissions, never unsaved browser state. */
 export function useLastSubmissionRestore(form: string, enabled: boolean,
   restore: (values: Values) => void, pristine: () => boolean) {
-  const { user } = useAuth();
+  const { user, workspaceId } = useAuth();
   const userId = user?.id;
   const callbacks = useRef({ restore, pristine });
   callbacks.current = { restore, pristine };
@@ -17,18 +17,18 @@ export function useLastSubmissionRestore(form: string, enabled: boolean,
       if (!controller.signal.aborted && !error && data && Object.keys(data).length > 0 && callbacks.current.pristine()) callbacks.current.restore(data);
     });
     return () => controller.abort();
-  }, [form, enabled, userId]);
+  }, [form, enabled, userId, workspaceId]);
 }
 
-/** Guard late responses against overwriting input and reset when accounts change. */
+/** Guard late responses against overwriting input and reset when workspaces or accounts change. */
 export function useLastSubmissionState<T extends object>(form: string, initial: T, enabled = true): [T, Dispatch<SetStateAction<T>>] {
-  const { user } = useAuth();
+  const { user, workspaceId } = useAuth();
   const baseline = useRef(initial);
   const dirty = useRef(false);
   const [value, update] = useState<T>(initial);
   useEffect(() => {
     if (enabled) { dirty.current = false; update(baseline.current); }
-  }, [enabled, user?.id]);
+  }, [enabled, user?.id, workspaceId]);
   useLastSubmissionRestore(form, enabled, (saved) => {
     const next = { ...baseline.current };
     for (const key of Object.keys(next) as Array<keyof T>) {

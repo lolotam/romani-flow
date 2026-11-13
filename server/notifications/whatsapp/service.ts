@@ -1,6 +1,7 @@
 import type { Db } from '../../db/connection.js';
-import { RepositoryError } from '../../repositories/base.js';
-import { getBoolean, getString, setSetting, setSettings, type SettingValue } from '../../repositories/settings.js';
+import { RepositoryError, type Scope } from '../../repositories/base.js';
+import { getBoolean, getString, isTenantSetting, PLATFORM, setSetting, setSettings, type SettingValue } from '../../repositories/settings.js';
+import { LEGACY_WORKSPACE_ID, isWorkspaceSuspended } from '../../repositories/workspaces.js';
 import { NotificationCoordinator } from '../coordinator.js';
 import type { SendOutcome, WhatsAppTransport } from './contracts.js';
 import { atomic, ReminderStore } from './repository.js';
@@ -8,6 +9,8 @@ import { selectReminders } from './selection.js';
 import { changedDestinations, snapshotDestinations, type DestinationSnapshot } from './destinations.js';
 
 export class WhatsAppReminders {
+  /** D9: the one WhatsApp instance belongs to the legacy workspace until P4 adds one per workspace. */
+  readonly scope: Scope = { workspaceId: LEGACY_WORKSPACE_ID };
   readonly coordinator = new NotificationCoordinator();
   readonly store: ReminderStore;
   readonly auditInstance: string;
@@ -18,7 +21,7 @@ export class WhatsAppReminders {
 
   constructor(readonly db: Db, readonly instance: string, private readonly transport: WhatsAppTransport,
     readonly clock: () => Date = () => new Date()) {
-    this.store = new ReminderStore(db, instance, clock);
+    this.store = new ReminderStore(db, this.scope, instance, clock);
     // Invalid sending configuration must not hide this backend's existing audit.
     this.auditInstance = instance || 'romani';
   }
@@ -26,8 +29,8 @@ export class WhatsAppReminders {
   /** Call inside the business write's transaction and the shared coordinator. */
   reconcile(): void {
     if (!this.instance) return;
-    const candidates = selectReminders(this.db, this.instance, this.clock());
-    const after = snapshotDestinations(this.db, candidates);
+    const candidates = selectReminders(this.db, this.scope, this.instance, this.clock());
+    const after = snapshotDestinations(this.db, this.scope, candidates);
     const replacements = this.beforeDestinations ? changedDestinations(this.beforeDestinations, after) : [];
     this.store.reconcile(candidates, replacements);
     // Multiple hooks in one write must not reuse an already-consumed destination change.
@@ -36,7 +39,7 @@ export class WhatsAppReminders {
 
   aroundWrite<T>(action: () => Promise<T>): Promise<T> {
     return this.coordinator.runExclusive(async () => {
-      this.beforeDestinations = snapshotDestinations(this.db, selectReminders(this.db, this.instance, this.clock()));
+      this.beforeDestinations = snapshotDestinations(this.db, this.scope, selectReminders(this.db, this.scope, this.instance, this.clock()));
       try { return await action(); }
       finally { this.beforeDestinations = null; }
     });
@@ -53,11 +56,13 @@ export class WhatsAppReminders {
   async schedule(): Promise<number> {
     return this.coordinator.runExclusive(() => atomic(this.db, () => {
       if (!this.instance) return 0;
-      if (!getBoolean(this.db, 'whatsapp.enabled')) { this.reconcile(); return 0; }
+      // A suspended workspace keeps its rows, but no message is queued for it.
+      if (isWorkspaceSuspended(this.db, this.scope.workspaceId)) return 0;
+      if (!getBoolean(this.db, this.scope, 'whatsapp.enabled')) { this.reconcile(); return 0; }
       const today = this.clock().toISOString().slice(0, 10);
-      if (getString(this.db, 'whatsapp.last_enqueue_date') === today) return 0;
-      const count = this.store.enqueue(selectReminders(this.db, this.instance, this.clock()));
-      setSetting(this.db, 'whatsapp.last_enqueue_date', today);
+      if (getString(this.db, this.scope, 'whatsapp.last_enqueue_date') === today) return 0;
+      const count = this.store.enqueue(selectReminders(this.db, this.scope, this.instance, this.clock()));
+      setSetting(this.db, this.scope, 'whatsapp.last_enqueue_date', today);
       return count;
     }));
   }
@@ -67,7 +72,7 @@ export class WhatsAppReminders {
   }
 
   async setEnabled(enabled: boolean): Promise<void> {
-    await this.saveSettings({ 'whatsapp.enabled': enabled });
+    await this.saveSettings(this.scope, { 'whatsapp.enabled': enabled });
   }
 
   /**
@@ -80,29 +85,43 @@ export class WhatsAppReminders {
    * can change between the assertion and the write. A caller that omits the
    * callback keeps its former behaviour, and a callback that throws refuses
    * the whole write before a single setting, notification or job changes.
+   *
+   * Workspace keys are written for `scope`; a platform key (the schedule) is
+   * written once for the platform. Only the reminder workspace has WhatsApp.
    */
   async saveSettings(
+    scope: Scope,
     settings: Record<string, SettingValue>,
     beforeWrite?: () => void,
   ): Promise<void> {
+    if (scope.workspaceId !== this.scope.workspaceId && Object.keys(settings).some(key => key.startsWith('whatsapp.'))) {
+      throw new RepositoryError('WhatsApp reminders are not available for this workspace.', 'whatsapp_unavailable', 403);
+    }
     await this.aroundWrite(async () => {
-      if (settings['whatsapp.enabled'] === true && !getBoolean(this.db, 'whatsapp.enabled')) await this.assertCanEnable();
+      if (settings['whatsapp.enabled'] === true && !getBoolean(this.db, this.scope, 'whatsapp.enabled')) await this.assertCanEnable();
       beforeWrite?.();
-      this.applySettings(settings);
+      this.applySettings(scope, settings);
     });
   }
 
   /** Disable and disconnect share one lock; queued enables must observe the resulting connection state. */
   withSendingDisabled<T>(disconnect: () => Promise<T>): Promise<T> {
     return this.aroundWrite(async () => {
-      this.applySettings({ 'whatsapp.enabled': false });
+      this.applySettings(this.scope, { 'whatsapp.enabled': false });
       return disconnect();
     });
   }
 
   /** Caller holds the coordinator; the SQLite transaction ends before provider I/O. */
-  private applySettings(settings: Record<string, SettingValue>): void {
-    atomic(this.db, () => { setSettings(this.db, settings); this.reconcile(); });
+  private applySettings(scope: Scope, settings: Record<string, SettingValue>): void {
+    const entries = Object.entries(settings);
+    const tenant = Object.fromEntries(entries.filter(([key]) => isTenantSetting(key)));
+    const platform = Object.fromEntries(entries.filter(([key]) => !isTenantSetting(key)));
+    atomic(this.db, () => {
+      setSettings(this.db, scope, tenant);
+      setSettings(this.db, PLATFORM, platform);
+      this.reconcile();
+    });
   }
 
   async assertCanEnable(): Promise<void> {
@@ -117,7 +136,9 @@ export class WhatsAppReminders {
   }
 
   private async drainBatch(): Promise<number> {
-    if (this.stopped || !getBoolean(this.db, 'whatsapp.enabled')) return 0;
+    if (this.stopped || !getBoolean(this.db, this.scope, 'whatsapp.enabled')) return 0;
+    // A suspended workspace keeps its queued jobs, but none of them is delivered.
+    if (isWorkspaceSuspended(this.db, this.scope.workspaceId)) return 0;
     // Status is bounded by the transport and does not hold up business mutations.
     try { if ((await this.transport.status()).state !== 'connected') return 0; }
     catch { return 0; }
@@ -125,8 +146,9 @@ export class WhatsAppReminders {
     for (const pending of this.store.due(10)) {
       if (this.stopped) break;
       await this.coordinator.runExclusive(async () => {
-        atomic(this.db, () => this.store.reconcileClaim(pending.id, selectReminders(this.db, this.instance, this.clock(), pending)));
-        if (this.stopped || !getBoolean(this.db, 'whatsapp.enabled')) return;
+        atomic(this.db, () => this.store.reconcileClaim(pending.id, selectReminders(this.db, this.scope, this.instance, this.clock(), pending)));
+        if (this.stopped || !getBoolean(this.db, this.scope, 'whatsapp.enabled')
+          || isWorkspaceSuspended(this.db, this.scope.workspaceId)) return;
         const claim = this.store.claim(pending.id);
         if (!claim) return;
         let outcome: SendOutcome;

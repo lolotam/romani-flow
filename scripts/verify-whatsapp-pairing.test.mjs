@@ -57,7 +57,7 @@ async function fixture(run, overrides = {}, providerPath = '/api') {
   const db = new DatabaseSync(path.join(dir, 'romani.db'));
   db.exec('PRAGMA foreign_keys=ON'); runMigrations(db, path.resolve('server/db/migrations'));
   for (const role of ['admin', 'viewer']) db.prepare(`INSERT INTO admin_users
-    (id,email,name,role,password_hash,created_at,updated_at) VALUES(?,?,?,?,?,?,?)`)
+    (workspace_id, id,email,name,role,password_hash,created_at,updated_at) VALUES('ws_legacy', ?,?,?,?,?,?,?)`)
     .run(role, `${role}@example.invalid`, 'Synthetic', role, 'no-password-login-used', '2026-01-01', '2026-01-01');
   const mailer = { isConfigured: () => false };
   const storage = new StorageService(path.join(dir, 'uploads')); storage.ensureDirectories();
@@ -284,28 +284,28 @@ test('admin disconnect stops reminders, uses only scoped logout and permits a fr
  const {setSetting,getBoolean}=await import('../server/repositories/settings.ts');
  const initial=await f.request('/api/whatsapp/connect',{method:'POST',body:{}});
  assert.equal(initial.status,200);assert.equal(initial.json.data.qr,PNG);
- f.mode.state='open';setSetting(f.db,'whatsapp.enabled',true);
+ f.mode.state='open';setSetting(f.db, { workspaceId: 'ws_legacy' }, 'whatsapp.enabled',true);
  const before=f.calls.length;
  for(const [role,status] of [['viewer',403],[null,401]])assert.equal((await f.request('/api/whatsapp/disconnect',{method:'POST',body:{},role})).status,status);
  assert.equal((await f.request('/api/whatsapp/disconnect',{method:'POST',body:{},headers:{origin:'https://foreign.example.invalid'}})).status,403);
  assert.equal((await f.request('/api/whatsapp/disconnect?instance=curemed',{method:'POST',body:{}})).status,400);
- assert.equal(f.calls.length,before);assert.equal(getBoolean(f.db,'whatsapp.enabled'),true);
+ assert.equal(f.calls.length,before);assert.equal(getBoolean(f.db, { workspaceId: 'ws_legacy' }, 'whatsapp.enabled'),true);
  const response=await f.request('/api/whatsapp/disconnect',{method:'POST',body:{}});
  assert.equal(response.status,200);assert.equal(response.json.data.state,'disconnected');assert.equal(response.headers.get('cache-control'),'no-store');
- assert.equal(getBoolean(f.db,'whatsapp.enabled'),false);
+ assert.equal(getBoolean(f.db, { workspaceId: 'ws_legacy' }, 'whatsapp.enabled'),false);
  const writes=f.calls.filter(call=>call.method==='DELETE');assert.equal(writes.length,1);assert.equal(writes[0].path,'/api/instance/logout/romani-fixture');assert.equal(writes[0].authorized,true);
  assert.equal(f.calls.some(call=>call.path.includes('/delete/')||call.path.includes('curemed')),false);
  const qr=await f.request('/api/whatsapp/connect',{method:'POST',body:{}});assert.equal(qr.status,200);assert.equal(qr.json.data.state,'connecting');
- assert.equal(getBoolean(f.db,'whatsapp.enabled'),false);
+ assert.equal(getBoolean(f.db, { workspaceId: 'ws_legacy' }, 'whatsapp.enabled'),false);
 }));
 
 test('logout acknowledgement without actual closed state never reports successful disconnection',()=>fixture(async f=>{
  const {setSetting,getBoolean}=await import('../server/repositories/settings.ts');
  assert.equal((await f.request('/api/whatsapp/connect',{method:'POST',body:{}})).status,200);
- f.mode.state='open';f.mode.logoutState='open';setSetting(f.db,'whatsapp.enabled',true);
+ f.mode.state='open';f.mode.logoutState='open';setSetting(f.db, { workspaceId: 'ws_legacy' }, 'whatsapp.enabled',true);
  const response=await f.request('/api/whatsapp/disconnect',{method:'POST',body:{}});
  assert.equal(response.status,409);assert.equal(response.json.error.code,'disconnect_pending');assert.equal(response.json.data,null);
- assert.equal(getBoolean(f.db,'whatsapp.enabled'),false);assert.equal(f.calls.filter(call=>call.method==='DELETE').length,1);
+ assert.equal(getBoolean(f.db, { workspaceId: 'ws_legacy' }, 'whatsapp.enabled'),false);assert.equal(f.calls.filter(call=>call.method==='DELETE').length,1);
  assert.equal((await f.request('/api/whatsapp/connect',{method:'POST',body:{}})).status,429);
 }));
 
@@ -366,7 +366,7 @@ test('shutdown drains detached disconnect work and refuses further pairing provi
 
 test('a queued enable cannot slip between disconnect disable and provider logout',()=>fixture(async f=>{
  const {setSetting,getBoolean}=await import('../server/repositories/settings.ts');
- f.mode.state='open';setSetting(f.db,'whatsapp.enabled',true);
+ f.mode.state='open';setSetting(f.db, { workspaceId: 'ws_legacy' }, 'whatsapp.enabled',true);
  let release,entered;
  const blocked=new Promise(resolve=>release=resolve),started=new Promise(resolve=>entered=resolve);
  const held=f.reminders.coordinator.runExclusive(async()=>{entered();await blocked;});
@@ -385,7 +385,7 @@ test('a queued enable cannot slip between disconnect disable and provider logout
   assert.equal((await disconnect).status,200);
   const response=await enable;
   assert.equal(response.status,409);assert.equal(response.json.error.code,'whatsapp_not_connected');
-  assert.equal(getBoolean(f.db,'whatsapp.enabled'),false);
+  assert.equal(getBoolean(f.db, { workspaceId: 'ws_legacy' }, 'whatsapp.enabled'),false);
   assert.equal(f.mode.state,'close');assert.equal(f.calls.filter(call=>call.method==='DELETE').length,1);
  }finally{release();await held;await disconnect;}
 },{ROMANI_EVOLUTION_INSTANCE:'romani'},''));
@@ -397,13 +397,13 @@ test('status keeps reporting connecting while a server-issued QR is valid, and c
   f.mode.state = 'open';
   assert.deepEqual((await f.request('/api/whatsapp/status')).json.data, { configured: true, state: 'connected' });
   f.mode.state = 'close';
-  setSetting(f.db, 'system.whatsapp_pairing_pending_until', Date.now() - 1);
+  setSetting(f.db, { platform: true }, 'system.whatsapp_pairing_pending_until', Date.now() - 1);
   assert.deepEqual((await f.request('/api/whatsapp/status')).json.data, { configured: true, state: 'disconnected' });
 }));
 
 test('a pending QR is revoked by disconnect even when the window was opened by another process', () => fixture(async f => {
   // Simulates a restart or another worker: the window exists only in the shared database.
-  setSetting(f.db, 'system.whatsapp_pairing_pending_until', Date.now() + 60_000);
+  setSetting(f.db, { platform: true }, 'system.whatsapp_pairing_pending_until', Date.now() + 60_000);
   f.mode.state = 'close';
   const response = await f.request('/api/whatsapp/disconnect', { method: 'POST', body: {} });
   assert.equal(response.status, 200);

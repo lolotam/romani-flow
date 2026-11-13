@@ -1,11 +1,11 @@
 import { randomUUID } from 'node:crypto';
-import { Router, type NextFunction, type Request, type Response } from 'express';
-import express from 'express';
+import express, { Router, type NextFunction, type Request, type Response } from 'express';
 import sharp from 'sharp';
 import { ZodError } from 'zod';
 import type { AppConfig } from '../config.js';
 import type { Db } from '../db/connection.js';
 import { asyncHandler } from '../middleware/errorHandler.js';
+import { tenantOf } from '../middleware/auth.js';
 import { RepositoryError } from '../repositories/base.js';
 import { limits, extractionRequest } from '../contracts/documentExtraction.js';
 import { validateImages, type DecoderFactory, type ImageDecoder } from '../extraction/images.js';
@@ -309,8 +309,8 @@ export function createDocumentExtractionRouter(
 
   router.get(
     '/status',
-    asyncHandler(async (_req, res) => {
-      res.json({ data: service.status(), error: null });
+    asyncHandler(async (req, res) => {
+      res.json({ data: service.status(tenantOf(req)), error: null });
     }),
   );
 
@@ -399,7 +399,7 @@ export function createDocumentExtractionRouter(
 
   /** The reviewed live model list of one provider, as in earlier versions. */
   router.get('/models', asyncHandler((req, res) =>
-    respondProviderListing(req, res, (provider, signal) => service.models(provider, signal)),
+    respondProviderListing(req, res, (provider, signal) => service.models(tenantOf(req), provider, signal)),
   ));
 
   router.post(
@@ -433,7 +433,7 @@ export function createDocumentExtractionRouter(
           controller.signal,
           res.locals.extractionDecoderFactory as DecoderFactory,
         );
-        const data = await service.run(input, req.user!.id, controller.signal);
+        const data = await service.run(tenantOf(req), input, req.user!.id, controller.signal);
         if (!controller.signal.aborted && !res.destroyed) {
           res.json({ data, error: null });
         }

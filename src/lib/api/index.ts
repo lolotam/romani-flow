@@ -20,6 +20,7 @@ export type {
   AppSettings,
   CronStatus,
   EmailLogEntry,
+  EmailStatus,
   ExpiryPreview,
   ExpiryPreviewItem,
   SendDocumentsResult,

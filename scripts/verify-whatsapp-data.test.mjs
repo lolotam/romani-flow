@@ -1,4 +1,4 @@
-﻿import test from 'node:test';
+import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -23,11 +23,11 @@ test('additive 007 upgrades existing employees with opt-in false and default glo
   fs.copyFileSync('server/db/migrations/007_whatsapp_notifications.sql',path.join(dir,'007_whatsapp_notifications.sql'));
   const result=runMigrations(db,dir);
   assert.deepEqual(result.applied,['007_whatsapp_notifications.sql']);
-  assert.deepEqual(runMigrations(db,path.resolve('server/db/migrations')).applied,['008_document_drafts.sql','009_document_number.sql']);
+  assert.deepEqual(runMigrations(db,path.resolve('server/db/migrations')).applied,['008_document_drafts.sql','009_document_number.sql','010_workspaces.sql','011_clerk_identity.sql']);
   assert.equal(db.prepare('SELECT count(*) n FROM document_drafts').get().n,0);
   assert.equal(db.prepare('SELECT name FROM employees WHERE id=?').get('existing').name,'Synthetic');
   assert.equal(db.prepare('SELECT whatsapp_notifications_enabled enabled FROM employees WHERE id=?').get('existing').enabled,0);
-  assert.equal(getBoolean(db,'whatsapp.enabled'),false);
+  assert.equal(getBoolean(db, { workspaceId: 'ws_legacy' }, 'whatsapp.enabled'),false);
   assert.throws(()=>db.prepare('UPDATE employees SET whatsapp_notifications_enabled=2').run(),/CHECK/);
   assert.deepEqual(db.prepare('PRAGMA foreign_key_check').all(),[]);
  } finally {db.close();assert.ok(dir.startsWith(path.join(os.tmpdir(),'romani-wa-migration-')));fs.rmSync(dir,{recursive:true,force:true});}
@@ -38,18 +38,18 @@ test('canonical recipient uniqueness and job identity are enforced in SQLite',as
  const {ReminderStore}=await import('../server/notifications/whatsapp/repository.ts');
  const {selectReminders}=await import('../server/notifications/whatsapp/selection.ts');
  const f=reminderFixture();try{
-  const store=new ReminderStore(f.db,'romani-fixture',()=>f.clock.now);
+  const store=new ReminderStore(f.db, { workspaceId: 'ws_legacy' },'romani-fixture',()=>f.clock.now);
   store.saveRecipient({label:'Synthetic manager',phone:MANAGER_PHONE,enabled:true});
   assert.throws(()=>store.saveRecipient({label:'Duplicate',phone:'00999 0000-0002',enabled:true}),/already exists/);
-  assert.throws(()=>f.db.prepare("INSERT INTO whatsapp_recipients VALUES('bad','Bad','national',1,'x','x')").run(),/CHECK/);
-  const rows=selectReminders(f.db,'romani-fixture',f.clock.now);assert.equal(store.enqueue(rows),2);assert.equal(store.enqueue(rows),0);
+  assert.throws(()=>f.db.prepare("INSERT INTO whatsapp_recipients VALUES('bad','ws_legacy','Bad','national',1,'x','x')").run(),/CHECK/);
+  const rows=selectReminders(f.db, { workspaceId: 'ws_legacy' },'romani-fixture',f.clock.now);assert.equal(store.enqueue(rows),2);assert.equal(store.enqueue(rows),0);
   assert.equal(f.db.prepare('SELECT COUNT(*) n FROM whatsapp_jobs').get().n,2);
  }finally{f.close();}
 });
 
 test('queue capacity commits what fits and selects deferred work after next-day capacity returns without duplicates',async t=>{
  const {reminderFixture}=await import('./fixtures/whatsapp.mjs');const {ReminderStore}=await import('../server/notifications/whatsapp/repository.ts');const {selectReminders}=await import('../server/notifications/whatsapp/selection.ts');
- const f=reminderFixture();try{f.db.prepare('UPDATE employees SET whatsapp_notifications_enabled=1').run();const base=selectReminders(f.db,'romani-fixture',f.clock.now)[0];const store=new ReminderStore(f.db,'romani-fixture',()=>f.clock.now);
+ const f=reminderFixture();try{f.db.prepare('UPDATE employees SET whatsapp_notifications_enabled=1').run();const base=selectReminders(f.db, { workspaceId: 'ws_legacy' },'romani-fixture',f.clock.now)[0];const store=new ReminderStore(f.db, { workspaceId: 'ws_legacy' },'romani-fixture',()=>f.clock.now);
   const candidates=Array.from({length:2001},(_,n)=>({...base,recipient:'+999'+String(n).padStart(8,'0')}));
   const warnings=[];t.mock.method(console,'warn',message=>warnings.push(message));
   assert.equal(store.enqueue(candidates),2000);assert.equal(f.db.prepare('SELECT count(*) n FROM whatsapp_jobs').get().n,2000);
@@ -64,7 +64,7 @@ test('queue capacity commits what fits and selects deferred work after next-day 
 
 test('seeded near-full queue keeps existing rows, commits only remaining capacity and logs the overflow count',async t=>{
  const {reminderFixture}=await import('./fixtures/whatsapp.mjs');const {ReminderStore}=await import('../server/notifications/whatsapp/repository.ts');const {selectReminders}=await import('../server/notifications/whatsapp/selection.ts');
- const f=reminderFixture();try{f.db.prepare('UPDATE employees SET whatsapp_notifications_enabled=1').run();const base=selectReminders(f.db,'romani-fixture',f.clock.now)[0];const store=new ReminderStore(f.db,'romani-fixture',()=>f.clock.now);
+ const f=reminderFixture();try{f.db.prepare('UPDATE employees SET whatsapp_notifications_enabled=1').run();const base=selectReminders(f.db, { workspaceId: 'ws_legacy' },'romani-fixture',f.clock.now)[0];const store=new ReminderStore(f.db, { workspaceId: 'ws_legacy' },'romani-fixture',()=>f.clock.now);
   const candidates=Array.from({length:2003},(_,n)=>({...base,recipient:'+999'+String(n).padStart(8,'0')}));
   assert.equal(store.enqueue(candidates.slice(0,1998)),1998);
   const seeded=f.db.prepare('SELECT id FROM whatsapp_jobs').all();assert.equal(seeded.length,1998);

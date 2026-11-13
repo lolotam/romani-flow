@@ -3,7 +3,7 @@ import cron from 'node-cron';
 import type { AppConfig } from '../config.js';
 import type { Db } from '../db/connection.js';
 import { asyncHandler } from '../middleware/errorHandler.js';
-import { requireAdmin } from '../middleware/auth.js';
+import { requireAdmin, tenantOf } from '../middleware/auth.js';
 import {
   readAllSettings,
   type SettingValue,
@@ -11,7 +11,7 @@ import {
 import type { ExtractionService } from '../extraction/service.js';
 import type { CandidateValidation } from '../extraction/candidates.js';
 import { NOTIFICATION_INTERVALS } from '../services/intervals.js';
-import type { CronService } from '../services/cronService.js';
+import { mayChangeSchedule, type CronService } from '../services/cronService.js';
 import type { WhatsAppReminders } from '../notifications/whatsapp/service.js';
 
 /**
@@ -222,6 +222,23 @@ async function validateExtractionSelection(
  * the caller reports, and it never leaves a partially written configuration
  * behind.
  */
+/**
+ * Keys a workspace may not change in P1 (decision D11).
+ *
+ * The schedule is one platform setting that only the legacy workspace edits until
+ * the platform dashboard exists (the caller drops an unchanged schedule first).
+ * WhatsApp settings exist only for the workspace that owns the instance (D9).
+ */
+function workspaceRestriction(workspaceId: string, reminderWorkspaceId: string, key: string): string | null {
+  if (key === 'cron.schedule' && !mayChangeSchedule({ workspaceId })) {
+    return 'The reminder schedule is managed by the platform.';
+  }
+  if (key.startsWith('whatsapp.') && workspaceId !== reminderWorkspaceId) {
+    return 'WhatsApp reminders are not available for this workspace.';
+  }
+  return null;
+}
+
 class SettingsWriteRefused extends Error {
   constructor(readonly reason: string) {
     super(reason);
@@ -238,17 +255,13 @@ export function createSettingsRouter(
 ): Router {
   const router = Router();
 
-  router.get('/', (_req, res) => {
+  // The settings reveal the relay of the workspace, so only an owner reads them.
+  router.get('/', requireAdmin, (req, res) => {
     res.json({
       data: {
-        settings: readAllSettings(db),
+        settings: readAllSettings(db, tenantOf(req)),
         smtp: {
           configured: Boolean(config.smtp.host && config.smtp.user && config.smtp.pass),
-          host: config.smtp.host,
-          port: config.smtp.port,
-          user: config.smtp.user,
-          secure: config.smtp.secure,
-          from: config.smtp.from,
         },
       },
       error: null,
@@ -260,6 +273,7 @@ export function createSettingsRouter(
     requireAdmin,
     asyncHandler(async (req, res) => {
       const body = (req.body?.settings ?? req.body ?? {}) as Record<string, unknown>;
+      const scope = tenantOf(req);
 
       const accepted: Record<string, SettingValue> = {};
       const rejected: Array<{ key: string; reason: string }> = [];
@@ -283,6 +297,13 @@ export function createSettingsRouter(
           continue;
         }
 
+        if (key === 'cron.schedule' && value === cron.currentSchedule()) continue;
+        const unavailable = workspaceRestriction(scope.workspaceId, reminders.scope.workspaceId, key);
+        if (unavailable) {
+          rejected.push({ key, reason: unavailable });
+          continue;
+        }
+
         accepted[key] = value;
       }
 
@@ -301,7 +322,7 @@ export function createSettingsRouter(
 
       // The effective combination is checked before the first write, so a
       // rejected request changes neither a setting nor a notification.
-      const persisted = readAllSettings(db);
+      const persisted = readAllSettings(db, scope);
       const effective = { ...persisted, ...accepted };
       const changesExtraction = Object.keys(accepted).some(key => key.startsWith('ai_extraction.'));
       // The persisted preferences are observed before the validation and the
@@ -357,7 +378,7 @@ export function createSettingsRouter(
       // changed only the enabled flag — is refused as a whole.
       const beforeWrite = changesExtraction
         ? () => {
-            const changed = extractionPreferences(readAllSettings(db)) !== boundPreferences;
+            const changed = extractionPreferences(readAllSettings(db, scope)) !== boundPreferences;
             const refused = changed
               ? 'The extraction selection changed while it was validated.'
               : authority
@@ -368,7 +389,7 @@ export function createSettingsRouter(
         : undefined;
 
       try {
-        await reminders.saveSettings(accepted, beforeWrite);
+        await reminders.saveSettings(scope, accepted, beforeWrite);
       } catch (error) {
         if (!(error instanceof SettingsWriteRefused)) throw error;
         res.status(400).json({

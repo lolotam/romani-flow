@@ -9,6 +9,7 @@ import type { Company } from './types';
 
 interface CompaniesSettingsProps {
   companies: Company[];
+  canEdit: boolean;
   newCompany: { name: string; name_ar: string; description: string };
   onNewCompanyChange: (value: { name: string; name_ar: string; description: string }) => void;
   onAdd: () => void;
@@ -17,7 +18,7 @@ interface CompaniesSettingsProps {
 }
 
 export default function CompaniesSettings({
-  companies, newCompany, onNewCompanyChange, onAdd, onEdit, onDelete
+  companies, canEdit, newCompany, onNewCompanyChange, onAdd, onEdit, onDelete
 }: CompaniesSettingsProps) {
   const { t } = useLanguage();
 
@@ -31,38 +32,40 @@ export default function CompaniesSettings({
         <CardDescription>{t('settings.companies.description')}</CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          <div>
-            <Label htmlFor="company_name_ar">{t('settings.companies.nameArabic')}</Label>
-            <Input
-              id="company_name_ar"
-              value={newCompany.name_ar}
-              onChange={(e) => onNewCompanyChange({ ...newCompany, name_ar: e.target.value })}
-              placeholder={t('settings.companies.nameArabicPlaceholder')}
-            />
+        {canEdit && <>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div>
+              <Label htmlFor="company_name_ar">{t('settings.companies.nameArabic')}</Label>
+              <Input
+                id="company_name_ar"
+                value={newCompany.name_ar}
+                onChange={(e) => onNewCompanyChange({ ...newCompany, name_ar: e.target.value })}
+                placeholder={t('settings.companies.nameArabicPlaceholder')}
+              />
+            </div>
+            <div>
+              <Label htmlFor="company_name_en">{t('settings.companies.nameEnglish')}</Label>
+              <Input
+                id="company_name_en" dir="ltr"
+                value={newCompany.name}
+                onChange={(e) => onNewCompanyChange({ ...newCompany, name: e.target.value })}
+                placeholder={t('settings.companies.nameEnglishPlaceholder')}
+              />
+            </div>
+            <div className="flex items-end">
+              <Button onClick={onAdd} className="w-full">{t('settings.companies.addNew')}</Button>
+            </div>
           </div>
           <div>
-            <Label htmlFor="company_name_en">{t('settings.companies.nameEnglish')}</Label>
-            <Input
-              id="company_name_en" dir="ltr"
-              value={newCompany.name}
-              onChange={(e) => onNewCompanyChange({ ...newCompany, name: e.target.value })}
-              placeholder={t('settings.companies.nameEnglishPlaceholder')}
+            <Label htmlFor="company_description">{t('settings.companies.descriptionLabel')}</Label>
+            <Textarea
+              id="company_description"
+              value={newCompany.description}
+              onChange={(e) => onNewCompanyChange({ ...newCompany, description: e.target.value })}
+              placeholder={t('settings.companies.descriptionPlaceholder')}
             />
           </div>
-          <div className="flex items-end">
-            <Button onClick={onAdd} className="w-full">{t('settings.companies.addNew')}</Button>
-          </div>
-        </div>
-        <div>
-          <Label htmlFor="company_description">{t('settings.companies.descriptionLabel')}</Label>
-          <Textarea
-            id="company_description"
-            value={newCompany.description}
-            onChange={(e) => onNewCompanyChange({ ...newCompany, description: e.target.value })}
-            placeholder={t('settings.companies.descriptionPlaceholder')}
-          />
-        </div>
+        </>}
 
         <div className="pt-4 border-t">
           <h3 className="font-semibold mb-3">{t('settings.companies.currentCompaniesCount', { count: companies.length })}</h3>
@@ -73,14 +76,14 @@ export default function CompaniesSettings({
                   <p className="font-medium">{company.name_ar}</p>
                   <p className="text-sm text-muted-foreground">{company.name}</p>
                 </div>
-                <div className="flex gap-2">
+                {canEdit && <div className="flex gap-2">
                   <Button size="sm" variant="outline" onClick={() => onEdit(company)}>
                     <Pencil className="h-4 w-4" />
                   </Button>
                   <Button size="sm" variant="outline" onClick={() => onDelete(company)}>
                     <Trash2 className="h-4 w-4" />
                   </Button>
-                </div>
+                </div>}
               </div>
             ))}
           </div>

@@ -1,6 +1,6 @@
-import { Router, type Request } from 'express';
+import { Router, type Request, type RequestHandler } from 'express';
 import type { NodeEnv } from '../../config.js';
-import { requireAdmin } from '../../middleware/auth.js';
+import { requireAdmin, tenantOf } from '../../middleware/auth.js';
 import { asyncHandler } from '../../middleware/errorHandler.js';
 import { RepositoryError } from '../../repositories/base.js';
 import { normalizeWhatsAppPhone } from './phone.js';
@@ -19,9 +19,22 @@ function page(req: Request): { limit: number; offset: number } {
   return { limit, offset };
 }
 
+/** D9: until P4, WhatsApp exists only for the workspace that owns the instance; others see nothing. */
+export function requireReminderWorkspace(reminders: WhatsAppReminders): RequestHandler {
+  return (req, _res, next) => {
+    if (tenantOf(req).workspaceId !== reminders.scope.workspaceId) {
+      next(new RepositoryError('WhatsApp reminders are not available for this workspace.', 'whatsapp_unavailable', 404));
+      return;
+    }
+    next();
+  };
+}
+
 export function createReminderRouter(reminders: WhatsAppReminders, env: NodeEnv): Router {
   const router = Router(), db = reminders.db;
-  router.use(requireAdmin, (req, res, next) => {
+  // Availability is decided before the role, so every role in a workspace without the
+  // instance gets the same 404 whatsapp_unavailable.
+  router.use(requireReminderWorkspace(reminders), requireAdmin, (req, res, next) => {
     res.setHeader('Cache-Control', 'no-store');
     if (['x-project', 'x-project-id', 'x-instance', 'x-instance-name'].some(name => req.get(name)) ||
         ['instance', 'instanceName', 'project', 'url', 'apikey'].some(name => name in req.query)) {
@@ -38,9 +51,10 @@ export function createReminderRouter(reminders: WhatsAppReminders, env: NodeEnv)
   router.get('/recipients', (req, res, next) => {
     try {
       const { limit, offset } = page(req);
-      const items = db.prepare('SELECT * FROM whatsapp_recipients ORDER BY created_at,id LIMIT ? OFFSET ?').all(limit, offset)
+      const ws = reminders.scope.workspaceId;
+      const items = db.prepare('SELECT * FROM whatsapp_recipients WHERE workspace_id=? ORDER BY created_at,id LIMIT ? OFFSET ?').all(ws, limit, offset)
         .map(row => ({ ...row, enabled: Boolean(row.enabled) }));
-      res.json({ data: { items, total: (db.prepare('SELECT count(*) total FROM whatsapp_recipients').get()!).total }, error: null });
+      res.json({ data: { items, total: (db.prepare('SELECT count(*) total FROM whatsapp_recipients WHERE workspace_id=?').get(ws)!).total }, error: null });
     } catch (error) { next(error); }
   });
   router.post('/recipients', asyncHandler(async (req, res) => {
@@ -55,13 +69,14 @@ export function createReminderRouter(reminders: WhatsAppReminders, env: NodeEnv)
   }));
   router.delete('/recipients/:id', asyncHandler(async (req, res) => {
     await reminders.mutate(() => {
-      if (!db.prepare('DELETE FROM whatsapp_recipients WHERE id=?').run(String(req.params.id)).changes) throw new RepositoryError('Recipient not found.', 'not_found', 404);
+      if (!db.prepare('DELETE FROM whatsapp_recipients WHERE id=? AND workspace_id=?').run(String(req.params.id), reminders.scope.workspaceId).changes) throw new RepositoryError('Recipient not found.', 'not_found', 404);
     });
     res.json({ data: { deleted: true }, error: null });
   }));
   router.get('/log', (req, res, next) => {
     try {
-      const { limit, offset } = page(req), where = ['instance=?'], values: (string | number)[] = [reminders.auditInstance];
+      const { limit, offset } = page(req), where = ['instance=?'];
+      const values: (string | number)[] = [reminders.scope.workspaceId, reminders.auditInstance];
       if (req.query.state !== undefined) {
         if (typeof req.query.state !== 'string' || !['pending', 'sending', 'provider_accepted', 'retryable_failed', 'permanent_failed', 'unknown', 'cancelled'].includes(req.query.state)) throw new RepositoryError('Invalid state.', 'invalid_query', 400);
         where.push('state=?'); values.push(req.query.state);
@@ -77,14 +92,14 @@ export function createReminderRouter(reminders: WhatsAppReminders, env: NodeEnv)
         values.push(req.query.item, `%${req.query.item.replace(/[\\%_]/g, value => `\\${value}`)}%`);
       }
       const clause = where.join(' AND ');
-      const total = db.prepare(`SELECT count(*) total FROM whatsapp_jobs WHERE ${clause}`).get(...values)!.total;
+      const total = db.prepare(`SELECT count(*) total FROM whatsapp_jobs WHERE workspace_id=? AND ${clause}`).get(...values)!.total;
       const hasCapacity = reminders.store.queueSize() < 2000;
-      const jobs = db.prepare(`SELECT * FROM whatsapp_jobs WHERE ${clause} ORDER BY created_at DESC,id LIMIT ? OFFSET ?`).all(...values, limit, offset);
+      const jobs = db.prepare(`SELECT * FROM whatsapp_jobs WHERE workspace_id=? AND ${clause} ORDER BY created_at DESC,id LIMIT ? OFFSET ?`).all(...values, limit, offset);
       // One query for the whole page instead of one per job (the page is capped at 100 rows).
       const attemptsByJob = new Map<string, Record<string, unknown>[]>();
       if (jobs.length) {
-        const rows = db.prepare(`SELECT * FROM whatsapp_attempts WHERE job_id IN (${jobs.map(() => '?').join(',')}) ORDER BY job_id,attempt`)
-          .all(...jobs.map(job => String(job.id)));
+        const rows = db.prepare(`SELECT * FROM whatsapp_attempts WHERE workspace_id=? AND job_id IN (${jobs.map(() => '?').join(',')}) ORDER BY job_id,attempt`)
+          .all(reminders.scope.workspaceId, ...jobs.map(job => String(job.id)));
         for (const row of rows) {
           const key = String(row.job_id), list = attemptsByJob.get(key);
           if (list) list.push(row); else attemptsByJob.set(key, [row]);

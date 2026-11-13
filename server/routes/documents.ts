@@ -1,13 +1,14 @@
 import { Router } from 'express';
 import type { Db } from '../db/connection.js';
 import { asyncHandler } from '../middleware/errorHandler.js';
-import { requireAdmin } from '../middleware/auth.js';
+import { requireRole, tenantOf } from '../middleware/auth.js';
 import { parseListOptions } from '../http/query.js';
 import {
   findRow,
   listRows,
   RepositoryError,
   type Row,
+  type Scope,
 } from '../repositories/base.js';
 import { getNumber } from '../repositories/settings.js';
 import { rememberSubmission } from '../repositories/formDefaults.js';
@@ -63,14 +64,14 @@ function assertWritable(payload: Row): void {
 export function createDocumentsRouter(db: Db, documents: DocumentService): Router {
   const router = Router();
 
-  const warningDays = (): number => getNumber(db, 'expiry_warning_days', 30);
+  const warningDays = (scope: Scope): number => getNumber(db, scope, 'expiry_warning_days', 30);
 
-  const statusFor = (expiry: string | null): string =>
-    documentStatus(expiry, warningDays());
+  const statusFor = (scope: Scope) => (expiry: string | null): string =>
+    documentStatus(expiry, warningDays(scope));
 
-  const shape = (row: Row): Row => ({
+  const shape = (scope: Scope) => (row: Row): Row => ({
     ...row,
-    status: documentStatus((row.expiry_date as string | null) ?? null, warningDays()),
+    status: documentStatus((row.expiry_date as string | null) ?? null, warningDays(scope)),
   });
 
   router.get(
@@ -78,17 +79,18 @@ export function createDocumentsRouter(db: Db, documents: DocumentService): Route
     asyncHandler(async (req, res) => {
       const parsed = parseListOptions(req.query, 'documents');
       const relations = parsed.relations ?? [];
-      const rows = listRows(db, 'documents', {
+      const scope = tenantOf(req);
+      const rows = listRows(db, scope, 'documents', {
         ...parsed,
         relations: relations.length > 0 ? relations : RELATIONS,
-      }).map(shape);
+      }).map(shape(scope));
       res.json({ data: rows, error: null });
     }),
   );
 
   router.post(
     '/',
-    requireAdmin,
+    requireRole('editor'),
     asyncHandler(async (req, res) => {
       const payload = readPayload(req.body);
       assertWritable(payload);
@@ -100,22 +102,24 @@ export function createDocumentsRouter(db: Db, documents: DocumentService): Route
         prepared.expiry_date = normalizeDate(prepared.expiry_date);
       }
 
-      const row = await documents.createDocument(prepared, statusFor, {
+      const scope = tenantOf(req);
+      const row = await documents.createDocument(scope, prepared, statusFor(scope), {
         uploadOwner: draft === undefined ? undefined : { userId: req.user!.id, scope: draftReference(draft).scope },
         completed: (created) => {
-          rememberSubmission(db, req.user!.id, 'documents', created);
-          finishDraft(db, req.user!.id, draft, created);
+          rememberSubmission(db, scope, req.user!.id, 'documents', created);
+          finishDraft(db, scope, req.user!.id, draft, created);
         } });
       // The envelope always carries a list, so the client's `insert()` contract
       // is the same for every resource.
-      res.status(201).json({ data: [shape(row)], error: null });
+      res.status(201).json({ data: [shape(scope)(row)], error: null });
     }),
   );
 
   router.get(
     '/:id',
     asyncHandler(async (req, res) => {
-      const row = findRow(db, 'documents', String(req.params.id), RELATIONS);
+      const scope = tenantOf(req);
+      const row = findRow(db, scope, 'documents', String(req.params.id), RELATIONS);
       if (!row) {
         res.status(404).json({
           data: null,
@@ -123,13 +127,13 @@ export function createDocumentsRouter(db: Db, documents: DocumentService): Route
         });
         return;
       }
-      res.json({ data: shape(row), error: null });
+      res.json({ data: shape(scope)(row), error: null });
     }),
   );
 
   router.patch(
     '/:id',
-    requireAdmin,
+    requireRole('editor'),
     asyncHandler(async (req, res) => {
       const payload = readPayload(req.body);
       assertWritable(payload);
@@ -141,9 +145,10 @@ export function createDocumentsRouter(db: Db, documents: DocumentService): Route
         prepared.expiry_date = normalizeDate(prepared.expiry_date);
       }
 
-      const row = await documents.updateDocument(String(req.params.id), prepared, statusFor, {
+      const scope = tenantOf(req);
+      const row = await documents.updateDocument(scope, String(req.params.id), prepared, statusFor(scope), {
         uploadOwner: draft === undefined ? undefined : { userId: req.user!.id, scope: draftReference(draft).scope },
-        completed: updated => finishDraft(db, req.user!.id, draft, updated, String(req.params.id)) });
+        completed: updated => finishDraft(db, scope, req.user!.id, draft, updated, String(req.params.id)) });
       if (!row) {
         res.status(404).json({
           data: null,
@@ -151,15 +156,15 @@ export function createDocumentsRouter(db: Db, documents: DocumentService): Route
         });
         return;
       }
-      res.json({ data: shape(row), error: null });
+      res.json({ data: shape(scope)(row), error: null });
     }),
   );
 
   router.delete(
     '/:id',
-    requireAdmin,
+    requireRole('editor'),
     asyncHandler(async (req, res) => {
-      const deleted = await documents.deleteDocument(String(req.params.id));
+      const deleted = await documents.deleteDocument(tenantOf(req), String(req.params.id));
       if (!deleted) {
         res.status(404).json({
           data: null,

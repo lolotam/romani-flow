@@ -30,6 +30,8 @@ import {
   expiryDateClassName,
   formatDateForDisplay,
 } from '@/components/employees/employeeHelpers';
+import { useAuth } from '@/hooks/useAuth';
+import { canEdit } from '@/lib/permissions';
 
 export interface EmployeesTableProps {
   employees: EmployeeWithRelations[];
@@ -59,6 +61,7 @@ export function EmployeesTable({
   onDelete,
 }: EmployeesTableProps) {
   const { t } = useLanguage();
+  const editable = canEdit(useAuth().user?.role);
 
   const getSortIcon = (field: SortField) => {
     if (sortField !== field) return null;
@@ -290,7 +293,7 @@ export function EmployeesTable({
                 >
                   <FileText className="h-4 w-4" />
                 </Button>
-                <Button
+                {editable && <Button
                   variant="ghost"
                   size="sm"
                   onClick={() => onEdit(employee)}
@@ -298,8 +301,8 @@ export function EmployeesTable({
                   className="hover:bg-accent"
                 >
                   <Edit className="h-4 w-4" />
-                </Button>
-                <Button
+                </Button>}
+                {editable && <Button
                   variant="ghost"
                   size="sm"
                   onClick={() => onDelete(employee.id)}
@@ -307,7 +310,7 @@ export function EmployeesTable({
                   title={t('employees.actions.delete')}
                 >
                   <Trash2 className="h-4 w-4" />
-                </Button>
+                </Button>}
               </div>
             </TableCell>
           </TableRow>

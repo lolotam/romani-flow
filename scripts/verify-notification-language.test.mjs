@@ -9,21 +9,21 @@ import { setSetting } from '../server/repositories/settings.ts';
 import { signSession } from '../server/middleware/auth.ts';
 
 test('company reminders select the stored name matching the channel language with Arabic fallback', () => reminderApi(async f => {
-  insertRow(f.db, 'documents', { title: 'Synthetic company document', company_id: f.company.id, document_type_id: f.type.id, expiry_date: '2026-01-01' });
+  insertRow(f.db, { workspaceId: 'ws_legacy' }, 'documents', { title: 'Synthetic company document', company_id: f.company.id, document_type_id: f.type.id, expiry_date: '2026-01-01' });
   f.reminders.store.saveRecipient({ label: 'Synthetic', phone: MANAGER_PHONE, enabled: true });
   for (const language of ['ar', 'en']) {
-    setSetting(f.db, 'whatsapp.language', language);
-    const job = selectReminders(f.db, 'romani', f.clock.now).find(row => row.item_name === 'Synthetic company document');
+    setSetting(f.db, { workspaceId: 'ws_legacy' }, 'whatsapp.language', language);
+    const job = selectReminders(f.db, { workspaceId: 'ws_legacy' }, 'romani', f.clock.now).find(row => row.item_name === 'Synthetic company document');
     assert.equal(job.owner_name, language === 'en' ? f.company.name : f.company.name_ar);
     assert.ok(job.text.includes(job.owner_name));
   }
   f.db.prepare('UPDATE companies SET name_ar=? WHERE id=?').run('', f.company.id);
-  setSetting(f.db, 'whatsapp.language', 'ar');
-  assert.equal(selectReminders(f.db, 'romani', f.clock.now).find(row => row.item_name === 'Synthetic company document').owner_name, f.company.name);
+  setSetting(f.db, { workspaceId: 'ws_legacy' }, 'whatsapp.language', 'ar');
+  assert.equal(selectReminders(f.db, { workspaceId: 'ws_legacy' }, 'romani', f.clock.now).find(row => row.item_name === 'Synthetic company document').owner_name, f.company.name);
   assert.equal(f.calls.length, 0);
   f.db.prepare('UPDATE companies SET name=?,name_ar=? WHERE id=?').run('   ', 'اسم الشركة', f.company.id);
-  setSetting(f.db, 'whatsapp.language', 'en');
-  assert.equal(selectReminders(f.db, 'romani', f.clock.now).find(row => row.item_name === 'Synthetic company document').owner_name, 'اسم الشركة');
+  setSetting(f.db, { workspaceId: 'ws_legacy' }, 'whatsapp.language', 'en');
+  assert.equal(selectReminders(f.db, { workspaceId: 'ws_legacy' }, 'romani', f.clock.now).find(row => row.item_name === 'Synthetic company document').owner_name, 'اسم الشركة');
 }));
 
 test('channel languages persist independently; invalid writes are atomic and viewers cannot change or preview templates', () => reminderApi(async f => {
@@ -67,7 +67,7 @@ test('language changes refresh pending text without changing destination identit
   assert.deepEqual(f.db.prepare('SELECT * FROM whatsapp_attempts ORDER BY id').all(), attempts);
   assert.deepEqual(f.db.prepare('SELECT id FROM whatsapp_jobs ORDER BY id').all().map(row => row.id), original.map(row => row.id));
   assert.equal(await f.reminders.schedule(), 0); assert.equal(f.calls.length, 0);
-  const candidates = selectReminders(f.db, 'romani', f.clock.now);
+  const candidates = selectReminders(f.db, { workspaceId: 'ws_legacy' }, 'romani', f.clock.now);
   assert.ok(candidates.some(row => row.audience === 'employee' && row.text.startsWith('Hello')));
   assert.ok(candidates.some(row => row.audience === 'management' && row.text.includes('for employee')));
 }));
@@ -91,7 +91,7 @@ test('synthetic previews and actual email reports use bilingual renderers withou
     await f.request('/api/settings', { method: 'PUT', body: { settings: { 'email.language': language } } });
     const sent = [];
     // Only SMTP is replaced; real settings, selection, renderers and audit remain in use.
-    const result = await sendExpiryReport(f.db, { send: async message => {
+    const result = await sendExpiryReport(f.db, { workspaceId: 'ws_legacy' }, { send: async message => {
       sent.push(message); return { status: 'sent', messageId: 'synthetic-email', accepted: message.to, rejected: [] };
     } }, 'manual');
     assert.equal(result.sent, true); assert.equal(sent.length, 1);

@@ -1,4 +1,5 @@
 import type { Db } from '../db/connection.js';
+import type { Scope } from '../repositories/base.js';
 import { emailIdentity } from './emailAddress.js';
 
 const validRecipient = (value: unknown): value is string => typeof value === 'string' && /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(value.trim());
@@ -17,11 +18,12 @@ function validIdentity(value: unknown): value is string {
 }
 
 /** Legacy interrupted reports lack item identities: block their recipients until reviewed. */
-export function uncertainEmailIdentities(db: Db): Set<string> {
+export function uncertainEmailIdentities(db: Db, scope: Scope): Set<string> {
   const identities = new Set<string>();
-  const rows = db.prepare("SELECT id,recipients,details FROM email_log WHERE kind='expiry_report' AND status IN ('sending','unknown') AND trigger_source='cron'").all() as { id: string; recipients: string; details: string | null }[];
+  const rows = db.prepare("SELECT id,recipients,details FROM email_log WHERE kind='expiry_report' AND status IN ('sending','unknown') AND trigger_source='cron' AND workspace_id=?")
+    .all(scope.workspaceId) as { id: string; recipients: string; details: string | null }[];
   for (const row of rows) {
-    db.prepare("UPDATE email_log SET status='unknown' WHERE id=? AND status='sending'").run(row.id);
+    db.prepare("UPDATE email_log SET status='unknown' WHERE id=? AND status='sending' AND workspace_id=?").run(row.id, scope.workspaceId);
     let details: { recipients?: unknown; identities?: unknown; employees?: unknown; documents?: unknown } = {};
     try { details = JSON.parse(row.details ?? '{}') ?? {}; } catch { /* Treat damaged legacy details as uncertain. */ }
     if (Array.isArray(details.recipients) && details.recipients.length > 0

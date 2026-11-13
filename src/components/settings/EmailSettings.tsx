@@ -1,5 +1,6 @@
 import { useLanguage } from '@/contexts/LanguageContext';
 import { useToast } from '@/hooks/use-toast';
+import { useAuth } from '@/hooks/useAuth';
 import { useEmailSettings, type ActionResult } from '@/hooks/useEmailSettings';
 import { EmailConfigCard } from './EmailConfigCard';
 import { EmailLogCard } from './EmailLogCard';
@@ -13,6 +14,7 @@ import { Button } from '@/components/ui/button';
 export default function EmailSettings() {
   const { language } = useLanguage();
   const { toast } = useToast();
+  const { scheduleEditable } = useAuth();
   const state = useEmailSettings();
   const L = (ar: string, en: string) => (language === 'ar' ? ar : en);
 
@@ -43,6 +45,7 @@ export default function EmailSettings() {
         cron={state.cron}
         busy={state.busy}
         onToggleInterval={state.toggleInterval}
+        scheduleEditable={scheduleEditable}
         onSave={async () =>
           report(await state.save(), L('تم حفظ الإعدادات', 'Settings saved'), L('تعذر حفظ الإعدادات', 'Settings were not saved'))
         }

@@ -7,7 +7,8 @@ import { requireAdmin } from '../middleware/auth.js';
 import { asyncHandler } from '../middleware/errorHandler.js';
 import type { NodeEnv } from '../config.js';
 import type { WhatsAppReminders } from '../notifications/whatsapp/service.js';
-import { getNumber, setSetting } from '../repositories/settings.js';
+import { requireReminderWorkspace } from '../notifications/whatsapp/routes.js';
+import { getNumber, PLATFORM, setSetting } from '../repositories/settings.js';
 
 /** Shared, durable end of the 60-second QR window; survives restarts and is the same for every worker. */
 const PENDING_PAIRING_KEY = 'system.whatsapp_pairing_pending_until';
@@ -27,9 +28,9 @@ export function createPairingRouter(config: PairingConfig, env: NodeEnv, reminde
   let connecting = false;
   let lastConnectAt = 0;
   let lastDisconnectAt = 0;
-  const pendingPairingUntil = () => getNumber(reminders.db, PENDING_PAIRING_KEY, 0);
-  const setPendingPairingUntil = (until: number) => setSetting(reminders.db, PENDING_PAIRING_KEY, until);
-  router.use(requireAdmin, (_req, res, next) => {
+  const pendingPairingUntil = () => getNumber(reminders.db, PLATFORM, PENDING_PAIRING_KEY, 0);
+  const setPendingPairingUntil = (until: number) => setSetting(reminders.db, PLATFORM, PENDING_PAIRING_KEY, until);
+  router.use(requireReminderWorkspace(reminders), requireAdmin, (_req, res, next) => {
     res.setHeader('Cache-Control', 'no-store');
     res.setHeader('Referrer-Policy', 'no-referrer');
     next();

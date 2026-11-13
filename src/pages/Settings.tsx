@@ -13,6 +13,7 @@ import { useLanguage } from '@/contexts/LanguageContext';
 import { api, endpoints } from '@/lib/api';
 import { Layout } from '@/components/Layout';
 import { useAuth } from '@/hooks/useAuth';
+import { canEdit, isOwner } from '@/lib/permissions';
 import { Mail, Moon, Building2, FileText, UserCog, Shield, Database, QrCode, FileScan } from 'lucide-react';
 
 import type { Company, DocumentType, Ministry, Position } from '@/components/settings/types';
@@ -29,10 +30,25 @@ import { DocumentExtractionSettings } from '@/components/settings/DocumentExtrac
 
 export default function Settings() {
   const { t, isRTL } = useLanguage();
-  const { user } = useAuth();
+  const { user, whatsappAvailable } = useAuth();
   const { toast } = useToast();
   const { theme, toggleTheme } = useTheme();
-  const [activeTab, setActiveTab] = useState('email');
+  const owner = isOwner(user?.role);
+  const editable = canEdit(user?.role);
+  const showWhatsApp = owner && whatsappAvailable;
+  const [activeTab, setActiveTab] = useState(owner ? 'email' : 'appearance');
+  const visibleTabs = [
+    ...(owner ? ['email'] : []),
+    ...(showWhatsApp ? ['whatsapp'] : []),
+    ...(owner ? ['extraction'] : []),
+    'appearance',
+    'companies',
+    'positions',
+    'documents',
+    'ministries',
+    ...(owner ? ['backup'] : []),
+  ];
+  const selectedTab = visibleTabs.includes(activeTab) ? activeTab : visibleTabs[0];
   const [whatsappRefreshKey, setWhatsAppRefreshKey] = useState(0);
   const refreshWhatsAppSettings = useCallback(() => setWhatsAppRefreshKey(value => value + 1), []);
   const [isLoading, setIsLoading] = useState(true);
@@ -227,49 +243,49 @@ export default function Settings() {
         </motion.div>
 
         <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }}>
-          <Tabs dir={isRTL ? 'rtl' : 'ltr'} value={activeTab} onValueChange={setActiveTab} className="space-y-6">
+          <Tabs dir={isRTL ? 'rtl' : 'ltr'} value={selectedTab} onValueChange={setActiveTab} className="space-y-6">
             <TabsList className="grid h-auto w-full grid-cols-2 sm:grid-cols-3 xl:grid-cols-4 gap-1">
-              <TabsTrigger value="email" className="flex items-center gap-2"><Mail className="h-4 w-4" /><span>{t('settings.tabs.email')}</span></TabsTrigger>
-              {user?.role === 'admin' && <TabsTrigger value="whatsapp" className="flex items-center gap-2"><QrCode className="h-4 w-4" /><span>{t('settings.tabs.whatsapp')}</span></TabsTrigger>}
-              {user?.role === 'admin' && <TabsTrigger value="extraction" className="flex items-center gap-2"><FileScan className="h-4 w-4" /><span>{t('extraction.title')}</span></TabsTrigger>}
+              {owner && <TabsTrigger value="email" className="flex items-center gap-2"><Mail className="h-4 w-4" /><span>{t('settings.tabs.email')}</span></TabsTrigger>}
+              {showWhatsApp && <TabsTrigger value="whatsapp" className="flex items-center gap-2"><QrCode className="h-4 w-4" /><span>{t('settings.tabs.whatsapp')}</span></TabsTrigger>}
+              {owner && <TabsTrigger value="extraction" className="flex items-center gap-2"><FileScan className="h-4 w-4" /><span>{t('extraction.title')}</span></TabsTrigger>}
               <TabsTrigger value="appearance" className="flex items-center gap-2"><Moon className="h-4 w-4" /><span>{t('settings.tabs.appearance')}</span></TabsTrigger>
               <TabsTrigger value="companies" className="flex items-center gap-2"><Building2 className="h-4 w-4" /><span>{t('settings.tabs.companies')}</span></TabsTrigger>
               <TabsTrigger value="positions" className="flex items-center gap-2"><UserCog className="h-4 w-4" /><span>{t('settings.tabs.positions')}</span></TabsTrigger>
               <TabsTrigger value="documents" className="flex items-center gap-2"><FileText className="h-4 w-4" /><span>{t('settings.tabs.documents')}</span></TabsTrigger>
               <TabsTrigger value="ministries" className="flex items-center gap-2"><Shield className="h-4 w-4" /><span>{t('settings.tabs.ministries')}</span></TabsTrigger>
-              <TabsTrigger value="backup" className="flex items-center gap-2"><Database className="h-4 w-4" /><span>{t('settings.tabs.backup')}</span></TabsTrigger>
+              {owner && <TabsTrigger value="backup" className="flex items-center gap-2"><Database className="h-4 w-4" /><span>{t('settings.tabs.backup')}</span></TabsTrigger>}
             </TabsList>
 
-            <TabsContent value="email">
+            {owner && <TabsContent value="email">
               <EmailSettingsComponent />
-            </TabsContent>
-            {user?.role === 'admin' && <TabsContent value="whatsapp" className="space-y-5"><WhatsAppPairingSettings onDisconnectSettled={refreshWhatsAppSettings} /><WhatsAppSettings refreshKey={whatsappRefreshKey} /></TabsContent>}
+            </TabsContent>}
+            {showWhatsApp && <TabsContent value="whatsapp" className="space-y-5"><WhatsAppPairingSettings onDisconnectSettled={refreshWhatsAppSettings} /><WhatsAppSettings refreshKey={whatsappRefreshKey} /></TabsContent>}
 
-            {user?.role === 'admin' && <TabsContent value="extraction"><DocumentExtractionSettings /></TabsContent>}
+            {owner && <TabsContent value="extraction"><DocumentExtractionSettings /></TabsContent>}
 
             <TabsContent value="appearance">
               <AppearanceSettings darkMode={theme === 'dark'} onToggleDarkMode={toggleDarkMode} />
             </TabsContent>
 
             <TabsContent value="companies">
-              <CompaniesSettings companies={companies} newCompany={newCompany} onNewCompanyChange={setNewCompany} onAdd={addCompany} onEdit={setEditingCompany} onDelete={deleteCompany} />
+              <CompaniesSettings canEdit={editable} companies={companies} newCompany={newCompany} onNewCompanyChange={setNewCompany} onAdd={addCompany} onEdit={setEditingCompany} onDelete={deleteCompany} />
             </TabsContent>
 
             <TabsContent value="positions">
-              <PositionsSettings positions={positions} newPosition={newPosition} onNewPositionChange={setNewPosition} onAdd={addPosition} onEdit={setEditingPosition} onDelete={deletePosition} />
+              <PositionsSettings canEdit={editable} positions={positions} newPosition={newPosition} onNewPositionChange={setNewPosition} onAdd={addPosition} onEdit={setEditingPosition} onDelete={deletePosition} />
             </TabsContent>
 
             <TabsContent value="documents">
-              <DocumentTypesSettings documentTypes={documentTypes} newDocType={newDocType} onNewDocTypeChange={setNewDocType} onAdd={addDocumentType} onEdit={setEditingDocType} onDelete={deleteDocumentType} />
+              <DocumentTypesSettings canEdit={editable} documentTypes={documentTypes} newDocType={newDocType} onNewDocTypeChange={setNewDocType} onAdd={addDocumentType} onEdit={setEditingDocType} onDelete={deleteDocumentType} />
             </TabsContent>
 
             <TabsContent value="ministries">
-              <MinistriesSettings ministries={ministries} newMinistry={newMinistry} onNewMinistryChange={setNewMinistry} onAdd={addMinistry} onEdit={setEditingMinistry} onDelete={deleteMinistry} />
+              <MinistriesSettings canEdit={editable} ministries={ministries} newMinistry={newMinistry} onNewMinistryChange={setNewMinistry} onAdd={addMinistry} onEdit={setEditingMinistry} onDelete={deleteMinistry} />
             </TabsContent>
 
-            <TabsContent value="backup">
+            {owner && <TabsContent value="backup">
               <BackupSettings onExportBackup={exportBackup} onEraseAllData={handleEraseAllData} />
-            </TabsContent>
+            </TabsContent>}
           </Tabs>
         </motion.div>
 

@@ -449,7 +449,7 @@ class FormsMockApi {
   seedDraft(scope, values, account = this.currentAccount, revision = crypto.randomUUID()) {
     if (!this.draftDb) return { revision, values };
     this.draftDb.prepare(
-      "INSERT OR REPLACE INTO document_drafts(user_id, scope, revision, values_json, updated_at) VALUES(?, ?, ?, ?, ?)"
+      "INSERT OR REPLACE INTO document_drafts(workspace_id, user_id, scope, revision, values_json, updated_at) VALUES('ws_legacy', ?, ?, ?, ?, ?)"
     ).run(account, scope, revision, values ? JSON.stringify(values) : null, new Date().toISOString());
     return { revision, values };
   }
@@ -1885,7 +1885,7 @@ async function runFormsTests(page, api, draftDb, draftsPort) {
 
       // Step 2: Simulate another device/tab directly mutating SQLite revision
       const currentRev = draftDb.prepare('SELECT revision FROM document_drafts WHERE user_id=? AND scope=?').get('account-admin-1', 'company:comp-1').revision;
-      writeDraft(draftDb, 'account-admin-1', { scope: 'company:comp-1', revision: String(currentRev) }, { title: 'Other Device Remote Edit' });
+      writeDraft(draftDb, { workspaceId: 'ws_legacy' }, 'account-admin-1', { scope: 'company:comp-1', revision: String(currentRev) }, { title: 'Other Device Remote Edit' });
 
       // Step 3: Local session attempts to save unsaved local changes
       const conflictResult = await page.evaluate(async () => {
@@ -2365,20 +2365,20 @@ export async function main() {
 
   for (const id of ['account-admin-1', 'account-admin-2', 'admin']) {
     draftDb.prepare(
-      "INSERT OR REPLACE INTO admin_users(id, email, name, role, password_hash, created_at, updated_at) VALUES(?, ?, ?, ?, ?, '2026-01-01', '2026-01-01')"
+      "INSERT OR REPLACE INTO admin_users(workspace_id, id, email, name, role, password_hash, created_at, updated_at) VALUES('ws_legacy', ?, ?, ?, ?, ?, '2026-01-01', '2026-01-01')"
     ).run(id, `${id}@example.invalid`, `Synthetic ${id}`, 'admin', 'not-a-login-fixture');
   }
 
-  insertRow(draftDb, 'companies', { id: 'comp-1', name: 'Romani Trading Co', name_ar: 'شركة روماني للتجارة' });
-  insertRow(draftDb, 'companies', { id: 'comp-2', name: 'Gulf Services Ltd', name_ar: 'شركة الخليج للخدمات' });
-  insertRow(draftDb, 'employees', { id: 'emp-1', company_id: 'comp-1', name: 'Ahmed Al-Sabah' });
-  insertRow(draftDb, 'employees', { id: 'emp-2', company_id: 'comp-1', name: 'Fatima Al-Mansoor' });
-  insertRow(draftDb, 'document_types', { id: 'type-civil-id', name: 'Civil ID', name_ar: 'البطاقة المدنية' });
-  insertRow(draftDb, 'document_types', { id: 'type-passport', name: 'Passport', name_ar: 'جواز السفر' });
-  insertRow(draftDb, 'document_types', { id: 'type-contract', name: 'Work Contract', name_ar: 'عقد العمل' });
-  insertRow(draftDb, 'ministries', { id: 'min-moi', name: 'Ministry of Interior', name_ar: 'وزارة الداخلية' });
-  insertRow(draftDb, 'ministries', { id: 'min-molf', name: 'Ministry of Labor', name_ar: 'وزارة العمل' });
-  insertRow(draftDb, 'documents', {
+  insertRow(draftDb, { workspaceId: 'ws_legacy' }, 'companies', { id: 'comp-1', name: 'Romani Trading Co', name_ar: 'شركة روماني للتجارة' });
+  insertRow(draftDb, { workspaceId: 'ws_legacy' }, 'companies', { id: 'comp-2', name: 'Gulf Services Ltd', name_ar: 'شركة الخليج للخدمات' });
+  insertRow(draftDb, { workspaceId: 'ws_legacy' }, 'employees', { id: 'emp-1', company_id: 'comp-1', name: 'Ahmed Al-Sabah' });
+  insertRow(draftDb, { workspaceId: 'ws_legacy' }, 'employees', { id: 'emp-2', company_id: 'comp-1', name: 'Fatima Al-Mansoor' });
+  insertRow(draftDb, { workspaceId: 'ws_legacy' }, 'document_types', { id: 'type-civil-id', name: 'Civil ID', name_ar: 'البطاقة المدنية' });
+  insertRow(draftDb, { workspaceId: 'ws_legacy' }, 'document_types', { id: 'type-passport', name: 'Passport', name_ar: 'جواز السفر' });
+  insertRow(draftDb, { workspaceId: 'ws_legacy' }, 'document_types', { id: 'type-contract', name: 'Work Contract', name_ar: 'عقد العمل' });
+  insertRow(draftDb, { workspaceId: 'ws_legacy' }, 'ministries', { id: 'min-moi', name: 'Ministry of Interior', name_ar: 'وزارة الداخلية' });
+  insertRow(draftDb, { workspaceId: 'ws_legacy' }, 'ministries', { id: 'min-molf', name: 'Ministry of Labor', name_ar: 'وزارة العمل' });
+  insertRow(draftDb, { workspaceId: 'ws_legacy' }, 'documents', {
     id: 'doc-edit-1',
     title: 'Employee Passport',
     document_type_id: 'type-passport',
@@ -2387,7 +2387,7 @@ export async function main() {
     created_at: '2026-01-01',
     updated_at: '2026-01-01',
   });
-  insertRow(draftDb, 'documents', {
+  insertRow(draftDb, { workspaceId: 'ws_legacy' }, 'documents', {
     id: 'doc-edit-2',
     title: 'Civil ID Card Edit',
     document_type_id: 'type-civil-id',

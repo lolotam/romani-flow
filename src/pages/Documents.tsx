@@ -1,4 +1,4 @@
-﻿import { useState } from 'react';
+import { useState } from 'react';
 import { motion } from 'framer-motion';
 import { Building2, Download, Mail, Trash2, User } from 'lucide-react';
 import { Layout } from '@/components/Layout';
@@ -15,9 +15,14 @@ import { useDocuments } from '@/hooks/useDocuments';
 import { useDocumentActions } from '@/hooks/useDocumentActions';
 import { useLanguage } from '@/contexts/LanguageContext';
 import type { DocumentWithRelations } from '@/lib/api';
+import { useAuth } from '@/hooks/useAuth';
+import { canEdit, isOwner } from '@/lib/permissions';
 
 export default function Documents() {
   const { t, language } = useLanguage();
+  const { user } = useAuth();
+  const editable = canEdit(user?.role);
+  const owner = isOwner(user?.role);
   const data = useDocuments();
   const { isDeleting, deleteDocuments, downloadDocument, emailLabel } = useDocumentActions(data.removeDocuments);
   const [isUploadDialogOpen, setIsUploadDialogOpen] = useState(false);
@@ -74,8 +79,8 @@ export default function Documents() {
           <h1 className="text-3xl font-bold text-gradient text-slate-950">{t('documents.title')}</h1>
           <p className="text-muted-foreground">{t('documents.viewAndManage', { count: data.documents.length })}</p>
         </div>
-        <DocumentUploadDialog open={isUploadDialogOpen} onOpenChange={setIsUploadDialogOpen}
-          onFilesAccepted={handleFilesAccepted} />
+        {editable && <DocumentUploadDialog open={isUploadDialogOpen} onOpenChange={setIsUploadDialogOpen}
+          onFilesAccepted={handleFilesAccepted} />}
       </motion.div>
 
       {data.error && (
@@ -106,18 +111,18 @@ export default function Documents() {
                 </Button>
               </div>
               <div className="flex flex-wrap gap-2">
-                <Button variant="outline" size="sm" onClick={() => setEmailDocuments(data.selectedDocuments)} disabled={isDeleting}>
+                {owner && <Button variant="outline" size="sm" onClick={() => setEmailDocuments(data.selectedDocuments)} disabled={isDeleting}>
                   <Mail className="h-4 w-4 ml-1" />{emailLabel}
-                </Button>
+                </Button>}
                 <Button variant="outline" size="sm" onClick={async () => {
                   for (const document of data.selectedDocuments) await downloadDocument(document);
                 }} disabled={isDeleting}>
                   <Download className="h-4 w-4 ml-1" />{t('documents.bulk.download')}
                 </Button>
-                <Button variant="destructive" size="sm" disabled={isDeleting}
+                {editable && <Button variant="destructive" size="sm" disabled={isDeleting}
                   onClick={() => { void deleteDocuments(data.selectedDocuments.map((document) => document.id)); }}>
                   <Trash2 className="h-4 w-4 ml-1" />{t('documents.bulk.delete')}
-                </Button>
+                </Button>}
               </div>
             </CardContent>
           </Card>
@@ -149,7 +154,7 @@ export default function Documents() {
       </motion.div>
 
       {/* Document Form Dialog */}
-      {(uploadedFile || editingDocument) && (
+      {editable && (uploadedFile || editingDocument) && (
         <DocumentEditorDialog uploadedFile={uploadedFile} fileName={uploadedFile?.name ?? editingDocument?.file_name ?? ''}
           onClose={handleDocumentFormClose} onSuccess={data.reload} documentTypes={data.documentTypes}
           companies={data.companies} employees={data.employees} ministries={data.ministries} editingDocument={editingDocument} />

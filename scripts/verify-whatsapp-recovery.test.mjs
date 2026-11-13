@@ -12,7 +12,7 @@ test('invalid-runtime startup writes nothing and valid recovery is confined to i
   const own=new WhatsAppReminders(f.db,'romani',transport,()=>f.clock.now);
   own.store.saveRecipient({label:'Synthetic manager',phone:MANAGER_PHONE,enabled:true});await own.schedule();
   const other=new WhatsAppReminders(f.db,'other-isolated-fixture',transport,()=>f.clock.now);
-  other.store.enqueue(selectReminders(f.db,other.instance,f.clock.now));
+  other.store.enqueue(selectReminders(f.db, { workspaceId: 'ws_legacy' },other.instance,f.clock.now));
   const ownClaim=own.store.claim(own.store.due()[0].id),otherClaim=other.store.claim(other.store.due()[0].id);
   const rows=()=>({jobs:f.db.prepare('SELECT * FROM whatsapp_jobs ORDER BY id').all(),attempts:f.db.prepare('SELECT * FROM whatsapp_attempts ORDER BY id').all()});
   const before=rows(),changes=f.db.prepare('SELECT total_changes() n').get().n;
@@ -44,7 +44,7 @@ test('W8 full SQLite/attachment recovery retains outbox/attempt snapshots and re
   restored=new DatabaseSync(path.join(target,'romani.db'));restored.exec('PRAGMA foreign_keys=ON');assert.equal(restored.prepare('PRAGMA integrity_check').get().integrity_check,'ok');assert.deepEqual(restored.prepare('PRAGMA foreign_key_check').all(),[]);
   assert.deepEqual(fs.readFileSync(path.join(target,'uploads','proof.pdf')),pdf);assert.equal(restored.prepare('SELECT count(*) n FROM whatsapp_jobs').get().n,2);assert.equal(restored.prepare('SELECT count(*) n FROM whatsapp_attempts').get().n,2);assert.equal(restored.prepare('SELECT count(*) n FROM whatsapp_recipients').get().n,1);
   // Explicitly disable only the verified isolated tree, never the source/production DB.
-  assert.ok(target.startsWith(root+path.sep));setSetting(restored,'whatsapp.enabled',false);
+  assert.ok(target.startsWith(root+path.sep));setSetting(restored, { workspaceId: 'ws_legacy' }, 'whatsapp.enabled',false);
   const recovered=new WhatsAppReminders(restored,'romani-fixture',transport,()=>f.clock.now);recovered.start();assert.equal(await recovered.drain(),0);await recovered.stop();
   assert.equal(calls,0);assert.equal(restored.prepare("SELECT count(*) n FROM whatsapp_jobs WHERE state='unknown'").get().n,1);assert.equal(restored.prepare("SELECT count(*) n FROM whatsapp_jobs WHERE state='provider_accepted'").get().n,1);
   assert.equal(restored.prepare('SELECT text FROM whatsapp_attempts WHERE id=?').get(first.attemptId).text,first.job.text);

@@ -19,7 +19,7 @@ test('closed async API admission rejects new document sends without an attempt o
 }));
 
 for(const [outcome,drainFails] of [['sent',false],['failed',false],['sent',true]])test(`detached SMTP persists ${outcome} before shutdown completes (drain failure: ${drainFails})`,()=>reminderApi(async f=>{
- const file=await f.storage.save(Buffer.from('%PDF-1.4\nSynthetic shutdown fixture\n%%EOF'),'synthetic.pdf','application/pdf');
+ const file=await f.storage.save('ws_legacy',{buffer:Buffer.from('%PDF-1.4\nSynthetic shutdown fixture\n%%EOF'),originalName:'synthetic.pdf',mimeType:'application/pdf'});
  f.db.prepare('UPDATE documents SET file_path=?,file_name=?,mime_type=? WHERE id=?').run(file.relativePath,file.fileName,file.mimeType,f.document.id);
  let release,entered;
  const blocked=new Promise(resolve=>release=resolve),started=new Promise(resolve=>entered=resolve);
@@ -48,9 +48,9 @@ for(const [outcome,drainFails] of [['sent',false],['failed',false],['sent',true]
 
 test('shutdown waits for active scheduled SMTP beyond the old deadline and rejects new cron/manual work',t=>reminderApi(async f=>{
  let release,entered;const started=new Promise(resolve=>entered=resolve),blocked=new Promise(resolve=>release=resolve);
- setSetting(f.db,'email.enabled',true);setSetting(f.db,'email.recipients',['synthetic@example.invalid']);
+ setSetting(f.db, { workspaceId: 'ws_legacy' }, 'email.enabled',true);setSetting(f.db, { workspaceId: 'ws_legacy' }, 'email.recipients',['synthetic@example.invalid']);
  const cron=new CronService(f.db,{send:async()=>{entered();await blocked;return{status:'sent',accepted:['synthetic@example.invalid'],rejected:[],messageId:'synthetic-shutdown-email'};}});
- cron.setReminderEnqueue(()=>f.reminders.schedule());
+ cron.setReminderEnqueue({ workspaceId: 'ws_legacy' },()=>f.reminders.schedule());
  const server=http.createServer((_req,res)=>res.end('synthetic'));await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
  const run=cron.run('cron');let dbClosed=false;const exits=[];
  try{
@@ -58,16 +58,16 @@ test('shutdown waits for active scheduled SMTP beyond the old deadline and rejec
   t.mock.timers.enable({apis:['setTimeout']});
   const shutdown=drainApplication({server,stopHandlers:async()=>{},stopCron:()=>cron.shutdown(),stopReminders:()=>f.reminders.stop(),closeDatabase:()=>{
    assert.equal(f.db.prepare("SELECT count(*) n FROM email_log WHERE status='sent'").get().n,1);
-   assert.ok(getString(f.db,'cron.last_run_date'));dbClosed=true;
+   assert.ok(getString(f.db, { workspaceId: 'ws_legacy' }, 'cron.last_run_date'));dbClosed=true;
   },exit:code=>exits.push(code)});
-  for(const source of ['cron','manual'])assert.equal((await cron.run(source)).skipped,'shutting_down');
-  assert.equal(cron.reschedule().nextRun,null);
+  for(const source of ['cron','manual'])assert.equal((await cron.run(source,{workspaceId:'ws_legacy'})).skipped,'shutting_down');
+  cron.reschedule();assert.equal(cron.status({ workspaceId: 'ws_legacy' }).nextRun,null);
   t.mock.timers.tick(20_001);
-  assert.equal(dbClosed,false);assert.deepEqual(exits,[]);assert.equal(cron.status().running,true);
+  assert.equal(dbClosed,false);assert.deepEqual(exits,[]);assert.equal(cron.status({ workspaceId: 'ws_legacy' }).running,true);
   // SMTP phase/idle timeouts are not a whole-operation bound; the application has its own ceiling.
   assert.ok(SHUTDOWN_DEADLINE_MS>60_000);
   release();assert.equal((await run).sent,true);await shutdown;
-  assert.equal(dbClosed,true);assert.deepEqual(exits,[0]);assert.equal(cron.status().running,false);
+  assert.equal(dbClosed,true);assert.deepEqual(exits,[0]);assert.equal(cron.status({ workspaceId: 'ws_legacy' }).running,false);
  }finally{t.mock.timers.reset();release();await run;await cron.shutdown();server.closeAllConnections();await new Promise(resolve=>server.close(resolve));}
 }));
 

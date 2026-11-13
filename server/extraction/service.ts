@@ -1,5 +1,6 @@
 import type { NextFunction, Request, Response } from 'express';
 import type { Db } from '../db/connection.js';
+import { tenantOf, type Scope } from '../middleware/auth.js';
 import {
   resultSchema,
   type ExtractionRequest,
@@ -63,11 +64,11 @@ export interface ExtractionServiceConfig {
 
 /** The public surface of the service. */
 export interface ExtractionService {
-  status(): ExtractionStatus;
-  models(provider: 'groq' | 'openrouter', signal: AbortSignal): Promise<ModelChoice[]>;
+  status(scope: Scope): ExtractionStatus;
+  models(scope: Scope, provider: 'groq' | 'openrouter', signal: AbortSignal): Promise<ModelChoice[]>;
   catalog(provider: 'groq' | 'openrouter', signal: AbortSignal): Promise<ModelCatalogListing>;
   candidates(provider: 'groq' | 'openrouter'): CandidateListing;
-  run(request: ExtractionRequest, userId: string, signal: AbortSignal): Promise<ExtractionResult>;
+  run(scope: Scope, request: ExtractionRequest, userId: string, signal: AbortSignal): Promise<ExtractionResult>;
   preflight(req: Request, res: Response, next: NextFunction): void;
   acquire(req: Request, res: Response, next: NextFunction): void;
   validateCandidate(request: CandidateRequest): Promise<CandidateValidation>;
@@ -194,9 +195,9 @@ export function createExtractionService(
   };
 
   /** Resolves the selection of the request from the settings and approvals. */
-  const resolveSelection = (): { selection: Selection; approval: Approval } => {
-    const provider = getString(db, 'ai_extraction.provider');
-    const model = getString(db, 'ai_extraction.model');
+  const resolveSelection = (scope: Scope): { selection: Selection; approval: Approval } => {
+    const provider = getString(db, scope, 'ai_extraction.provider');
+    const model = getString(db, scope, 'ai_extraction.model');
     if (provider !== 'groq' && provider !== 'openrouter') {
       throw failure('provider_policy', 502, 'No extraction provider is selected.');
     }
@@ -254,7 +255,7 @@ export function createExtractionService(
   };
 
   /** The public status of the feature. It carries no key and no policy payload. */
-  const status = (): ExtractionStatus => describeExtractionStatus(db, config, now());
+  const status = (scope: Scope): ExtractionStatus => describeExtractionStatus(db, scope, config, now());
 
   /**
    * Lists the models the administrator may choose from.
@@ -265,8 +266,8 @@ export function createExtractionService(
    * refused before the first metadata call when the processing is not
    * approved, when the context is missing or when the feature is disabled.
    */
-  const models = async (provider: 'groq' | 'openrouter', signal: AbortSignal): Promise<ModelChoice[]> => {
-    if (!getBoolean(db, 'ai_extraction.enabled')) {
+  const models = async (scope: Scope, provider: 'groq' | 'openrouter', signal: AbortSignal): Promise<ModelChoice[]> => {
+    if (!getBoolean(db, scope, 'ai_extraction.enabled')) {
       throw failure('extraction_disabled', 403, 'Document extraction is disabled.');
     }
     if (!config.extraction.authorized || !config.extraction.context) {
@@ -300,17 +301,13 @@ export function createExtractionService(
    * result is built only when every batch succeeded, so a partial answer
    * never reaches the browser.
    */
-  const run = async (
-    request: ExtractionRequest,
-    userId: string,
-    signal: AbortSignal,
-  ): Promise<ExtractionResult> => {
+  const run = async (scope: Scope, request: ExtractionRequest, userId: string, signal: AbortSignal): Promise<ExtractionResult> => {
     /** Checks the state of the server that guards an outbound call. */
     const recheck = (): void => {
-      assertCurrent(db, config, request, userId);
+      assertCurrent(db, scope, config, request, userId);
     };
     recheck();
-    const { selection, approval } = resolveSelection();
+    const { selection, approval } = resolveSelection(scope);
     const batches: ExtractionRequest['images'][] = [];
     for (let index = 0; index < request.images.length; index += selection.maxImages) {
       batches.push(request.images.slice(index, index + selection.maxImages));
@@ -339,7 +336,7 @@ export function createExtractionService(
     }
 
     recheck();
-    const fields = normalizePages(pages, request.pageCount, readCatalogs(db));
+    const fields = normalizePages(pages, request.pageCount, readCatalogs(db, scope));
     return resultSchema.parse({
       requestId: request.requestId,
       context: request.context,
@@ -360,7 +357,7 @@ export function createExtractionService(
    */
   const preflight = (req: Request, _res: Response, next: NextFunction): void => {
     try {
-      if (!getBoolean(db, 'ai_extraction.enabled')) {
+      if (!getBoolean(db, tenantOf(req), 'ai_extraction.enabled')) {
         throw failure('extraction_disabled', 403, 'Document extraction is disabled.');
       }
       if (!config.extraction.authorized) {
@@ -369,11 +366,11 @@ export function createExtractionService(
       if (!config.extraction.context) {
         throw failure('processing_not_authorized', 403, 'External document processing is not authorized.');
       }
-      const provider = getString(db, 'ai_extraction.provider');
+      const provider = getString(db, tenantOf(req), 'ai_extraction.provider');
       if (provider !== 'groq' && provider !== 'openrouter') {
         throw failure('extraction_disabled', 403, 'No extraction provider is selected.');
       }
-      const model = getString(db, 'ai_extraction.model');
+      const model = getString(db, tenantOf(req), 'ai_extraction.model');
       if (!model) {
         throw failure('extraction_disabled', 403, 'No extraction model is selected.');
       }

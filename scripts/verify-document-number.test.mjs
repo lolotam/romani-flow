@@ -282,7 +282,7 @@ test('GET /api/backup/export includes document_number in documents export', () =
 
 test('form defaults isolate document_number: rememberSubmission never stores it, readSubmission deletes legacy', () => reminderApi(async f => {
   // rememberSubmission does not store document_number in form_defaults
-  rememberSubmission(f.db, 'admin', 'documents', {
+  rememberSubmission(f.db, { workspaceId: 'ws_legacy' }, 'admin', 'documents', {
     id: 'doc-synth',
     title: 'Submitted Title',
     notes: 'Some notes',
@@ -308,7 +308,7 @@ test('form defaults isolate document_number: rememberSubmission never stores it,
     })
   );
 
-  const restored = readSubmission(f.db, 'admin', 'documents');
+  const restored = readSubmission(f.db, { workspaceId: 'ws_legacy' }, 'admin', 'documents');
   assert.equal(restored.title, 'Legacy Title');
   assert.equal('document_number' in restored, false, 'readSubmission must remove legacy document_number');
 

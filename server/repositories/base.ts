@@ -1,5 +1,5 @@
 import type { Db } from '../db/connection.js';
-import { getTable, type RelationSpec, type TableSpec } from './schema.js';
+import { getTable, TENANT_TABLES, type RelationSpec, type TableSpec } from './schema.js';
 
 /**
  * Generic, allow-list driven data access.
@@ -28,6 +28,27 @@ export interface ListOptions {
 }
 
 export type Row = Record<string, unknown>;
+
+/**
+ * The workspace a call acts for. It always comes from the verified session,
+ * never from the request body or query, and every tenant table read or write
+ * is filtered by it.
+ */
+export interface Scope {
+  readonly workspaceId: string;
+}
+
+/** SQL fragment and parameter restricting a tenant table to the scope. */
+function scopeClause(spec: TableSpec, scope: Scope): { sql: string; params: SqlValue[] } {
+  if (!TENANT_TABLES.has(spec.name)) return { sql: '', params: [] };
+  return { sql: '"workspace_id" = ?', params: [scope.workspaceId] };
+}
+
+/** The scope clause as an `AND …` suffix, or nothing for a platform table. */
+function andScope(spec: TableSpec, scope: Scope): { sql: string; params: SqlValue[] } {
+  const tenant = scopeClause(spec, scope);
+  return { sql: tenant.sql ? ` AND ${tenant.sql}` : '', params: tenant.params };
+}
 
 /** Values that can be bound to a prepared statement. */
 export type SqlValue = string | number | null | bigint | Uint8Array;
@@ -116,9 +137,14 @@ function coerceFilterValue(
   return value;
 }
 
-function buildWhere(spec: TableSpec, filters: Filter[]): { sql: string; params: SqlValue[] } {
+function buildWhere(spec: TableSpec, scope: Scope, filters: Filter[]): { sql: string; params: SqlValue[] } {
   const clauses: string[] = [];
   const params: SqlValue[] = [];
+  const tenant = scopeClause(spec, scope);
+  if (tenant.sql) {
+    clauses.push(tenant.sql);
+    params.push(...tenant.params);
+  }
 
   for (const filter of filters) {
     const column = assertColumn(spec, filter.field);
@@ -169,6 +195,7 @@ function buildOrder(spec: TableSpec, order?: ListOptions['order']): string {
 /** Loads the related rows for one relation and returns them keyed by id. */
 function loadRelation(
   db: Db,
+  scope: Scope,
   ownerRows: Row[],
   relation: RelationSpec,
 ): Map<string, Row> {
@@ -180,9 +207,10 @@ function loadRelation(
   if (foreignKeys.length === 0) return linked;
 
   const placeholders = foreignKeys.map(() => '?').join(', ');
+  const tenant = andScope(requireSpec(relation.table), scope);
   const related = db
-    .prepare(`SELECT * FROM "${relation.table}" WHERE id IN (${placeholders})`)
-    .all(...foreignKeys) as Row[];
+    .prepare(`SELECT * FROM "${relation.table}" WHERE id IN (${placeholders})${tenant.sql}`)
+    .all(...foreignKeys, ...tenant.params) as Row[];
 
   for (const row of related) {
     linked.set(String(row.id), row);
@@ -192,6 +220,7 @@ function loadRelation(
 
 function attachRelations(
   db: Db,
+  scope: Scope,
   spec: TableSpec,
   rows: Row[],
   relationNames: string[],
@@ -202,7 +231,7 @@ function attachRelations(
     const relation = spec.relations?.[relationName];
     if (!relation) continue;
 
-    const linked = loadRelation(db, rows, relation);
+    const linked = loadRelation(db, scope, rows, relation);
 
     for (const row of rows) {
       const foreignValue = row[relation.foreignKey];
@@ -216,7 +245,7 @@ function attachRelations(
       // A relation may itself declare nested relations (documents → employees → companies).
       if (relation.nested) {
         for (const [nestedName, nestedSpec] of Object.entries(relation.nested)) {
-          const nestedLinked = loadRelation(db, [related], nestedSpec);
+          const nestedLinked = loadRelation(db, scope, [related], nestedSpec);
           const nestedRow = nestedLinked.get(String(related[nestedSpec.foreignKey]));
           if (nestedRow) {
             embedded[nestedName] = { ...nestedRow };
@@ -231,9 +260,9 @@ function attachRelations(
   return rows;
 }
 
-export function listRows(db: Db, tableName: string, options: ListOptions = {}): Row[] {
+export function listRows(db: Db, scope: Scope, tableName: string, options: ListOptions = {}): Row[] {
   const spec = requireSpec(tableName);
-  const { sql: whereSql, params } = buildWhere(spec, options.filters ?? []);
+  const { sql: whereSql, params } = buildWhere(spec, scope, options.filters ?? []);
   const orderSql = buildOrder(spec, options.order);
 
   const limit = options.limit !== undefined && options.limit >= 0 ? options.limit : undefined;
@@ -254,24 +283,35 @@ export function listRows(db: Db, tableName: string, options: ListOptions = {}): 
   }
 
   const rows = db.prepare(sql).all(...queryParams) as Row[];
-  return attachRelations(db, spec, rows, options.relations ?? []);
+  return attachRelations(db, scope, spec, rows, options.relations ?? []);
 }
 
 export function findRow(
   db: Db,
+  scope: Scope,
   tableName: string,
   id: string,
   relations: string[] = [],
 ): Row | null {
   const spec = requireSpec(tableName);
-  const row = db.prepare(`SELECT * FROM "${spec.name}" WHERE id = ?`).get(id) as Row | undefined;
+  const tenant = andScope(spec, scope);
+  const row = db
+    .prepare(`SELECT * FROM "${spec.name}" WHERE id = ?${tenant.sql}`)
+    .get(id, ...tenant.params) as Row | undefined;
   if (!row) return null;
-  return attachRelations(db, spec, [row], relations)[0];
+  return attachRelations(db, scope, spec, [row], relations)[0];
 }
 
-export function countRows(db: Db, tableName: string, filters: Filter[] = []): number {
+/** Whether a row with this id exists in the scope; a row of another workspace does not. */
+export function existsInScope(db: Db, scope: Scope, tableName: string, id: string): boolean {
   const spec = requireSpec(tableName);
-  const { sql, params } = buildWhere(spec, filters);
+  const tenant = andScope(spec, scope);
+  return db.prepare(`SELECT 1 FROM "${spec.name}" WHERE id = ?${tenant.sql}`).get(id, ...tenant.params) !== undefined;
+}
+
+export function countRows(db: Db, scope: Scope, tableName: string, filters: Filter[] = []): number {
+  const spec = requireSpec(tableName);
+  const { sql, params } = buildWhere(spec, scope, filters);
   const row = db.prepare(`SELECT COUNT(*) AS total FROM "${spec.name}"${sql}`).get(...params) as {
     total: number;
   };
@@ -298,10 +338,31 @@ function writableColumns(spec: TableSpec, payload: Row): Array<[string, SqlValue
   return entries;
 }
 
-export function insertRow(db: Db, tableName: string, payload: Row): Row {
+/**
+ * Refuses a write whose foreign key points at a row outside the workspace.
+ *
+ * The answer is the same 404 as for an id that does not exist at all, so a
+ * caller learns nothing about other workspaces.
+ */
+function assertReferencesInScope(db: Db, scope: Scope, spec: TableSpec, entries: Array<[string, SqlValue]>): void {
+  for (const [column, value] of entries) {
+    const target = spec.references?.[column];
+    if (!target || value === null || value === '') continue;
+    // A sentinel names no row, so there is no row of another workspace to reach.
+    if (spec.sentinelReferences?.[column]?.includes(String(value))) continue;
+    const tenant = andScope(requireSpec(target), scope);
+    const found = db.prepare(`SELECT 1 FROM "${target}" WHERE id = ?${tenant.sql}`).get(value, ...tenant.params);
+    if (!found) {
+      throw new RepositoryError(`Referenced ${target} record was not found.`, 'not_found', 404);
+    }
+  }
+}
+
+export function insertRow(db: Db, scope: Scope, tableName: string, payload: Row): Row {
   const spec = requireSpec(tableName);
   const now = new Date().toISOString();
   const entries = writableColumns(spec, payload);
+  assertReferencesInScope(db, scope, spec, entries);
 
   const columns = ['id', ...entries.map(([key]) => key)];
   const values: SqlValue[] = [];
@@ -322,23 +383,29 @@ export function insertRow(db: Db, tableName: string, payload: Row): Row {
     columns.push('updated_at');
     values.push(now);
   }
+  if (TENANT_TABLES.has(spec.name)) {
+    columns.push('workspace_id');
+    values.push(scope.workspaceId);
+  }
 
   const placeholders = values.map(() => '?').join(', ');
   db.prepare(
     `INSERT INTO "${spec.name}" (${columns.map((column) => `"${column}"`).join(', ')}) VALUES (${placeholders})`,
   ).run(...values);
 
-  const row = findRow(db, tableName, id, []) as Row;
+  const row = findRow(db, scope, tableName, id, []) as Row;
   return row;
 }
 
-export function updateRow(db: Db, tableName: string, id: string, payload: Row): Row | null {
+export function updateRow(db: Db, scope: Scope, tableName: string, id: string, payload: Row): Row | null {
   const spec = requireSpec(tableName);
-  const existing = db.prepare(`SELECT id FROM "${spec.name}" WHERE id = ?`).get(id);
+  const tenant = andScope(spec, scope);
+  const existing = db.prepare(`SELECT id FROM "${spec.name}" WHERE id = ?${tenant.sql}`).get(id, ...tenant.params);
   if (!existing) return null;
 
   const entries = writableColumns(spec, payload);
-  if (entries.length === 0) return findRow(db, tableName, id, []);
+  if (entries.length === 0) return findRow(db, scope, tableName, id, []);
+  assertReferencesInScope(db, scope, spec, entries);
 
   const assignments = entries.map(([key]) => `"${key}" = ?`);
   const values: SqlValue[] = entries.map(([, value]) => value);
@@ -348,15 +415,16 @@ export function updateRow(db: Db, tableName: string, id: string, payload: Row): 
     values.push(new Date().toISOString());
   }
 
-  values.push(id);
-  db.prepare(`UPDATE "${spec.name}" SET ${assignments.join(', ')} WHERE id = ?`).run(...values);
+  values.push(id, ...tenant.params);
+  db.prepare(`UPDATE "${spec.name}" SET ${assignments.join(', ')} WHERE id = ?${tenant.sql}`).run(...values);
 
-  return findRow(db, tableName, id, []);
+  return findRow(db, scope, tableName, id, []);
 }
 
-export function deleteRow(db: Db, tableName: string, id: string): boolean {
+export function deleteRow(db: Db, scope: Scope, tableName: string, id: string): boolean {
   const spec = requireSpec(tableName);
-  const result = db.prepare(`DELETE FROM "${spec.name}" WHERE id = ?`).run(id);
+  const tenant = andScope(spec, scope);
+  const result = db.prepare(`DELETE FROM "${spec.name}" WHERE id = ?${tenant.sql}`).run(id, ...tenant.params);
   return result.changes > 0;
 }
 

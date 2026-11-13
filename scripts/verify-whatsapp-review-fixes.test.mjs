@@ -15,10 +15,10 @@ test('queue capacity is counted per operational instance, not across namespaces'
   const f = reminderFixture();
   try {
     f.db.prepare('UPDATE employees SET whatsapp_notifications_enabled=1').run();
-    const base = selectReminders(f.db, 'romani-fixture', f.clock.now)[0];
+    const base = selectReminders(f.db, { workspaceId: 'ws_legacy' }, 'romani-fixture', f.clock.now)[0];
     const clock = () => f.clock.now;
-    const foreign = new ReminderStore(f.db, 'foreign', clock);
-    const local = new ReminderStore(f.db, 'romani-fixture', clock);
+    const foreign = new ReminderStore(f.db, { workspaceId: 'ws_legacy' }, 'foreign', clock);
+    const local = new ReminderStore(f.db, { workspaceId: 'ws_legacy' }, 'romani-fixture', clock);
 
     const full = Array.from({ length: 2000 }, (_, n) => ({ ...base, instance: 'foreign', recipient: phone(n) }));
     assert.equal(foreign.enqueue(full), 2000);
@@ -52,7 +52,7 @@ test('a document create waits for the notification coordinator (backup erase) in
     const gate = new Promise((resolve) => { release = resolve; });
     const erase = coordinator.runExclusive(() => gate);
 
-    const created = service.createDocument(
+    const created = service.createDocument({ workspaceId: 'ws_legacy' }, 
       { title: 'Synthetic create', employee_id: f.employee.id, document_type_id: f.type.id, expiry_date: '2030-01-01' },
       () => 'valid',
     );
@@ -83,7 +83,7 @@ test('the displayed company relation always follows the returned company id', ()
 
 test('the audit log reads attempts once per page and keeps per-job order and content', () => reminderApi(async (f) => {
   f.db.prepare('UPDATE employees SET whatsapp_notifications_enabled=1').run();
-  const base = selectReminders(f.db, 'romani', f.clock.now)[0];
+  const base = selectReminders(f.db, { workspaceId: 'ws_legacy' }, 'romani', f.clock.now)[0];
   assert.equal(f.reminders.store.enqueue([0, 1, 2].map((n) => ({ ...base, recipient: phone(n) }))), 3);
 
   for (const job of f.reminders.store.due(10)) {

@@ -20,6 +20,8 @@ import { StatsGrid } from '@/components/dashboard/StatsGrid';
 import { QuickActions } from '@/components/dashboard/QuickActions';
 import { RecentActivities } from '@/components/dashboard/RecentActivities';
 import { RemindersTable } from '@/components/dashboard/RemindersTable';
+import { useAuth } from '@/hooks/useAuth';
+import { canEdit, isOwner } from '@/lib/permissions';
 
 export default function Dashboard() {
   const [pinnedItems, setPinnedItems] = useState<string[]>([]);
@@ -91,10 +93,13 @@ export default function Dashboard() {
     }
   };
 
+  const { user } = useAuth();
   const quickActions = [
-    { titleKey: 'dashboard.quickActions.addDocument', icon: Plus, href: '/documents', action: () => navigate('/documents') },
-    { titleKey: 'dashboard.quickActions.addEmployee', icon: Users, href: '/employees', action: () => navigate('/employees') },
-    { titleKey: 'dashboard.quickActions.exportData', icon: Download, href: '#', action: exportAllData },
+    ...(canEdit(user?.role) ? [
+      { titleKey: 'dashboard.quickActions.addDocument', icon: Plus, href: '/documents', action: () => navigate('/documents') },
+      { titleKey: 'dashboard.quickActions.addEmployee', icon: Users, href: '/employees', action: () => navigate('/employees') },
+    ] : []),
+    ...(isOwner(user?.role) ? [{ titleKey: 'dashboard.quickActions.exportData', icon: Download, href: '#', action: exportAllData }] : []),
     { titleKey: 'dashboard.quickActions.settings', icon: Settings, href: '/settings', action: () => navigate('/settings') }
   ];
 

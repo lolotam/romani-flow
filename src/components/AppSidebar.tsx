@@ -22,6 +22,7 @@ import {
   useSidebar,
 } from "@/components/ui/sidebar";
 import { Button } from "@/components/ui/button";
+import { UserButton } from '@clerk/react';
 import { useAuth } from "@/hooks/useAuth";
 import { useLanguage } from "@/contexts/LanguageContext";
 import { ThemeToggle } from "@/components/ThemeToggle";
@@ -30,14 +31,14 @@ export function AppSidebar() {
   const { state } = useSidebar();
   const collapsed = state === 'collapsed';
   const location = useLocation();
-  const { logout } = useAuth();
+  const { logout, provider, user } = useAuth();
   const { t, language } = useLanguage();
 
   const mainItems = [
     { title: t('nav.dashboard'), url: "/dashboard", icon: LayoutDashboard },
     { title: t('nav.employees'), url: "/employees", icon: Users },
     { title: t('nav.documents'), url: "/documents", icon: FileText },
-    { title: t('nav.settings'), url: "/settings", icon: Settings },
+    ...(user ? [{ title: t('nav.settings'), url: "/settings", icon: Settings }] : []),
   ];
 
   const isActive = (path: string) => location.pathname === path;
@@ -100,14 +101,20 @@ export function AppSidebar() {
         {/* Footer */}
         <div className="mt-auto p-2 border-t border-[hsl(var(--sidebar-border))] space-y-1">
           <ThemeToggle collapsed={collapsed} />
-          <Button
-            variant="ghost"
-            onClick={logout}
-            className={`w-full flex items-center gap-2 ${collapsed ? "px-2 justify-center" : "px-3 justify-start"} py-3 text-red-300 hover:bg-red-500/20 hover:text-red-200 transition-colors`}
-          >
-            <LogOut className="h-5 w-5" />
-            {!collapsed && <span>{t('nav.logout')}</span>}
-          </Button>
+          {provider === 'clerk' ? (
+            <div className={`flex py-2 ${collapsed ? 'justify-center' : 'px-3'}`}>
+              <UserButton />
+            </div>
+          ) : (
+            <Button
+              variant="ghost"
+              onClick={logout}
+              className={`w-full flex items-center gap-2 ${collapsed ? "px-2 justify-center" : "px-3 justify-start"} py-3 text-red-300 hover:bg-red-500/20 hover:text-red-200 transition-colors`}
+            >
+              <LogOut className="h-5 w-5" />
+              {!collapsed && <span>{t('nav.logout')}</span>}
+            </Button>
+          )}
         </div>
       </SidebarContent>
     </Sidebar>

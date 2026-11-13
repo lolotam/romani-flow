@@ -23,7 +23,33 @@ export interface TableSpec {
   booleanColumns?: string[];
   /** Columns the server owns and always overwrites. */
   managed?: string[];
+  /**
+   * Foreign-key columns and the table they point at. A write may only reference
+   * a row of the same workspace, so a foreign id behaves as if it did not exist.
+   */
+  references?: Record<string, string>;
+  /**
+   * Reference values that are sentinels instead of row ids, keyed by column.
+   *
+   * A sentinel carries no row of its own, so it is accepted as it is: it can
+   * never point at the row of another workspace.
+   */
+  sentinelReferences?: Record<string, string[]>;
 }
+
+/**
+ * Tables whose rows belong to one workspace. Every generic read and write of
+ * these tables is filtered by the caller's workspace, and `workspace_id` is
+ * never a column the client can filter on or write.
+ */
+export const TENANT_TABLES = new Set([
+  'companies',
+  'ministries',
+  'document_types',
+  'positions',
+  'employees',
+  'documents',
+]);
 
 export const TABLES: Record<string, TableSpec> = {
   companies: {
@@ -66,6 +92,7 @@ export const TABLES: Record<string, TableSpec> = {
       'updated_at',
     ],
     booleanColumns: ['is_active', 'driving_license', 'whatsapp_notifications_enabled'],
+    references: { company_id: 'companies', position_id: 'positions' },
     relations: {
       companies: { table: 'companies', foreignKey: 'company_id' },
     },
@@ -91,6 +118,17 @@ export const TABLES: Record<string, TableSpec> = {
       'created_at',
       'updated_at',
     ],
+    references: {
+      employee_id: 'employees',
+      company_id: 'companies',
+      document_type_id: 'document_types',
+      ministry_id: 'ministries',
+    },
+    // The storage columns belong to the server: only the metadata of an
+    // uploaded file may fill them, never a value the client sends.
+    managed: ['file_path', 'file_name', 'file_size', 'mime_type'],
+    // `other` is the sentinel of a custom ministry; it names no row.
+    sentinelReferences: { ministry_id: ['other'] },
     relations: {
       employees: {
         table: 'employees',

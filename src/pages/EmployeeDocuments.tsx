@@ -1,4 +1,4 @@
-﻿import { useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { FileText, Mail, Upload } from 'lucide-react';
@@ -17,6 +17,8 @@ import { useDocumentActions } from '@/hooks/useDocumentActions';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { useToast } from '@/hooks/use-toast';
 import type { DocumentWithRelations } from '@/lib/api';
+import { useAuth } from '@/hooks/useAuth';
+import { canEdit, isOwner } from '@/lib/permissions';
 
 // Remount scoped state when navigating directly between employee routes.
 export default function EmployeeDocuments() {
@@ -39,6 +41,9 @@ function EmployeeNotFound() {
 
 function EmployeeDocumentsPage({ employeeId }: { employeeId: string }) {
   const { t, language, isRTL } = useLanguage();
+  const { user } = useAuth();
+  const editable = canEdit(user?.role);
+  const owner = isOwner(user?.role);
   const { toast } = useToast();
   const navigate = useNavigate();
   const data = useDocuments(employeeId);
@@ -123,9 +128,9 @@ function EmployeeDocumentsPage({ employeeId }: { employeeId: string }) {
             <CardContent className="p-3 flex flex-wrap items-center gap-3">
               <span className="text-sm">{t('documents.bulk.selected', { count: data.selectedDocuments.length })}</span>
               <Button variant="ghost" size="sm" onClick={data.clearSelection}>{t('documents.bulk.clearSelection')}</Button>
-              <Button variant="outline" size="sm" disabled={!canEmailSelection || isDeleting}
-                onClick={() => sendDocuments(data.selectedDocuments)}><Mail className="h-4 w-4 ml-1" />{emailLabel}</Button>
-              {!canEmailSelection && <span className="text-sm text-muted-foreground" role="status">
+              {owner && <Button variant="outline" size="sm" disabled={!canEmailSelection || isDeleting}
+                onClick={() => sendDocuments(data.selectedDocuments)}><Mail className="h-4 w-4 ml-1" />{emailLabel}</Button>}
+              {owner && !canEmailSelection && <span className="text-sm text-muted-foreground" role="status">
                 {label('اختر مستندات لها ملفات مرفوعة لإرسالها بالبريد.', 'Select documents with uploaded files to send by email.')}
               </span>}
             </CardContent>
@@ -138,7 +143,7 @@ function EmployeeDocumentsPage({ employeeId }: { employeeId: string }) {
             <h3 className="text-lg font-medium text-muted-foreground mb-2">{t('employeeDocuments.noDocuments')}</h3>
             <p className="text-muted-foreground mb-4">{t(data.searchTerm || data.selectedStatus !== 'all' || data.selectedType !== 'all'
               ? 'employeeDocuments.noDocumentsDesc' : 'employeeDocuments.noDocumentsEmpty')}</p>
-            <Button onClick={() => setUploadOpen(true)}><Upload className="h-4 w-4 ml-2" />{t('employeeDocuments.uploadFirst')}</Button>
+            {editable && <Button onClick={() => setUploadOpen(true)}><Upload className="h-4 w-4 ml-2" />{t('employeeDocuments.uploadFirst')}</Button>}
           </Card> : <div className={data.viewMode === 'grid'
             ? 'grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4' : 'space-y-2'}>
             {data.filteredDocuments.map((doc) => <DocumentCard key={doc.id} doc={doc} showMinistry

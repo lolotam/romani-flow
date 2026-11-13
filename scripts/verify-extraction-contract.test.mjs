@@ -347,7 +347,7 @@ test('contract positive control: describeExtractionStatus maxSourceBytes with de
     runMigrations(db, path.resolve('server/db/migrations'));
     const config = loadConfig({});
     // Default cap is 25 MiB (> 20 MiB hard limit)
-    const status = describeExtractionStatus(db, config);
+    const status = describeExtractionStatus(db, { workspaceId: 'ws_legacy' }, config);
     assert.equal(
       status.maxSourceBytes,
       20 * 1024 * 1024,
@@ -365,7 +365,7 @@ test('contract regression: describeExtractionStatus maxSourceBytes is min(20MiB,
     const config = loadConfig({});
     // Configured upload cap lower than hard limit (10 MiB < 20 MiB)
     config.maxUploadBytes = 10 * 1024 * 1024;
-    const status = describeExtractionStatus(db, config);
+    const status = describeExtractionStatus(db, { workspaceId: 'ws_legacy' }, config);
     assert.equal(
       status.maxSourceBytes,
       10 * 1024 * 1024,

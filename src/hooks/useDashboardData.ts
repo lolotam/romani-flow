@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
-import { api, endpoints } from '@/lib/api';
+import { api } from '@/lib/api';
+import { useAuth } from '@/hooks/useAuth';
 import type {
   Company,
   DocumentWithRelations,
@@ -23,7 +24,7 @@ const EMPTY_STATS: DashboardStats = {
   expiredDocuments: 0,
 };
 
-/** The default warning window, used until the settings answer. */
+/** The default warning window, used until the session reports the workspace value. */
 const DEFAULT_WARNING_DAYS = 30;
 
 type Translate = (key: string, params?: Record<string, unknown>) => string;
@@ -46,8 +47,8 @@ function statusFor(daysLeft: number): ExpiringItem['status'] {
 /**
  * Builds the reminder list.
  *
- * The warning window follows the server's `expiry_warning_days` setting, so the
- * dashboard and the reminder emails agree on what "expiring soon" means.
+ * The warning window follows the workspace's `expiry_warning_days`, published on
+ * `/api/auth/me` for every role.
  */
 function collectExpiringItems(
   employees: EmployeeWithRelations[],
@@ -149,6 +150,7 @@ export interface DashboardData {
 }
 
 export function useDashboardData(t: Translate): DashboardData {
+  const { expiryWarningDays } = useAuth();
   const [stats, setStats] = useState<DashboardStats>(EMPTY_STATS);
   const [activities, setActivities] = useState<RecentActivity[]>([]);
   const [expiringItems, setExpiringItems] = useState<ExpiringItem[]>([]);
@@ -160,12 +162,11 @@ export function useDashboardData(t: Translate): DashboardData {
 
     const load = async () => {
       try {
-        const [documentsResult, employeesResult, companiesResult, settingsResult] =
+        const [documentsResult, employeesResult, companiesResult] =
           await Promise.all([
             api.from<DocumentWithRelations>('documents').select('*').execute(),
             api.from<EmployeeWithRelations>('employees').select('*').execute(),
             api.from<Company>('companies').select('*').execute(),
-            endpoints.settings.read(),
           ]);
 
         if (cancelled) return;
@@ -174,9 +175,7 @@ export function useDashboardData(t: Translate): DashboardData {
         const employees = employeesResult.data ?? [];
         const companies = companiesResult.data ?? [];
 
-        const configured = Number(settingsResult.data?.settings?.expiry_warning_days);
-        const warningDays =
-          Number.isFinite(configured) && configured > 0 ? configured : DEFAULT_WARNING_DAYS;
+        const warningDays = expiryWarningDays > 0 ? expiryWarningDays : DEFAULT_WARNING_DAYS;
 
         let expiringCount = 0;
         let expiredCount = 0;
@@ -210,7 +209,7 @@ export function useDashboardData(t: Translate): DashboardData {
     return () => {
       cancelled = true;
     };
-  }, [t]);
+  }, [t, expiryWarningDays]);
 
   return { stats, activities, expiringItems, isLoading, error };
 }
