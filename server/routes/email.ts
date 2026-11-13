@@ -51,6 +51,7 @@ export function createEmailRouter(
 
   router.get(
     '/log',
+    requireAdmin,
     asyncHandler(async (req, res) => {
       const rows = db
         .prepare('SELECT * FROM email_log WHERE workspace_id = ? ORDER BY created_at DESC LIMIT 100')
@@ -61,13 +62,13 @@ export function createEmailRouter(
 
   router.get(
     '/status',
+    requireAdmin,
     asyncHandler(async (req, res) => {
+      // Only the fact that mail is configured is published: the host, the port
+      // and the account of the relay are server secrets.
       res.json({
         data: {
-          smtpConfigured: mailer.isConfigured(),
-          host: config.smtp.host,
-          port: config.smtp.port,
-          user: config.smtp.user,
+          configured: mailer.isConfigured(),
           enabled: getBoolean(db, tenantOf(req), 'email.enabled'),
           recipients: getStringList(db, tenantOf(req), 'email.recipients'),
           cc: getStringList(db, tenantOf(req), 'email.cc'),
@@ -142,6 +143,7 @@ export function createEmailRouter(
 
   router.get(
     '/expiry-preview',
+    requireAdmin,
     asyncHandler(async (req, res) => {
       const windowDays = getNumber(db, tenantOf(req), 'cron.days', 30);
       const intervals = parseIntervals(getRawList(db, tenantOf(req), 'email.notification_intervals'));

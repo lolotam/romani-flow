@@ -8,6 +8,7 @@ import {
   type ReactNode,
 } from 'react';
 import { onUnauthorized, request } from '@/lib/api/http';
+import { sessionCapabilities, type AuthMePayload } from '@/lib/sessionCapabilities';
 
 /**
  * Authentication.
@@ -32,6 +33,16 @@ export interface AuthContextValue {
   workspaceId: string | null;
   workspaceRequired: boolean;
   isPlatformAdmin: boolean;
+  /**
+   * The reminder cron expression can be edited.
+   * A missing flag stays editable so older sessions keep today's control.
+   */
+  scheduleEditable: boolean;
+  /**
+   * WhatsApp settings exist for this workspace.
+   * A missing flag is available only in legacy mode (the single legacy workspace).
+   */
+  whatsappAvailable: boolean;
   login: (email: string, password: string) => Promise<{ success: boolean; error?: string }>;
   logout: () => Promise<void>;
 }
@@ -54,6 +65,8 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [user, setUser] = useState<SessionUser | null>(null);
+  const [scheduleEditable, setScheduleEditable] = useState(true);
+  const [whatsappAvailable, setWhatsappAvailable] = useState(true);
 
   const applySession = useCallback((nextUser: SessionUser | null) => {
     setUser(nextUser);
@@ -64,9 +77,12 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
     let active = true;
 
     // The session is resolved from the cookie on every page load.
-    request<{ user: SessionUser }>('/api/auth/me')
+    request<AuthMePayload>('/api/auth/me')
       .then(({ data, error }) => {
         if (!active) return;
+        const capabilities = sessionCapabilities(data, true);
+        setScheduleEditable(capabilities.scheduleEditable);
+        setWhatsappAvailable(capabilities.whatsappAvailable);
         applySession(error ? null : (data?.user ?? null));
       })
       .finally(() => {
@@ -85,7 +101,7 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
 
   const login = useCallback(
     async (email: string, password: string): Promise<{ success: boolean; error?: string }> => {
-      const { data, error } = await request<{ user: SessionUser }>('/api/auth/login', {
+      const { data, error } = await request<AuthMePayload>('/api/auth/login', {
         method: 'POST',
         body: { email, password },
       });
@@ -94,6 +110,9 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
         return { success: false, error: error.message };
       }
 
+      const capabilities = sessionCapabilities(data, true);
+      setScheduleEditable(capabilities.scheduleEditable);
+      setWhatsappAvailable(capabilities.whatsappAvailable);
       applySession(data?.user ?? null);
       return { success: true };
     },
@@ -114,10 +133,12 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
       workspaceId: null,
       workspaceRequired: false,
       isPlatformAdmin: false,
+      scheduleEditable,
+      whatsappAvailable,
       login,
       logout,
     }),
-    [isAuthenticated, isLoading, user, login, logout],
+    [isAuthenticated, isLoading, user, scheduleEditable, whatsappAvailable, login, logout],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

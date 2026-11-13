@@ -6,6 +6,7 @@ import { randomBytes } from 'node:crypto';
 import nodemailer from 'nodemailer';
 import { reminderApi } from './fixtures/whatsapp-api.mjs';
 import { addWorkspaceB, asB, B, LEG, today } from './fixtures/workspace-b.mjs';
+import { insertRow } from '../server/repositories/base.ts';
 import { getBoolean, getString, setSetting } from '../server/repositories/settings.ts';
 import { startEmailAttempt } from '../server/services/emailLog.ts';
 
@@ -172,4 +173,155 @@ test("B saves its own settings without touching legacy's, and cannot set WhatsAp
   const whatsapp = await asB(f, '/api/settings', { method: 'PUT', body: { settings: { 'whatsapp.enabled': false } } });
   assert.equal(whatsapp.status, 400);
   assert.equal(getBoolean(f.db, LEG, 'whatsapp.enabled'), true);
+}));
+
+test('the settings and the mail log are read by an owner alone', () => reminderApi(async f => {
+  f.db.prepare("INSERT INTO admin_users(workspace_id,id,email,name,role,password_hash,created_at,updated_at) VALUES('ws_legacy','editor','editor@example.invalid','Synthetic','editor','not-a-login-fixture','2026-01-01','2026-01-01')").run();
+
+  for (const role of ['viewer', 'editor']) {
+    for (const url of ['/api/settings', '/api/email/status', '/api/email/log', '/api/email/expiry-preview']) {
+      const refused = await f.request(url, { role, user: role });
+      assert.equal(refused.status, 403, `${role} ${url} answered ${refused.status}`);
+      assert.equal(refused.json.error.code, 'forbidden', `${role} ${url}`);
+    }
+  }
+
+  const settings = await f.request('/api/settings');
+  assert.equal(settings.status, 200, JSON.stringify(settings.json));
+  const status = await f.request('/api/email/status');
+  assert.equal(status.status, 200, JSON.stringify(status.json));
+  assert.equal(typeof status.json.data.configured, 'boolean', 'the status publishes whether mail is configured');
+  for (const field of ['host', 'port', 'user']) {
+    assert.equal(field in status.json.data, false, `the mail status no longer publishes the ${field}`);
+  }
+}));
+
+test('a suspended workspace sends no report and queues no WhatsApp message', t => withMail(t, async (f, calls) => {
+  legacyDueToday(f);
+  enableReports(f, LEG, LEGACY_TO);
+  await f.request(`/api/employees/${f.employee.id}`, { method: 'PATCH', body: { whatsapp_notifications_enabled: true, residency_expiry_date: null } });
+  f.db.prepare("UPDATE workspaces SET suspended_at=? WHERE id='ws_legacy'").run(new Date().toISOString());
+
+  // The scheduled tick leaves the suspended workspace alone.
+  await f.cron.run();
+  assert.equal(mailTo(calls, LEGACY_TO).length, 0, 'no report leaves a suspended workspace');
+  assert.equal(f.db.prepare('SELECT count(*) n FROM whatsapp_jobs').get().n, 0, 'no message is queued for a suspended workspace');
+
+  // A manual report of that workspace is refused as well.
+  const manual = await f.cron.run('manual', LEG);
+  assert.equal(manual.sent, false, JSON.stringify(manual));
+  assert.equal(manual.skipped, 'workspace_suspended');
+  assert.equal(mailTo(calls, LEGACY_TO).length, 0, 'the manual report of a suspended workspace sends nothing');
+}));
+
+test('a message that was queued before the suspension is not delivered', () => reminderApi(async f => {
+  await f.request(`/api/employees/${f.employee.id}`, { method: 'PATCH', body: { whatsapp_notifications_enabled: true, residency_expiry_date: null } });
+  assert.equal(await f.reminders.schedule(), 1, 'the message is queued while the workspace is live');
+  assert.equal(f.db.prepare('SELECT count(*) n FROM whatsapp_jobs').get().n, 1);
+
+  f.db.prepare("UPDATE workspaces SET suspended_at=? WHERE id='ws_legacy'").run(new Date().toISOString());
+  assert.equal(await f.reminders.drain(), 0, 'a suspended workspace delivers nothing');
+  assert.equal(f.calls.length, 0, 'no message reached the provider');
+  assert.equal(f.db.prepare('SELECT count(*) n FROM whatsapp_jobs').get().n, 1, 'the queued message waits for the suspension to end');
+}));
+
+test('a client cannot point a document at a stored file', () => reminderApi(async f => {
+  const b = addWorkspaceB(f);
+  const bFile = '2026/01/tenant-b-file.pdf';
+  fs.mkdirSync(path.dirname(f.storage.resolve(bFile)), { recursive: true });
+  fs.writeFileSync(f.storage.resolve(bFile), '%PDF-1.4 synthetic');
+  f.db.prepare('UPDATE documents SET file_path=?,file_name=?,mime_type=? WHERE id=?')
+    .run(bFile, 'tenant-b-file.pdf', 'application/pdf', b.document.id);
+
+  // The route refuses the storage columns outright.
+  const refused = await asB(f, '/api/documents', {
+    method: 'POST', body: { title: 'Forged path', employee_id: b.employee.id, document_type_id: b.type.id, file_path: bFile },
+  });
+  assert.equal(refused.status, 400, JSON.stringify(refused.json));
+  assert.equal(refused.json.error.code, 'managed_field');
+
+  // The service drops them as well, so no caller can hand a document a path.
+  const row = await f.documents.createDocument(B, {
+    title: 'Forged by the service', employee_id: b.employee.id, document_type_id: b.type.id,
+    file_path: bFile, file_name: 'tenant-b-file.pdf', file_size: 10, mime_type: 'application/pdf',
+  }, () => 'valid');
+  assert.equal(row.file_path, null);
+  assert.equal(row.file_name, null);
+  assert.equal(f.db.prepare('SELECT file_path FROM documents WHERE id=?').get(row.id).file_path, null);
+}));
+
+test('a client cannot retarget a document file on update', () => reminderApi(async f => {
+  const b = addWorkspaceB(f);
+  const ownPath = '2026/01/tenant-b-own.pdf';
+  const foreignPath = '2026/01/tenant-b-foreign.pdf';
+  f.db.prepare('UPDATE documents SET file_path=?,file_name=?,mime_type=? WHERE id=?')
+    .run(ownPath, 'own.pdf', 'application/pdf', b.document.id);
+
+  const refused = await asB(f, `/api/documents/${b.document.id}`, {
+    method: 'PATCH', body: { title: 'Retarget', file_path: foreignPath },
+  });
+  assert.equal(refused.status, 400, JSON.stringify(refused.json));
+  assert.equal(refused.json.error.code, 'managed_field');
+  assert.equal(f.db.prepare('SELECT file_path,title FROM documents WHERE id=?').get(b.document.id).file_path, ownPath);
+
+  const row = await f.documents.updateDocument(B, b.document.id, {
+    title: 'Service retarget', file_path: foreignPath, file_name: 'foreign.pdf', file_size: 10, mime_type: 'application/pdf',
+  }, () => 'valid');
+  assert.equal(row.title, 'Service retarget');
+  assert.equal(row.file_path, ownPath);
+  assert.equal(f.db.prepare('SELECT file_path FROM documents WHERE id=?').get(b.document.id).file_path, ownPath);
+}));
+
+test('the ministry sentinel is accepted and never points at another ministry', () => reminderApi(async f => {
+  const b = addWorkspaceB(f);
+  const bMinistries = f.db.prepare("SELECT id FROM ministries WHERE workspace_id='ws_b'").all();
+
+  // A custom ministry of the caller's own workspace.
+  const created = await asB(f, '/api/documents', {
+    method: 'POST', body: { title: 'Custom ministry', employee_id: b.employee.id, document_type_id: b.type.id, ministry_id: 'other', entity_name: 'Custom B' },
+  });
+  assert.equal(created.status, 201, JSON.stringify(created.json));
+  const createdDocument = created.json.data[0];
+  const ministry = f.db.prepare("SELECT id FROM ministries WHERE workspace_id='ws_b' AND name='Custom B'").get();
+  assert.ok(ministry, 'the custom ministry belongs to the caller');
+  assert.equal(f.db.prepare('SELECT ministry_id FROM documents WHERE id=?').get(createdDocument.id).ministry_id, ministry.id);
+
+  // The sentinel without a name names no ministry at all.
+  const nameless = await asB(f, '/api/documents', {
+    method: 'POST', body: { title: 'Nameless', employee_id: b.employee.id, document_type_id: b.type.id, ministry_id: 'other' },
+  });
+  assert.equal(nameless.status, 400, JSON.stringify(nameless.json));
+  assert.equal(nameless.json.error.code, 'invalid_entity');
+
+  // The sentinel is never resolved to the ministry of another workspace.
+  for (const row of bMinistries) {
+    assert.notEqual(createdDocument.ministry_id, row.id, 'the sentinel never points at another ministry');
+  }
+}));
+
+test('ministry other is accepted on update and another workspace ministry is rejected', () => reminderApi(async f => {
+  const b = addWorkspaceB(f);
+  const legacyMinistry = insertRow(f.db, LEG, 'ministries', { name: 'Legacy only', name_ar: 'تراث' });
+
+  const updated = await asB(f, `/api/documents/${b.document.id}`, {
+    method: 'PATCH', body: { ministry_id: 'other', entity_name: 'Updated custom' },
+  });
+  assert.equal(updated.status, 200, JSON.stringify(updated.json));
+  const custom = f.db.prepare("SELECT id FROM ministries WHERE workspace_id='ws_b' AND name='Updated custom'").get();
+  assert.ok(custom, 'the custom ministry belongs to the caller');
+  assert.equal(f.db.prepare('SELECT ministry_id FROM documents WHERE id=?').get(b.document.id).ministry_id, custom.id);
+
+  const foreignCreate = await asB(f, '/api/documents', {
+    method: 'POST', body: { title: 'Foreign ministry', employee_id: b.employee.id, document_type_id: b.type.id, ministry_id: legacyMinistry.id },
+  });
+  assert.equal(foreignCreate.status, 404, JSON.stringify(foreignCreate.json));
+  assert.equal(foreignCreate.json.error.code, 'not_found');
+  assert.equal(f.db.prepare("SELECT count(*) n FROM documents WHERE title='Foreign ministry'").get().n, 0);
+
+  const foreignUpdate = await asB(f, `/api/documents/${b.document.id}`, {
+    method: 'PATCH', body: { ministry_id: legacyMinistry.id },
+  });
+  assert.equal(foreignUpdate.status, 404, JSON.stringify(foreignUpdate.json));
+  assert.equal(foreignUpdate.json.error.code, 'not_found');
+  assert.equal(f.db.prepare('SELECT ministry_id FROM documents WHERE id=?').get(b.document.id).ministry_id, custom.id);
 }));

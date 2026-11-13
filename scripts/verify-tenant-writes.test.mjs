@@ -40,7 +40,7 @@ const NO_FOREIGN_ROWS = {
 };
 
 const file = { buffer: Buffer.from('%PDF-1.4 synthetic'), originalname: 'tenant.pdf', mimetype: 'application/pdf' };
-const asBDraft = (f, url, options = {}) => asB(f, url, { ...options, headers: { 'x-draft-account': 'admin-b' } });
+const asBDraft = (f, url, options = {}) => asB(f, url, { ...options, headers: { 'x-draft-account': 'admin-b', ...(options.headers ?? {}) } });
 
 /** Each attempt runs as B and must answer `status` (and `code`, when given); `covers` names its handler. */
 function attempts(ids) {
@@ -62,6 +62,7 @@ function attempts(ids) {
     // Abandoning an upload B cannot see is a no-op; the test checks the legacy upload survives.
     { covers: 'routes/files.ts DELETE /uploads/:uploadId', method: 'DELETE', url: `/api/files/uploads/${legacyUpload}`, body: { draft }, status: 200 },
     { covers: 'routes/documentDrafts.ts PUT|DELETE /:scope', method: 'PUT', url: '/api/document-drafts/new', body: { revision: draft.revision, values: { employee_id: employee } }, status: 400, code: 'invalid_draft', draftHeader: true },
+    { covers: 'routes/documentDrafts.ts PUT|DELETE /:scope', method: 'DELETE', url: '/api/document-drafts/new', body: { revision: draft.revision }, status: 409, code: 'draft_workspace_mismatch', draftHeader: true, draftWorkspace: 'ws_legacy' },
     { covers: 'routes/documentDrafts.ts PUT|DELETE /:scope', method: 'PUT', url: `/api/document-drafts/employee:${employee}`, body: { revision: 'none', values: {} }, status: 404, draftHeader: true },
     { covers: 'routes/email.ts POST /send-documents', method: 'POST', url: '/api/email/send-documents', body: { document_ids: [doc], to: ['tenant-b@example.invalid'] }, status: 409, code: 'missing_files' },
     { covers: 'notifications/whatsapp/routes.ts PATCH /recipients/:id', method: 'PATCH', url: '/api/whatsapp/recipients/synthetic', body: { label: 'B' }, status: 404, code: 'whatsapp_unavailable' },
@@ -93,8 +94,9 @@ test('no write lets B change, delete, reference or reach legacy rows and uploads
 
   const ids = { doc: f.document.id, employee: f.employee.id, company: f.company.id, type: f.type.id, bDoc: b.document.id,
     bCompany: b.company.id, bUpload: bUpload.uploadId, legacyUpload: legacyUpload.uploadId, draft };
-  for (const { method, url, body, status, code, draftHeader } of attempts(ids)) {
-    const response = await (draftHeader ? asBDraft : asB)(f, url, { method, body });
+  for (const { method, url, body, status, code, draftHeader, draftWorkspace } of attempts(ids)) {
+    const headers = draftWorkspace ? { 'x-draft-workspace': draftWorkspace } : undefined;
+    const response = await (draftHeader ? asBDraft : asB)(f, url, { method, body, headers });
     const label = `${method} ${url} answered ${response.status}: ${JSON.stringify(response.json).slice(0, 160)}`;
     assert.equal(response.status, status, label);
     if (code) assert.equal(response.json.error.code, code, label);
@@ -120,4 +122,44 @@ test('no write lets B change, delete, reference or reach legacy rows and uploads
   const legacySend = await f.request('/api/email/send-documents', { method: 'POST', body: { document_ids: [f.document.id], to: ['legacy@example.invalid'] } });
   // The fixture has no SMTP, so legacy gets past the lookup that refuses B and fails only at sending.
   assert.equal(legacySend.json.error.code, 'send_failed');
+}));
+
+test('a draft of another workspace is refused, and a draft without the header is allowed', () => reminderApi(async f => {
+  addWorkspaceB(f);
+  const legacy = { 'x-draft-account': 'admin' };
+
+  // The header names the workspace the form was created for.
+  const refused = await f.request('/api/document-drafts/new', {
+    method: 'PUT', headers: { ...legacy, 'x-draft-workspace': 'ws_b' }, body: { revision: 'none', values: { title: 'Cross workspace' } },
+  });
+  assert.equal(refused.status, 409, JSON.stringify(refused.json));
+  assert.equal(refused.json.error.code, 'draft_workspace_mismatch');
+
+  // The same draft with the workspace it belongs to is accepted.
+  const accepted = await f.request('/api/document-drafts/new', {
+    method: 'PUT', headers: { ...legacy, 'x-draft-workspace': 'ws_legacy' }, body: { revision: 'none', values: { title: 'Own workspace' } },
+  });
+  assert.equal(accepted.status, 200, JSON.stringify(accepted.json));
+
+  // A client that sends no header at all keeps the old behaviour.
+  const withoutHeader = await f.request('/api/document-drafts/new', {
+    method: 'PUT', headers: legacy, body: { revision: accepted.json.data.revision, values: { title: 'No header' } },
+  });
+  assert.equal(withoutHeader.status, 200, JSON.stringify(withoutHeader.json));
+
+  // B cannot delete a legacy draft, not even with the header of its own workspace.
+  const legacyDraft = (await f.request('/api/document-drafts/new', { headers: legacy })).json.data;
+  const deletedByB = await asBDraft(f, '/api/document-drafts/new', {
+    method: 'DELETE', headers: { 'x-draft-workspace': 'ws_legacy' }, body: { revision: legacyDraft.revision },
+  });
+  assert.equal(deletedByB.status, 409, JSON.stringify(deletedByB.json));
+  assert.equal(deletedByB.json.error.code, 'draft_workspace_mismatch');
+  assert.ok(f.db.prepare("SELECT 1 FROM document_drafts WHERE workspace_id='ws_legacy' AND scope='new'").get(), 'the legacy draft survives');
+
+  // The legacy administrator deletes its own draft.
+  const deleted = await f.request('/api/document-drafts/new', {
+    method: 'DELETE', headers: { ...legacy, 'x-draft-workspace': 'ws_legacy' }, body: { revision: legacyDraft.revision },
+  });
+  assert.equal(deleted.status, 200, JSON.stringify(deleted.json));
+  assert.equal(f.db.prepare("SELECT values_json FROM document_drafts WHERE workspace_id='ws_legacy' AND scope='new'").get().values_json, null, 'the legacy draft is discarded');
 }));

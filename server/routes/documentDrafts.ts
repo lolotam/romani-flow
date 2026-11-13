@@ -12,6 +12,13 @@ export function createDocumentDraftsRouter(db: Db, coordinator: NotificationCoor
   router.use(requireRole('editor'), (req, res, next) => {
     res.setHeader('Cache-Control', 'no-store');
     if (req.get('x-draft-account') !== req.user!.id) { next(new RepositoryError('Draft account changed.', 'draft_conflict', 409)); return; }
+    // The form remembers the workspace it was created for. A draft of another
+    // workspace is refused instead of being written into this one.
+    const draftWorkspace = req.get('x-draft-workspace');
+    if (draftWorkspace && draftWorkspace !== tenantOf(req).workspaceId) {
+      next(new RepositoryError('Draft workspace changed.', 'draft_workspace_mismatch', 409));
+      return;
+    }
     next();
   });
   router.get('/:scope', (req, res) => {

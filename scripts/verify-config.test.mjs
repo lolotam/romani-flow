@@ -54,6 +54,17 @@ for (const missing of ['CLERK_SECRET_KEY', 'CLERK_PUBLISHABLE_KEY', 'CLERK_WEBHO
     });
   });
 }
+test('an invalid LEGACY_CLAIM_EMAIL is rejected and a valid one is normalized', () => {
+  assert.throws(
+    () => validateConfig(loadConfig({ ...base, LEGACY_CLAIM_EMAIL: 'not-an-email' })),
+    /LEGACY_CLAIM_EMAIL must be a valid email address/,
+  );
+  const config = loadConfig({ ...base, LEGACY_CLAIM_EMAIL: ' Owner@Example.invalid ' });
+  assert.doesNotThrow(() => validateConfig(config));
+  assert.equal(config.legacyClaimEmail, 'owner@example.invalid');
+  assert.equal(loadConfig(base).legacyClaimEmail, null);
+});
+
 test('clerk config validates and normalizes the platform admin allowlist', () => {
   const config = loadConfig({ ...base, ...clerk, PLATFORM_ADMIN_EMAILS: ' Owner@Example.com , second@example.com ' });
   assert.doesNotThrow(() => validateConfig(config));

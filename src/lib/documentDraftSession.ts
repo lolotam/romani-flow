@@ -4,6 +4,13 @@ import { request, ApiRequestError, type ApiEnvelope, type RequestOptions } from 
 export type DraftValues = Record<string, string | null>;
 export interface DraftReference { scope: string; revision: string; account?: string }
 export type DraftStatus = 'loading' | 'saved' | 'saving' | 'discarding' | 'failed' | 'conflict';
+
+/** The open form belongs to another workspace; autosave must stop and must not throw. */
+export function draftWorkspaceMismatch(error: unknown): boolean {
+  return error instanceof ApiRequestError
+    && error.status === 409
+    && (error.code === 'draft_workspace_mismatch' || error.message === 'draft_workspace_mismatch');
+}
 type Transport = <T>(url: string, options?: RequestOptions) => Promise<ApiEnvelope<T>>;
 
 /** Draft dates remain local date-only values; files and undefined values never enter the payload. */
@@ -29,6 +36,8 @@ export class DocumentDraftSession {
   private discardEdits: DraftValues | null = null;
   private deletingDraft = false;
   private ready = false;
+  /** A 409 workspace mismatch retires this form; later edits must not autosave. */
+  private workspaceMismatch = false;
   hasDraft = false;
 
   constructor(readonly scope: string, private restore: (values: DraftValues | null) => void,
@@ -49,7 +58,10 @@ export class DocumentDraftSession {
       this.fail(error instanceof Error ? error : new Error('Draft unavailable'));
       return;
     }
-    if (result.error || !result.data) { this.fail(result.error ?? new Error('Draft unavailable')); return; }
+    if (result.error || !result.data) {
+      this.fail(result.error ?? new Error('Draft unavailable'));
+      return;
+    }
     this.revision = result.data.revision;
     this.ready = true;
     this.hasDraft = result.data.values !== null;
@@ -61,12 +73,21 @@ export class DocumentDraftSession {
   }
 
   private fail(error: Error): void {
+    if (draftWorkspaceMismatch(error)) {
+      this.workspaceMismatch = true;
+      this.failure = error;
+      this.pending = null;
+      this.paused = true;
+      clearTimeout(this.timer);
+      if (!this.disposed) this.status('failed');
+      return;
+    }
     this.failure = error;
     if (!this.disposed) this.status(error instanceof ApiRequestError && error.code === 'draft_conflict' ? 'conflict' : 'failed');
   }
 
   change(values: DraftValues): void {
-    if (this.disposed || this.restoring) return;
+    if (this.workspaceMismatch || this.disposed || this.restoring) return;
     if (this.deletingDraft) { this.edited = true; this.discardEdits = values; return; }
     if (this.paused) return;
     this.edited = true; this.pending = values;
@@ -83,10 +104,15 @@ export class DocumentDraftSession {
     clearTimeout(this.timer);
     const task = this.serial.then(async () => {
       await this.loaded;
+      if (this.workspaceMismatch) return;
       if (this.failure) throw this.failure;
       while (this.pending) {
         const values = this.pending; this.pending = null;
         const result = await this.transport<{ revision: string }>(this.url, { method: 'PUT', body: { revision: this.revision, values } });
+        if (draftWorkspaceMismatch(result.error)) {
+          this.fail(result.error ?? new Error('draft_workspace_mismatch'));
+          return;
+        }
         if (result.error || !result.data) {
           this.pending ??= values;
           this.fail(result.error ?? new Error('Draft unavailable')); throw this.failure;
@@ -170,7 +196,11 @@ export class DocumentDraftSession {
         try { this.restore(null); } finally { this.restoring = false; }
         this.status('saved');
       }
-    } catch (error) { this.fail(error as Error); throw error; }
+    } catch (error) {
+      this.fail(error as Error);
+      if (draftWorkspaceMismatch(error)) return;
+      throw error;
+    }
     finally {
       this.deletingDraft = false;
       this.paused = false;

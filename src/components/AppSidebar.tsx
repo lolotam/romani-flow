@@ -24,6 +24,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { UserButton } from '@clerk/react';
 import { useAuth } from "@/hooks/useAuth";
+import { isOwner } from "@/lib/permissions";
 import { useLanguage } from "@/contexts/LanguageContext";
 import { ThemeToggle } from "@/components/ThemeToggle";
 
@@ -31,14 +32,14 @@ export function AppSidebar() {
   const { state } = useSidebar();
   const collapsed = state === 'collapsed';
   const location = useLocation();
-  const { logout, provider } = useAuth();
+  const { logout, provider, user } = useAuth();
   const { t, language } = useLanguage();
 
   const mainItems = [
     { title: t('nav.dashboard'), url: "/dashboard", icon: LayoutDashboard },
     { title: t('nav.employees'), url: "/employees", icon: Users },
     { title: t('nav.documents'), url: "/documents", icon: FileText },
-    { title: t('nav.settings'), url: "/settings", icon: Settings },
+    ...(isOwner(user?.role) ? [{ title: t('nav.settings'), url: "/settings", icon: Settings }] : []),
   ];
 
   const isActive = (path: string) => location.pathname === path;

@@ -64,6 +64,10 @@ export function requireWorkspace(db: Db): RequestHandler {
     }
 
     const workspace = resolveWorkspace(db, { ...identity, orgId: identity.orgId });
+    if (!workspace) {
+      fail(res, 403, 'workspace_not_ready', 'An organization owner must initialize this workspace.');
+      return;
+    }
     if (workspace.suspended_at) {
       fail(res, 403, 'workspace_suspended', 'This workspace is suspended.');
       return;

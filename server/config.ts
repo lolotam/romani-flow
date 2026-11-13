@@ -37,6 +37,11 @@ export interface AppConfig {
   clerkPublishableKey: string | null;
   clerkWebhookSigningSecret: string | null;
   platformAdminEmails: string[];
+  /**
+   * The address that may claim the legacy workspace after the Clerk switch.
+   * Optional: without it the legacy workspace simply stays unclaimed.
+   */
+  legacyClaimEmail: string | null;
   smtp: SmtpConfig;
   whatsapp: PairingConfig;
   maxUploadBytes: number;
@@ -54,6 +59,9 @@ export interface AppConfig {
 }
 
 const MIN_ADMIN_PASSWORD_LENGTH = 12;
+
+/** The same shape the routes accept for an address. */
+const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
 
 const DEFAULT_ALLOWED_TYPES = [
   'application/pdf',
@@ -190,6 +198,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     clerkPublishableKey: readOptionalString(env, 'CLERK_PUBLISHABLE_KEY'),
     clerkWebhookSigningSecret: readOptionalString(env, 'CLERK_WEBHOOK_SIGNING_SECRET'),
     platformAdminEmails: readList(env, 'PLATFORM_ADMIN_EMAILS', []).map(email => email.toLowerCase()),
+    legacyClaimEmail: readOptionalString(env, 'LEGACY_CLAIM_EMAIL')?.toLowerCase() ?? null,
     whatsapp: readPairingConfig(env),
     smtp: {
       host: readFirst(env, SMTP_HOST_KEYS, smtpUser || smtpPass || smtpFrom ? 'smtp.gmail.com' : ''),
@@ -255,6 +264,9 @@ export function validateConfig(config: AppConfig): void {
   }
   if (!config.adminSeedEmails.every((email) => email.includes('@'))) {
     problems.push('ADMIN_SEED_EMAILS must be a comma-separated list of valid email addresses.');
+  }
+  if (config.legacyClaimEmail && !EMAIL_PATTERN.test(config.legacyClaimEmail)) {
+    problems.push('LEGACY_CLAIM_EMAIL must be a valid email address.');
   }
   if (config.adminSeedEmails.length > 0 && !config.adminSeedPassword) {
     problems.push('ADMIN_SEED_PASSWORD is required when ADMIN_SEED_EMAILS is set (there is no default password).');

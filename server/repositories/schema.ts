@@ -28,6 +28,13 @@ export interface TableSpec {
    * a row of the same workspace, so a foreign id behaves as if it did not exist.
    */
   references?: Record<string, string>;
+  /**
+   * Reference values that are sentinels instead of row ids, keyed by column.
+   *
+   * A sentinel carries no row of its own, so it is accepted as it is: it can
+   * never point at the row of another workspace.
+   */
+  sentinelReferences?: Record<string, string[]>;
 }
 
 /**
@@ -117,6 +124,11 @@ export const TABLES: Record<string, TableSpec> = {
       document_type_id: 'document_types',
       ministry_id: 'ministries',
     },
+    // The storage columns belong to the server: only the metadata of an
+    // uploaded file may fill them, never a value the client sends.
+    managed: ['file_path', 'file_name', 'file_size', 'mime_type'],
+    // `other` is the sentinel of a custom ministry; it names no row.
+    sentinelReferences: { ministry_id: ['other'] },
     relations: {
       employees: {
         table: 'employees',

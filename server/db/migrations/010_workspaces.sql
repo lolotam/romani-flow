@@ -91,6 +91,7 @@ UPDATE form_defaults SET workspace_id = 'ws_legacy';
 UPDATE document_drafts SET workspace_id = 'ws_legacy';
 UPDATE whatsapp_jobs SET workspace_id = 'ws_legacy';
 UPDATE whatsapp_attempts SET workspace_id = 'ws_legacy';
+UPDATE upload_cleanup_queue SET workspace_id = 'ws_legacy';
 
 -- The recipient phone was unique across the whole database, so a duplicate
 -- error would reveal another workspace's recipient. It is unique per workspace now.
@@ -111,6 +112,8 @@ DROP TABLE whatsapp_recipients;
 ALTER TABLE whatsapp_recipients_v2 RENAME TO whatsapp_recipients;
 
 -- Fail closed: no tenant row may be written without its workspace.
+-- Every tenant table is guarded twice: on insert and on update, so a row can
+-- never be moved out of its workspace afterwards either.
 CREATE TRIGGER ws_required_admin_users_i BEFORE INSERT ON admin_users WHEN NEW.workspace_id IS NULL BEGIN SELECT RAISE(ABORT, 'workspace_required'); END;
 CREATE TRIGGER ws_required_admin_users_u BEFORE UPDATE OF workspace_id ON admin_users WHEN NEW.workspace_id IS NULL BEGIN SELECT RAISE(ABORT, 'workspace_required'); END;
 CREATE TRIGGER ws_required_companies_i BEFORE INSERT ON companies WHEN NEW.workspace_id IS NULL BEGIN SELECT RAISE(ABORT, 'workspace_required'); END;
@@ -126,13 +129,25 @@ CREATE TRIGGER ws_required_employees_u BEFORE UPDATE OF workspace_id ON employee
 CREATE TRIGGER ws_required_documents_i BEFORE INSERT ON documents WHEN NEW.workspace_id IS NULL BEGIN SELECT RAISE(ABORT, 'workspace_required'); END;
 CREATE TRIGGER ws_required_documents_u BEFORE UPDATE OF workspace_id ON documents WHEN NEW.workspace_id IS NULL BEGIN SELECT RAISE(ABORT, 'workspace_required'); END;
 CREATE TRIGGER ws_required_email_log_i BEFORE INSERT ON email_log WHEN NEW.workspace_id IS NULL BEGIN SELECT RAISE(ABORT, 'workspace_required'); END;
+CREATE TRIGGER ws_required_email_log_u BEFORE UPDATE OF workspace_id ON email_log WHEN NEW.workspace_id IS NULL BEGIN SELECT RAISE(ABORT, 'workspace_required'); END;
 CREATE TRIGGER ws_required_expiry_notifications_i BEFORE INSERT ON expiry_notifications WHEN NEW.workspace_id IS NULL BEGIN SELECT RAISE(ABORT, 'workspace_required'); END;
+CREATE TRIGGER ws_required_expiry_notifications_u BEFORE UPDATE OF workspace_id ON expiry_notifications WHEN NEW.workspace_id IS NULL BEGIN SELECT RAISE(ABORT, 'workspace_required'); END;
 CREATE TRIGGER ws_required_pending_uploads_i BEFORE INSERT ON pending_uploads WHEN NEW.workspace_id IS NULL BEGIN SELECT RAISE(ABORT, 'workspace_required'); END;
+CREATE TRIGGER ws_required_pending_uploads_u BEFORE UPDATE OF workspace_id ON pending_uploads WHEN NEW.workspace_id IS NULL BEGIN SELECT RAISE(ABORT, 'workspace_required'); END;
 CREATE TRIGGER ws_required_form_defaults_i BEFORE INSERT ON form_defaults WHEN NEW.workspace_id IS NULL BEGIN SELECT RAISE(ABORT, 'workspace_required'); END;
+CREATE TRIGGER ws_required_form_defaults_u BEFORE UPDATE OF workspace_id ON form_defaults WHEN NEW.workspace_id IS NULL BEGIN SELECT RAISE(ABORT, 'workspace_required'); END;
 CREATE TRIGGER ws_required_document_drafts_i BEFORE INSERT ON document_drafts WHEN NEW.workspace_id IS NULL BEGIN SELECT RAISE(ABORT, 'workspace_required'); END;
+CREATE TRIGGER ws_required_document_drafts_u BEFORE UPDATE OF workspace_id ON document_drafts WHEN NEW.workspace_id IS NULL BEGIN SELECT RAISE(ABORT, 'workspace_required'); END;
 CREATE TRIGGER ws_required_whatsapp_recipients_i BEFORE INSERT ON whatsapp_recipients WHEN NEW.workspace_id IS NULL BEGIN SELECT RAISE(ABORT, 'workspace_required'); END;
+CREATE TRIGGER ws_required_whatsapp_recipients_u BEFORE UPDATE OF workspace_id ON whatsapp_recipients WHEN NEW.workspace_id IS NULL BEGIN SELECT RAISE(ABORT, 'workspace_required'); END;
 CREATE TRIGGER ws_required_whatsapp_jobs_i BEFORE INSERT ON whatsapp_jobs WHEN NEW.workspace_id IS NULL BEGIN SELECT RAISE(ABORT, 'workspace_required'); END;
+CREATE TRIGGER ws_required_whatsapp_jobs_u BEFORE UPDATE OF workspace_id ON whatsapp_jobs WHEN NEW.workspace_id IS NULL BEGIN SELECT RAISE(ABORT, 'workspace_required'); END;
 CREATE TRIGGER ws_required_whatsapp_attempts_i BEFORE INSERT ON whatsapp_attempts WHEN NEW.workspace_id IS NULL BEGIN SELECT RAISE(ABORT, 'workspace_required'); END;
+CREATE TRIGGER ws_required_whatsapp_attempts_u BEFORE UPDATE OF workspace_id ON whatsapp_attempts WHEN NEW.workspace_id IS NULL BEGIN SELECT RAISE(ABORT, 'workspace_required'); END;
+CREATE TRIGGER ws_required_upload_cleanup_queue_i BEFORE INSERT ON upload_cleanup_queue WHEN NEW.workspace_id IS NULL BEGIN SELECT RAISE(ABORT, 'workspace_required'); END;
+CREATE TRIGGER ws_required_upload_cleanup_queue_u BEFORE UPDATE OF workspace_id ON upload_cleanup_queue WHEN NEW.workspace_id IS NULL BEGIN SELECT RAISE(ABORT, 'workspace_required'); END;
+CREATE TRIGGER ws_required_workspace_settings_i BEFORE INSERT ON workspace_settings WHEN NEW.workspace_id IS NULL BEGIN SELECT RAISE(ABORT, 'workspace_required'); END;
+CREATE TRIGGER ws_required_workspace_settings_u BEFORE UPDATE OF workspace_id ON workspace_settings WHEN NEW.workspace_id IS NULL BEGIN SELECT RAISE(ABORT, 'workspace_required'); END;
 
 -- Every tenant query filters by workspace first.
 CREATE INDEX idx_admin_users_ws ON admin_users(workspace_id);

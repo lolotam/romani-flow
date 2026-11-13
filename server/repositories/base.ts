@@ -348,6 +348,8 @@ function assertReferencesInScope(db: Db, scope: Scope, spec: TableSpec, entries:
   for (const [column, value] of entries) {
     const target = spec.references?.[column];
     if (!target || value === null || value === '') continue;
+    // A sentinel names no row, so there is no row of another workspace to reach.
+    if (spec.sentinelReferences?.[column]?.includes(String(value))) continue;
     const tenant = andScope(requireSpec(target), scope);
     const found = db.prepare(`SELECT 1 FROM "${target}" WHERE id = ?${tenant.sql}`).get(value, ...tenant.params);
     if (!found) {

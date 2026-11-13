@@ -4,8 +4,11 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 /**
- * D8 guard: every raw SQL statement that touches a tenant table must mention
- * `workspace_id`, unless it is listed below with the reason it is safe.
+ * D8 guard: every raw SQL statement that touches a tenant table must bind that
+ * table to a workspace. Mentioning the token `workspace_id` is not enough: the
+ * statement needs `workspace_id = ?` (or `= :name`, or `= 'literal'`) inside a
+ * WHERE or ON clause, or `workspace_id` in an INSERT column list. `${tenant.sql}`
+ * counts: it is the helper fragment `AND "workspace_id" = ?`.
  *
  * The generic repository helpers add the scope themselves (they build the SQL
  * from a table name), so this guard is aimed at hand-written statements.
@@ -13,7 +16,8 @@ import path from 'node:path';
 
 const TENANT_TABLES = ['companies', 'ministries', 'document_types', 'positions', 'employees', 'documents',
   'email_log', 'expiry_notifications', 'pending_uploads', 'form_defaults', 'document_drafts',
-  'whatsapp_recipients', 'whatsapp_jobs', 'whatsapp_attempts', 'workspace_settings', 'admin_users', 'upload_cleanup_queue'];
+  'whatsapp_recipients', 'whatsapp_jobs', 'whatsapp_attempts', 'workspace_settings', 'admin_users',
+  'upload_cleanup_queue', 'workspace_usage'];
 
 /** A table name chosen at run time can be any tenant table, so it is held to the same rule. */
 const INTERPOLATED_TABLE = /\b(?:FROM|INTO|UPDATE|JOIN)\s+"?\$\{/i;
@@ -72,6 +76,70 @@ function literals(source) {
   return found;
 }
 
+const TABLE_REF = /\b(FROM|INTO|UPDATE|JOIN)\s+"?([A-Za-z_][\w]*|\$\{[^}]+\})"?/gi;
+const INSERT_COLUMNS = /\bINSERT\b(?:\s+OR\s+\w+)?\s+INTO\s+"?([A-Za-z_][\w]*|\$\{[^}]+\})"?\s*\(([^)]*)\)/gi;
+/** `workspace_id = ?`, `= :name`, or `= 'literal'` / `= "literal"`. */
+const BOUND_PREDICATE = /(?:\b[\w]+\.)?"?workspace_id"?\s*=\s*(?:\?|:[A-Za-z_][\w]*|'(?:[^'\\]|\\.)*'|"(?:[^"\\]|\\.)*")/gi;
+const CLAUSE_KEYWORD = /\b(?:SELECT|FROM|WHERE|SET|ON|VALUES|ORDER|GROUP|LIMIT|HAVING|INSERT|UPDATE|DELETE|INTO|JOIN)\b/gi;
+
+function tenantName(raw) {
+  if (raw.startsWith('${')) return '${table}';
+  const name = raw.toLowerCase();
+  return TENANT_TABLES.includes(name) ? name : null;
+}
+
+/** INSERT targets whose column list names workspace_id. One entry per such INSERT. */
+function coveredInserts(sql) {
+  const covered = [];
+  INSERT_COLUMNS.lastIndex = 0;
+  for (const match of sql.matchAll(INSERT_COLUMNS)) {
+    const name = tenantName(match[1]);
+    if (name && /\bworkspace_id\b/i.test(match[2])) covered.push(name);
+  }
+  return covered;
+}
+
+/** Predicates that sit in a WHERE or ON clause, plus each `${tenant.sql}` helper fragment. */
+function boundPredicates(sql) {
+  let count = 0;
+  BOUND_PREDICATE.lastIndex = 0;
+  for (const match of sql.matchAll(BOUND_PREDICATE)) {
+    let nearest = '';
+    CLAUSE_KEYWORD.lastIndex = 0;
+    for (const keyword of sql.slice(0, match.index).matchAll(CLAUSE_KEYWORD)) nearest = keyword[0].toUpperCase();
+    if (nearest === 'WHERE' || nearest === 'ON') count += 1;
+  }
+  count += sql.match(/\$\{tenant\.sql\}/g)?.length ?? 0;
+  return count;
+}
+
+/**
+ * Tenant tables in `sql` that are not bound to a workspace.
+ * An INSERT is bound when its column list includes workspace_id. Every other
+ * reference needs its own WHERE/ON predicate, so one predicate cannot cover
+ * two tables.
+ */
+function unboundTables(sql) {
+  const covered = coveredInserts(sql);
+  const unbound = [];
+  TABLE_REF.lastIndex = 0;
+  for (const match of sql.matchAll(TABLE_REF)) {
+    const name = tenantName(match[2]);
+    if (!name) continue;
+    if (match[1].toUpperCase() === 'INTO') {
+      const index = covered.indexOf(name);
+      if (index >= 0) {
+        covered.splice(index, 1);
+        continue;
+      }
+    }
+    unbound.push(name);
+  }
+  const predicates = boundPredicates(sql);
+  // Each remaining reference needs a predicate of its own.
+  return predicates >= unbound.length ? [] : unbound;
+}
+
 function unscopedStatements() {
   const offenders = [];
   for (const file of sourceFiles(path.resolve('server'))) {
@@ -79,12 +147,15 @@ function unscopedStatements() {
     if (rel.startsWith('server/db/migrations/')) continue;
     const source = fs.readFileSync(file, 'utf8');
     for (const { text, index } of literals(source)) {
-      const table = TABLE_REFERENCE.exec(text)?.[1] ?? (INTERPOLATED_TABLE.test(text) ? '${table}' : undefined);
-      // `${tenant.sql}` is the `andScope` fragment of the generic helpers.
-      if (!table || /workspace_id|\$\{tenant\.sql\}/.test(text)) continue;
+      TABLE_REF.lastIndex = 0;
+      const mentionsTenant = TABLE_REFERENCE.test(text) || INTERPOLATED_TABLE.test(text);
+      TABLE_REFERENCE.lastIndex = 0;
+      if (!mentionsTenant) continue;
       if (ALLOWED.some(rule => rule.file === rel && text.includes(rule.fragment))) continue;
+      const unbound = unboundTables(text);
+      if (unbound.length === 0) continue;
       const line = source.slice(0, index).split('\n').length;
-      offenders.push(`${rel}:${line} [${table}] ${text.replace(/\s+/g, ' ').slice(0, 110)}`);
+      offenders.push(`${rel}:${line} [${unbound.join(', ')}] ${text.replace(/\s+/g, ' ').slice(0, 140)}`);
     }
   }
   return offenders;
@@ -93,6 +164,15 @@ function unscopedStatements() {
 test('every raw tenant-table statement is scoped to a workspace or allow-listed with a reason', () => {
   const offenders = unscopedStatements();
   assert.deepEqual(offenders, [], `Unscoped tenant SQL:\n${offenders.join('\n')}`);
+});
+
+test('a workspace_id column is not a workspace predicate', () => {
+  assert.deepEqual(unboundTables('SELECT id, workspace_id FROM documents WHERE id=?'), ['documents']);
+  assert.deepEqual(unboundTables('SELECT workspace_id FROM documents'), ['documents']);
+  assert.deepEqual(unboundTables('SELECT id FROM workspace_usage WHERE id=?'), ['workspace_usage']);
+  assert.deepEqual(unboundTables('SELECT id FROM documents WHERE id=? AND workspace_id=?'), []);
+  assert.deepEqual(unboundTables('INSERT INTO documents (id, workspace_id) VALUES (?, ?)'), []);
+  assert.deepEqual(unboundTables('SELECT id FROM documents WHERE id=?${tenant.sql}'), []);
 });
 
 test('every allow-list entry still matches a statement, so stale exceptions do not linger', () => {

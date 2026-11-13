@@ -45,13 +45,18 @@ export interface CronStatus {
   nextRun: string | null;
 }
 
+/** Whether the server can send mail. Host, port and username are not returned. */
 export interface SmtpStatus {
   configured: boolean;
-  host: string;
-  port: number;
-  user: string;
-  secure: boolean;
-  from: string;
+}
+
+/**
+ * `GET /api/email/status`: mail is configured, plus the caller's workspace settings.
+ * SMTP host, port and username are not part of this response.
+ */
+export interface EmailStatus {
+  configured: boolean;
+  settings?: Record<string, unknown>;
 }
 
 export interface AppSettings {
@@ -109,7 +114,7 @@ const files = {
 };
 
 const email = {
-  status: () => request<{ smtpConfigured: boolean }>('/api/email/status'),
+  status: () => request<EmailStatus>('/api/email/status'),
   sendTest: (to: string[], cc?: string[]) => request<{ sent: boolean }>('/api/email/test', { method: 'POST', body: { to, ...(cc === undefined ? {} : { cc }) } }),
   expiryReport: () =>
     request<{ sent: boolean; skipped: string | null; error: string | null }>('/api/email/expiry-report', {

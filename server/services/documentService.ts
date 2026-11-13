@@ -37,6 +37,15 @@ export interface StorageFields {
   mime_type: string;
 }
 
+/**
+ * The columns that name a stored file.
+ *
+ * They belong to the server: only the metadata of an uploaded file may fill
+ * them. A value the client sends is dropped, so a document can never point at
+ * the file of another workspace.
+ */
+const STORAGE_COLUMNS = ['file_path', 'file_name', 'file_size', 'mime_type'] as const;
+
 export interface UploadOwner { userId: string; scope: string }
 interface DocumentWriteHooks { completed?: (row: Row) => void; uploadOwner?: UploadOwner }
 
@@ -191,6 +200,21 @@ export class DocumentService {
     };
   }
 
+  /**
+   * Writes the storage columns of a document.
+   *
+   * The columns are managed by the server, so they are not part of the row
+   * write: they are set here, from the metadata of the uploaded file only, and
+   * always inside the workspace of the document.
+   */
+  private applyStorageFields(scope: Scope, documentId: string, fields: StorageFields): Row {
+    this.db.prepare(
+      `UPDATE documents SET file_path = ?, file_name = ?, file_size = ?, mime_type = ?
+       WHERE id = ? AND workspace_id = ?`,
+    ).run(fields.file_path, fields.file_name, fields.file_size, fields.mime_type, documentId, scope.workspaceId);
+    return findRow(this.db, scope, 'documents', documentId, []) as Row;
+  }
+
   /** Bound draft uploads cannot be validated or claimed in a different account/context. */
   private assertUploadOwner(scope: Scope, uploadId: string, owner?: UploadOwner): void {
     const row = this.db.prepare('SELECT draft_user_id,draft_scope FROM pending_uploads WHERE id=? AND workspace_id=?').get(uploadId, scope.workspaceId);
@@ -215,6 +239,8 @@ export class DocumentService {
     const fields: Row = { ...payload };
     const uploadId = typeof fields.upload_id === 'string' ? fields.upload_id : null;
     delete fields.upload_id;
+    // The client never names a stored file.
+    for (const column of STORAGE_COLUMNS) delete fields[column];
 
     this.db.exec('BEGIN');
     try {
@@ -222,11 +248,11 @@ export class DocumentService {
       const storageFields: StorageFields | null = uploadId ? this.requireUpload(scope, uploadId, hooks?.uploadOwner) : null;
       const expiry = typeof fields.expiry_date === 'string' ? fields.expiry_date : null;
 
-      const row = insertRow(this.db, scope, 'documents', {
+      const inserted = insertRow(this.db, scope, 'documents', {
         ...fields,
-        ...(storageFields ?? {}),
         status: status(expiry),
       });
+      const row = storageFields ? this.applyStorageFields(scope, inserted.id as string, storageFields) : inserted;
 
       if (uploadId) this.claimUpload(scope, uploadId);
       hooks?.completed?.(row);
@@ -265,6 +291,8 @@ export class DocumentService {
     const fields: Row = { ...payload };
     const uploadId = typeof fields.upload_id === 'string' ? fields.upload_id : null;
     delete fields.upload_id;
+    // The client never names a stored file.
+    for (const column of STORAGE_COLUMNS) delete fields[column];
 
     const existing = findRow(this.db, scope, 'documents', documentId, []);
     if (!existing) return null;
@@ -280,11 +308,11 @@ export class DocumentService {
           ? (typeof fields.expiry_date === 'string' ? fields.expiry_date : null)
           : (existing.expiry_date as string | null);
 
-      const row = updateRow(this.db, scope, 'documents', documentId, {
+      const updated = updateRow(this.db, scope, 'documents', documentId, {
         ...fields,
-        ...(storageFields ?? {}),
         status: status(expiry),
       });
+      const row = updated && storageFields ? this.applyStorageFields(scope, documentId, storageFields) : updated;
 
       if (row) hooks?.completed?.(row);
       if (uploadId) this.claimUpload(scope, uploadId);

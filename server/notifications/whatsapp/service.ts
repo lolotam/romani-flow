@@ -1,7 +1,7 @@
 import type { Db } from '../../db/connection.js';
 import { RepositoryError, type Scope } from '../../repositories/base.js';
 import { getBoolean, getString, isTenantSetting, PLATFORM, setSetting, setSettings, type SettingValue } from '../../repositories/settings.js';
-import { LEGACY_WORKSPACE_ID } from '../../repositories/workspaces.js';
+import { LEGACY_WORKSPACE_ID, isWorkspaceSuspended } from '../../repositories/workspaces.js';
 import { NotificationCoordinator } from '../coordinator.js';
 import type { SendOutcome, WhatsAppTransport } from './contracts.js';
 import { atomic, ReminderStore } from './repository.js';
@@ -56,6 +56,8 @@ export class WhatsAppReminders {
   async schedule(): Promise<number> {
     return this.coordinator.runExclusive(() => atomic(this.db, () => {
       if (!this.instance) return 0;
+      // A suspended workspace keeps its rows, but no message is queued for it.
+      if (isWorkspaceSuspended(this.db, this.scope.workspaceId)) return 0;
       if (!getBoolean(this.db, this.scope, 'whatsapp.enabled')) { this.reconcile(); return 0; }
       const today = this.clock().toISOString().slice(0, 10);
       if (getString(this.db, this.scope, 'whatsapp.last_enqueue_date') === today) return 0;
@@ -135,6 +137,8 @@ export class WhatsAppReminders {
 
   private async drainBatch(): Promise<number> {
     if (this.stopped || !getBoolean(this.db, this.scope, 'whatsapp.enabled')) return 0;
+    // A suspended workspace keeps its queued jobs, but none of them is delivered.
+    if (isWorkspaceSuspended(this.db, this.scope.workspaceId)) return 0;
     // Status is bounded by the transport and does not hold up business mutations.
     try { if ((await this.transport.status()).state !== 'connected') return 0; }
     catch { return 0; }
@@ -143,7 +147,8 @@ export class WhatsAppReminders {
       if (this.stopped) break;
       await this.coordinator.runExclusive(async () => {
         atomic(this.db, () => this.store.reconcileClaim(pending.id, selectReminders(this.db, this.scope, this.instance, this.clock(), pending)));
-        if (this.stopped || !getBoolean(this.db, this.scope, 'whatsapp.enabled')) return;
+        if (this.stopped || !getBoolean(this.db, this.scope, 'whatsapp.enabled')
+          || isWorkspaceSuspended(this.db, this.scope.workspaceId)) return;
         const claim = this.store.claim(pending.id);
         if (!claim) return;
         let outcome: SendOutcome;

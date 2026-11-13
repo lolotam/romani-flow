@@ -6,6 +6,7 @@ import {
   clearSessionCookie,
   setSessionCookie,
   signSession,
+  tenantOf,
   toSessionUser,
 } from '../middleware/auth.js';
 import {
@@ -13,6 +14,8 @@ import {
   touchLastLogin,
   verifyPassword,
 } from '../repositories/adminUsers.js';
+import { mayChangeSchedule } from '../services/cronService.js';
+import { LEGACY_WORKSPACE_ID } from '../repositories/workspaces.js';
 
 /**
  * Authentication routes.
@@ -43,7 +46,13 @@ function clearAttempts(key: string): void {
   attempts.delete(key);
 }
 
-export function createAuthRouter(config: AppConfig, db: Db, authenticated: RequestHandler): Router {
+export function createAuthRouter(
+  config: AppConfig,
+  db: Db,
+  authenticated: RequestHandler,
+  /** The workspace that owns the WhatsApp instance (D9). */
+  whatsappWorkspaceId: string = LEGACY_WORKSPACE_ID,
+): Router {
   const router = Router();
 
   router.get('/config', (_req, res) => {
@@ -114,7 +123,18 @@ export function createAuthRouter(config: AppConfig, db: Db, authenticated: Reque
   });
 
   router.get('/me', authenticated, (req, res) => {
-    res.json({ data: { user: req.user }, error: null });
+    const scope = tenantOf(req);
+    // The two capabilities the server enforces on its own: the shared schedule
+    // belongs to the legacy workspace, and the WhatsApp instance belongs to the
+    // workspace that owns it.
+    res.json({
+      data: {
+        user: req.user,
+        scheduleEditable: mayChangeSchedule(scope),
+        whatsappAvailable: scope.workspaceId === whatsappWorkspaceId,
+      },
+      error: null,
+    });
   });
 
   return router;

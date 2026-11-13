@@ -39,13 +39,14 @@ function seedEveryTenantTable(db) {
     VALUES('j1','inst','document','d1','2026-12-01',30,'+96550000000','Boss','management','Doc','Emp','hi',?,?,?)`).run(T, T, T);
   db.prepare(`INSERT INTO whatsapp_attempts(id,job_id,attempt,recipient,recipient_label,audience,item_name,owner_name,expiry_date,text,state,started_at)
     VALUES('a1','j1',1,'+96550000000','Boss','management','Doc','Emp','2026-12-01','hi','provider_accepted',?)`).run(T);
+  db.prepare("INSERT INTO upload_cleanup_queue(file_path,created_at) VALUES('2026/11/abandoned.pdf',?)").run(T);
   db.prepare("INSERT INTO settings(key,value,updated_at) VALUES('email.recipients','[\"x@example.invalid\"]',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").run(T);
   db.prepare("INSERT INTO settings(key,value,updated_at) VALUES('cron.schedule','\"0 8 * * *\"',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").run(T);
 }
 
 const TENANT_TABLES = ['admin_users', 'companies', 'ministries', 'document_types', 'positions', 'employees', 'documents',
   'email_log', 'expiry_notifications', 'pending_uploads', 'form_defaults', 'document_drafts', 'whatsapp_recipients',
-  'whatsapp_jobs', 'whatsapp_attempts'];
+  'whatsapp_jobs', 'whatsapp_attempts', 'upload_cleanup_queue'];
 
 test('010 moves every existing tenant row into the legacy workspace', () => {
   const db = databaseAt009();
@@ -96,8 +97,25 @@ test('a tenant row written without a workspace is refused', () => {
   assert.throws(() => db.prepare("UPDATE companies SET workspace_id=NULL WHERE id='c3'").run(), /workspace_required/);
 });
 
-test('a recipient phone is unique per workspace, not across workspaces', () => {
+test('every tenant table refuses a row that leaves its workspace, on insert and on update', () => {
   const db = databaseAt009();
+  seedEveryTenantTable(db);
+  runMigrations(db, migrationsDir);
+
+  for (const table of [...TENANT_TABLES, 'workspace_settings']) {
+    const triggers = db.prepare("SELECT name FROM sqlite_master WHERE type='trigger' AND tbl_name=? AND name LIKE 'ws_required_%'")
+      .all(table).map(row => row.name);
+    assert.ok(triggers.some(name => name.endsWith('_i')), `${table} refuses a row without a workspace on insert`);
+    assert.ok(triggers.some(name => name.endsWith('_u')), `${table} refuses a row that leaves its workspace on update`);
+    assert.throws(
+      () => db.prepare(`UPDATE "${table}" SET workspace_id=NULL`).run(),
+      /workspace_required|NOT NULL/i,
+      `${table} refuses a row without a workspace`,
+    );
+  }
+});
+
+test('a recipient phone is unique per workspace, not across workspaces', () => {  const db = databaseAt009();
   runMigrations(db, migrationsDir);
   db.prepare("INSERT INTO workspaces(id,name,created_at,updated_at) VALUES('ws_b','B',?,?)").run(T, T);
   const add = db.prepare("INSERT INTO whatsapp_recipients(id,workspace_id,label,phone,enabled,created_at,updated_at) VALUES(?,?,'L','+96550000000',1,?,?)");

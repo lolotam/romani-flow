@@ -255,7 +255,8 @@ export function createSettingsRouter(
 ): Router {
   const router = Router();
 
-  router.get('/', (req, res) => {
+  // The settings reveal the relay of the workspace, so only an owner reads them.
+  router.get('/', requireAdmin, (req, res) => {
     res.json({
       data: {
         settings: readAllSettings(db, tenantOf(req)),

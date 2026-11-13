@@ -21,11 +21,18 @@ export function useWhatsAppSettings(refreshKey = 0) {
   const [enabled, setEnabled] = useState<boolean | null>(null), [busy, setBusy] = useState(false), [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
   const [language, setLanguage] = useState<'ar' | 'en' | null>(null);
+  const [loadedFor, setLoadedFor] = useState<string | null>(null);
 
   // Returning to the same account must not revive an earlier session's mutation.
+  // Lists are cleared here and withheld until a load for this identity finishes.
   useEffect(() => {
     identityEpoch.current += 1;
+    setLoadedFor(null);
     setBusy(false); setError('');
+    setRecipients([]); setRecipientTotal(0); setRecipientsAvailable(false);
+    setLog([]); setLogTotal(0); setLogAvailable(false);
+    setRecipientOffset(current => current === 0 ? current : 0);
+    setFilter(current => Object.keys(current).length === 0 ? current : {});
     return () => { identityEpoch.current += 1; };
   }, [identity]);
 
@@ -37,6 +44,7 @@ export function useWhatsAppSettings(refreshKey = 0) {
     const version = ++generation.current;
     const results = await loadWhatsAppReminderSettings(recipientOffset, filter, signal);
     if (signal?.aborted || active.current !== identity || generation.current !== version) return;
+    setLoadedFor(identity);
     setLoading(false);
     setRecipientsAvailable(results.people !== null); setLogAvailable(results.jobs !== null);
     setRecipients(results.people?.items ?? []); setRecipientTotal(results.people?.total ?? 0);
@@ -70,7 +78,8 @@ export function useWhatsAppSettings(refreshKey = 0) {
     } finally { if (current()) setBusy(false); }
   };
 
-  return { recipients, recipientTotal, recipientOffset, setRecipientOffset, recipientsAvailable, log, logTotal, logAvailable, filter, setFilter,
+  const listsMatch = loadedFor === identity;
+  return { recipients: listsMatch ? recipients : [], recipientTotal: listsMatch ? recipientTotal : 0, recipientOffset, setRecipientOffset, recipientsAvailable: listsMatch && recipientsAvailable, log: listsMatch ? log : [], logTotal: listsMatch ? logTotal : 0, logAvailable: listsMatch && logAvailable, filter, setFilter,
     enabled: active.current === identity ? enabled : null, language: active.current === identity ? language : null, busy, loading, error, act, reload: () => void load(),
     setLanguage: (value: 'ar' | 'en') => language === null ? Promise.resolve(false) : act(() => request('/api/settings', { method: 'PUT', body: { settings: { 'whatsapp.language': value } } })),
     setEnabled: (value: boolean) => enabled === null ? Promise.resolve(false) : act(() => request('/api/settings', { method: 'PUT', body: { settings: { 'whatsapp.enabled': value } } })) };

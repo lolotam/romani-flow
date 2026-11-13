@@ -20,6 +20,8 @@ interface EmailConfigCardProps {
   onToggleInterval: (days: number, selected: boolean) => void;
   onSave: () => void;
   onTest: () => void;
+  /** False when the reminder cron expression is managed outside this workspace. */
+  scheduleEditable?: boolean;
 }
 
 const INTERVAL_LABELS: Record<number, { ar: string; en: string }> = {
@@ -39,6 +41,7 @@ export function EmailConfigCard({
   onToggleInterval,
   onSave,
   onTest,
+  scheduleEditable = true,
 }: EmailConfigCardProps) {
   const { language } = useLanguage();
   const L = (ar: string, en: string) => (language === 'ar' ? ar : en);
@@ -53,10 +56,7 @@ export function EmailConfigCard({
         </CardTitle>
         <CardDescription>
           {smtp?.configured
-            ? L(
-                `SMTP مفعّل: ${smtp.user} عبر ${smtp.host}:${smtp.port}`,
-                `SMTP is configured: ${smtp.user} via ${smtp.host}:${smtp.port}`,
-              )
+            ? L('SMTP مفعّل.', 'SMTP is configured.')
             : L(
                 'SMTP غير مُعدّ. ضع بيانات الإرسال في متغيرات البيئة على الخادم (كلمة المرور لا تُحفظ هنا).',
                 'SMTP is not configured. Set the sending credentials in the server environment (the password is never stored here).',
@@ -123,6 +123,7 @@ export function EmailConfigCard({
                 id="cron_schedule"
                 dir="ltr"
                 value={form.cronSchedule}
+                disabled={!scheduleEditable}
                 onChange={(event) => patch({ cronSchedule: event.target.value })}
               />
             </div>

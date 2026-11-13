@@ -1,7 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { endpoints, rejectedSettings } from '@/lib/api';
 import type { CronStatus, EmailLogEntry, ExpiryPreview, SmtpStatus } from '@/lib/api';
+import { ApiRequestError } from '@/lib/api/http';
 import { validEmailSettings, writeLoadedEmailSettings } from '@/lib/emailSettingsWrite';
+import { useAuth } from './useAuth';
+import { isOwner } from '@/lib/permissions';
 
 /**
  * State and actions of the e-mail settings screen.
@@ -69,6 +72,10 @@ export function splitAddresses(value: string): string[] {
     .filter((entry) => entry.length > 0);
 }
 
+function forbidden(error: Error | null): boolean {
+  return error instanceof ApiRequestError && error.status === 403;
+}
+
 function toForm(settings: Record<string, unknown>): EmailForm {
   return {
     enabled: asBoolean(settings['email.enabled'], EMPTY_FORM.enabled),
@@ -88,6 +95,7 @@ function toForm(settings: Record<string, unknown>): EmailForm {
 }
 
 export function useEmailSettings() {
+  const owner = isOwner(useAuth().user?.role);
   const [form, setForm] = useState<EmailForm>(EMPTY_FORM);
   const [smtp, setSmtp] = useState<SmtpStatus | null>(null);
   const [cron, setCron] = useState<CronStatus | null>(null);
@@ -99,6 +107,7 @@ export function useEmailSettings() {
   const ready = useRef(false);
 
   const loadStatus = useCallback(async () => {
+    if (!owner) return;
     const [cronResult, previewResult, logResult] = await Promise.all([
       endpoints.cron.status(),
       endpoints.email.expiryPreview(),
@@ -107,20 +116,36 @@ export function useEmailSettings() {
     setCron(cronResult.data);
     setPreview(previewResult.data);
     setLog(logResult.data ?? []);
-  }, []);
+  }, [owner]);
 
   const load = useCallback(async () => {
+    if (!owner) {
+      ready.current = false;
+      setSettingsReady(false);
+      setIsLoading(false);
+      return;
+    }
     setIsLoading(true);
     ready.current = false; setSettingsReady(false);
-    const { data, error } = await endpoints.settings.read();
+    const [{ data, error }, status] = await Promise.all([
+      endpoints.settings.read(),
+      endpoints.email.status(),
+    ]);
+    if (forbidden(error)) {
+      setIsLoading(false);
+      return;
+    }
     if (!error && validEmailSettings(data?.settings)) {
       setForm(toForm(data.settings));
-      setSmtp(data.smtp);
+      const configured = typeof status.data?.configured === 'boolean'
+        ? status.data.configured
+        : data.smtp?.configured === true;
+      setSmtp({ configured });
       ready.current = true; setSettingsReady(true);
     }
     await loadStatus();
     setIsLoading(false);
-  }, [loadStatus]);
+  }, [loadStatus, owner]);
 
   useEffect(() => {
     void load();

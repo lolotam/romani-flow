@@ -12,15 +12,58 @@ export interface WorkspaceLink {
   suspended_at: string | null;
 }
 
-type WorkspaceIdentity = Pick<Identity, 'orgId' | 'orgRole' | 'orgName' | 'email' | 'emailVerified'> & { orgId: string };
+type WorkspaceIdentity = Pick<Identity, 'userId' | 'orgId' | 'orgRole' | 'orgName' | 'email' | 'emailVerified'> & { orgId: string };
+
+function isWorkspaceOwner(identity: WorkspaceIdentity): boolean {
+  return identity.orgRole === 'org:owner' || identity.orgRole === 'owner';
+}
 
 function linkedWorkspace(db: Db, orgId: string): WorkspaceLink | null {
   return (db.prepare('SELECT * FROM workspaces WHERE clerk_org_id = ?').get(orgId) as WorkspaceLink | undefined) ?? null;
 }
 
+/**
+ * Hands the unsaved work of the legacy administrator to the claiming account.
+ *
+ * The drafts and the remembered form defaults belong to the account that wrote
+ * them. The legacy administrator and the claiming Clerk user are the same
+ * person, so the rows move to the local user id of the claim. Both tables are
+ * keyed by workspace, user and context, so a row that already exists for the
+ * new account is a conflict: the newer row wins and the older one is dropped.
+ */
+function handOverOwnership(db: Db, workspaceId: string, fromUserId: string, toUserId: string): void {
+  if (!fromUserId || !toUserId || fromUserId === toUserId) return;
+  for (const [table, context] of [['document_drafts', 'scope'], ['form_defaults', 'form_key']] as const) {
+    const rows = db.prepare(
+      `SELECT "${context}" AS context, updated_at FROM "${table}" WHERE workspace_id = ? AND user_id = ?`,
+    ).all(workspaceId, fromUserId) as Array<{ context: string; updated_at: string }>;
+    for (const row of rows) {
+      const existing = db.prepare(
+        `SELECT updated_at FROM "${table}" WHERE workspace_id = ? AND user_id = ? AND "${context}" = ?`,
+      ).get(workspaceId, toUserId, row.context) as { updated_at: string } | undefined;
+      if (!existing) {
+        db.prepare(
+          `UPDATE "${table}" SET user_id = ? WHERE workspace_id = ? AND user_id = ? AND "${context}" = ?`,
+        ).run(toUserId, workspaceId, fromUserId, row.context);
+        continue;
+      }
+      // The newer row is kept; the older one is the one that is dropped.
+      if (existing.updated_at >= row.updated_at) {
+        db.prepare(`DELETE FROM "${table}" WHERE workspace_id = ? AND user_id = ? AND "${context}" = ?`)
+          .run(workspaceId, fromUserId, row.context);
+        continue;
+      }
+      db.prepare(`DELETE FROM "${table}" WHERE workspace_id = ? AND user_id = ? AND "${context}" = ?`)
+        .run(workspaceId, toUserId, row.context);
+      db.prepare(`UPDATE "${table}" SET user_id = ? WHERE workspace_id = ? AND user_id = ? AND "${context}" = ?`)
+        .run(toUserId, workspaceId, fromUserId, row.context);
+    }
+  }
+}
+
 function claimLegacyWorkspace(db: Db, identity: WorkspaceIdentity): WorkspaceLink | null {
   const email = identity.email?.trim().toLowerCase();
-  if (!email || !identity.emailVerified || identity.orgRole !== 'org:owner') return null;
+  if (!email || !identity.emailVerified || !isWorkspaceOwner(identity)) return null;
 
   return atomic(db, () => {
     const candidate = db.prepare(`
@@ -34,7 +77,18 @@ function claimLegacyWorkspace(db: Db, identity: WorkspaceIdentity): WorkspaceLin
       UPDATE workspaces SET clerk_org_id = ?, legacy_claim_email = NULL, updated_at = ?
       WHERE id = ? AND clerk_org_id IS NULL
     `).run(identity.orgId, now, candidate.id);
-    return claimed.changes === 1 ? linkedWorkspace(db, identity.orgId) : null;
+    if (claimed.changes !== 1) return null;
+
+    // The unsaved work of the legacy administrator moves to the claiming account.
+    const legacyAccount = db.prepare(
+      'SELECT id FROM admin_users WHERE workspace_id = ? AND lower(trim(email)) = ?',
+    ).get(candidate.id, email) as { id: string } | undefined;
+    const localUser = db.prepare('SELECT id FROM users WHERE clerk_user_id = ?').get(identity.userId) as
+      | { id: string }
+      | undefined;
+    if (legacyAccount && localUser) handOverOwnership(db, candidate.id, legacyAccount.id, localUser.id);
+
+    return linkedWorkspace(db, identity.orgId);
   });
 }
 
@@ -46,9 +100,10 @@ function provisionWorkspace(db: Db, identity: WorkspaceIdentity): WorkspaceLink 
 }
 
 /** Maps a verified organization to its workspace, claiming legacy data or provisioning JIT. */
-export function resolveWorkspace(db: Db, identity: WorkspaceIdentity): WorkspaceLink {
+export function resolveWorkspace(db: Db, identity: WorkspaceIdentity): WorkspaceLink | null {
   const linked = linkedWorkspace(db, identity.orgId);
   if (linked) return linked;
+  if (!isWorkspaceOwner(identity)) return null;
   try {
     return claimLegacyWorkspace(db, identity) ?? provisionWorkspace(db, identity);
   } catch (error) {

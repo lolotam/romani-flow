@@ -30,12 +30,14 @@ import { DocumentExtractionSettings } from '@/components/settings/DocumentExtrac
 
 export default function Settings() {
   const { t, isRTL } = useLanguage();
-  const { user } = useAuth();
+  const { user, whatsappAvailable } = useAuth();
   const { toast } = useToast();
   const { theme, toggleTheme } = useTheme();
   const owner = isOwner(user?.role);
   const editable = canEdit(user?.role);
+  const showWhatsApp = owner && whatsappAvailable;
   const [activeTab, setActiveTab] = useState(owner ? 'email' : 'appearance');
+  const selectedTab = !showWhatsApp && activeTab === 'whatsapp' ? (owner ? 'email' : 'appearance') : activeTab;
   const [whatsappRefreshKey, setWhatsAppRefreshKey] = useState(0);
   const refreshWhatsAppSettings = useCallback(() => setWhatsAppRefreshKey(value => value + 1), []);
   const [isLoading, setIsLoading] = useState(true);
@@ -230,10 +232,10 @@ export default function Settings() {
         </motion.div>
 
         <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }}>
-          <Tabs dir={isRTL ? 'rtl' : 'ltr'} value={activeTab} onValueChange={setActiveTab} className="space-y-6">
+          <Tabs dir={isRTL ? 'rtl' : 'ltr'} value={selectedTab} onValueChange={setActiveTab} className="space-y-6">
             <TabsList className="grid h-auto w-full grid-cols-2 sm:grid-cols-3 xl:grid-cols-4 gap-1">
               {owner && <TabsTrigger value="email" className="flex items-center gap-2"><Mail className="h-4 w-4" /><span>{t('settings.tabs.email')}</span></TabsTrigger>}
-              {owner && <TabsTrigger value="whatsapp" className="flex items-center gap-2"><QrCode className="h-4 w-4" /><span>{t('settings.tabs.whatsapp')}</span></TabsTrigger>}
+              {showWhatsApp && <TabsTrigger value="whatsapp" className="flex items-center gap-2"><QrCode className="h-4 w-4" /><span>{t('settings.tabs.whatsapp')}</span></TabsTrigger>}
               {owner && <TabsTrigger value="extraction" className="flex items-center gap-2"><FileScan className="h-4 w-4" /><span>{t('extraction.title')}</span></TabsTrigger>}
               <TabsTrigger value="appearance" className="flex items-center gap-2"><Moon className="h-4 w-4" /><span>{t('settings.tabs.appearance')}</span></TabsTrigger>
               <TabsTrigger value="companies" className="flex items-center gap-2"><Building2 className="h-4 w-4" /><span>{t('settings.tabs.companies')}</span></TabsTrigger>
@@ -246,7 +248,7 @@ export default function Settings() {
             {owner && <TabsContent value="email">
               <EmailSettingsComponent />
             </TabsContent>}
-            {owner && <TabsContent value="whatsapp" className="space-y-5"><WhatsAppPairingSettings onDisconnectSettled={refreshWhatsAppSettings} /><WhatsAppSettings refreshKey={whatsappRefreshKey} /></TabsContent>}
+            {showWhatsApp && <TabsContent value="whatsapp" className="space-y-5"><WhatsAppPairingSettings onDisconnectSettled={refreshWhatsAppSettings} /><WhatsAppSettings refreshKey={whatsappRefreshKey} /></TabsContent>}
 
             {owner && <TabsContent value="extraction"><DocumentExtractionSettings /></TabsContent>}
 

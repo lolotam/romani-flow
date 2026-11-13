@@ -52,6 +52,7 @@ export function useDocumentDraft(scope: string, restore: (values: DraftValues | 
     // predecessor, so it reads what the predecessor has written. The promise
     // is the settlement of the real work, never the notification of a flush.
     const predecessor = retirements.get(key) ?? null;
+    const formWorkspace = workspaceId;
     const current = new DocumentDraftSession(scope, values => {
       if (active && identity.current === identityId) { setHasDraft(values !== null); callback.current(values); }
     }, value => {
@@ -62,7 +63,12 @@ export function useDocumentDraft(scope: string, restore: (values: DraftValues | 
     },
     <T>(url: string, options?: RequestOptions): Promise<ApiEnvelope<T>> => {
       const send = (): Promise<ApiEnvelope<T>> =>
-        request<T>(url, { ...options, draftAccount: userId, keepalive: options?.method !== undefined });
+        request<T>(url, {
+          ...options,
+          draftAccount: userId,
+          ...(formWorkspace ? { draftWorkspace: formWorkspace } : {}),
+          keepalive: options?.method !== undefined,
+        });
       // A write is never delayed: the session orders its own writes behind
       // its own load.
       if (options?.method || !predecessor) return send();
@@ -94,7 +100,7 @@ export function useDocumentDraft(scope: string, restore: (values: DraftValues | 
       retirements.set(key, chained);
       void chained.then(() => { if (retirements.get(key) === chained) retirements.delete(key); });
     };
-  }, [scope, identityId, userId, enabled]);
+  }, [scope, identityId, userId, workspaceId, enabled]);
   return { session, status, hasDraft, reference: async () => {
     if (!session.current || identity.current !== identityId) throw new Error('Draft unavailable');
     return { ...await session.current.reference(), account: userId! };

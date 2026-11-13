@@ -132,7 +132,7 @@ export function createApp(deps: AppDependencies): Express {
   // Public endpoints.
   app.use('/health', createRootHealthRouter(db, () => mailer.isConfigured()));
   app.use('/api/health', createHealthRouter(db));
-  app.use('/api/auth', createAuthRouter(config, db, authenticated));
+  app.use('/api/auth', createAuthRouter(config, db, authenticated, reminders.scope.workspaceId));
   app.use('/api/whatsapp/webhook', createPairingWebhook(config.whatsapp));
   app.get('/api/platform/me', signedIn, (req, res) => {
     res.json({ data: { isPlatformAdmin: isPlatformAdmin(config, req) }, error: null });

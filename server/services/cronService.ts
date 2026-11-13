@@ -2,7 +2,7 @@ import cron, { type ScheduledTask } from 'node-cron';
 import type { Db } from '../db/connection.js';
 import type { Scope } from '../repositories/base.js';
 import { getBoolean, getString, PLATFORM, setSetting } from '../repositories/settings.js';
-import { LEGACY_WORKSPACE_ID, listWorkspaceIds } from '../repositories/workspaces.js';
+import { LEGACY_WORKSPACE_ID, isWorkspaceSuspended, listWorkspaceIds } from '../repositories/workspaces.js';
 import type { Mailer } from './mailer.js';
 import {
   recordAutomatedRun,
@@ -75,6 +75,8 @@ export class CronService {
   private async enqueueReminders(source: 'cron' | 'manual'): Promise<void> {
     if (source !== 'cron' || !this.reminderEnqueue) return;
     if (!getBoolean(this.db, this.reminderEnqueue.scope, 'cron.enabled')) return;
+    // A suspended workspace keeps its data but sends nothing.
+    if (isWorkspaceSuspended(this.db, this.reminderEnqueue.scope.workspaceId)) return;
     try { await this.reminderEnqueue.action(); }
     catch { console.error('[whatsapp] scheduled selection failed; details suppressed'); }
   }
@@ -147,6 +149,10 @@ export class CronService {
 
   private async reportFor(scope: Scope, source: 'cron' | 'manual'): Promise<CronResult> {
     try {
+      // A suspended workspace keeps every row, but no report leaves it.
+      if (isWorkspaceSuspended(this.db, scope.workspaceId)) {
+        return { sent: false, skipped: 'workspace_suspended' };
+      }
       if (source === 'cron' && shouldSkipAutomatedRun(this.db, scope)) {
         return { sent: false, skipped: 'already_run_today' };
       }

@@ -49,6 +49,7 @@ SELECT user_id, form_key, source_id, values_json, updated_at, workspace_id FROM 
 DROP TABLE form_defaults;
 ALTER TABLE form_defaults_v2 RENAME TO form_defaults;
 CREATE TRIGGER ws_required_form_defaults_i BEFORE INSERT ON form_defaults WHEN NEW.workspace_id IS NULL BEGIN SELECT RAISE(ABORT, 'workspace_required'); END;
+CREATE TRIGGER ws_required_form_defaults_u BEFORE UPDATE OF workspace_id ON form_defaults WHEN NEW.workspace_id IS NULL BEGIN SELECT RAISE(ABORT, 'workspace_required'); END;
 CREATE TRIGGER clear_employee_defaults AFTER DELETE ON employees BEGIN DELETE FROM form_defaults WHERE form_key='employees' AND source_id=OLD.id; END;
 CREATE TRIGGER clear_document_defaults AFTER DELETE ON documents BEGIN DELETE FROM form_defaults WHERE form_key='documents' AND source_id=OLD.id; END;
 CREATE TRIGGER clear_company_defaults AFTER DELETE ON companies BEGIN DELETE FROM form_defaults WHERE form_key='companies' AND source_id=OLD.id; END;
@@ -73,6 +74,7 @@ CREATE INDEX document_drafts_scope ON document_drafts(scope);
 CREATE INDEX document_drafts_employee ON document_drafts(json_extract(values_json,'$.employee_id'));
 CREATE INDEX document_drafts_company ON document_drafts(json_extract(values_json,'$.company_id'));
 CREATE TRIGGER ws_required_document_drafts_i BEFORE INSERT ON document_drafts WHEN NEW.workspace_id IS NULL BEGIN SELECT RAISE(ABORT, 'workspace_required'); END;
+CREATE TRIGGER ws_required_document_drafts_u BEFORE UPDATE OF workspace_id ON document_drafts WHEN NEW.workspace_id IS NULL BEGIN SELECT RAISE(ABORT, 'workspace_required'); END;
 CREATE TRIGGER invalidate_employee_drafts AFTER DELETE ON employees BEGIN
   UPDATE document_drafts SET values_json=NULL, revision=lower(hex(randomblob(16))), updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now')
   WHERE scope='employee:' || OLD.id OR json_extract(values_json,'$.employee_id')=OLD.id;
@@ -104,3 +106,4 @@ ALTER TABLE pending_uploads_v2 RENAME TO pending_uploads;
 CREATE INDEX idx_pending_uploads_created ON pending_uploads(created_at);
 CREATE INDEX idx_pending_uploads_ws ON pending_uploads(workspace_id, created_at);
 CREATE TRIGGER ws_required_pending_uploads_i BEFORE INSERT ON pending_uploads WHEN NEW.workspace_id IS NULL BEGIN SELECT RAISE(ABORT, 'workspace_required'); END;
+CREATE TRIGGER ws_required_pending_uploads_u BEFORE UPDATE OF workspace_id ON pending_uploads WHEN NEW.workspace_id IS NULL BEGIN SELECT RAISE(ABORT, 'workspace_required'); END;

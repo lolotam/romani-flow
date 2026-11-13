@@ -111,7 +111,7 @@ export function RemindersTable({
                       </TableCell>
                       <TableCell>
                         <div className="flex items-center space-x-1">
-                          <Button
+                          {editable && <Button
                             variant="ghost"
                             size="sm"
                             className="h-8 w-8 p-0"
@@ -123,7 +123,7 @@ export function RemindersTable({
                             ) : (
                               <Pin className="h-3 w-3" />
                             )}
-                          </Button>
+                          </Button>}
                           {editable && <Button
                             variant="ghost"
                             size="sm"

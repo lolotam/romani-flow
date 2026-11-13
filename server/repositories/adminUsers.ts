@@ -48,10 +48,11 @@ export function findAdminById(db: Db, id: string): AdminUser | null {
   return admin;
 }
 
-export function listAdmins(db: Db): AdminUser[] {
+export function listAdmins(db: Db, workspaceId: string): AdminUser[] {
   const rows = db
-    .prepare('SELECT id, email, name, role, workspace_id, is_active, last_login_at, created_at, updated_at FROM admin_users ORDER BY created_at')
-    .all() as unknown as AdminUser[];
+    .prepare(`SELECT id, email, name, role, workspace_id, is_active, last_login_at, created_at, updated_at
+                FROM admin_users WHERE workspace_id = ? ORDER BY created_at`)
+    .all(workspaceId) as unknown as AdminUser[];
   return rows;
 }
 

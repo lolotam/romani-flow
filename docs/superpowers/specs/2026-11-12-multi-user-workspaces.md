@@ -28,7 +28,7 @@ Today the app is single-tenant: one shared dataset, `admin_users` with email/pas
 ## 3. Concepts
 
 - **User**: a Clerk user. The app stores only `clerk_user_id`, primary verified email, display name and timestamps. Passwords, Google tokens and verification are Clerk's job.
-- **Workspace**: the isolation boundary. 1:1 with a **Clerk Organization**. A user who signs up without one gets a personal workspace created automatically, named after them. Clerk's "membership required" setting keeps every session inside an active organization.
+- **Workspace**: the isolation boundary. 1:1 with a **Clerk Organization**. A user with no organization must create or join one. There is no automatic personal workspace. The UI uses `hidePersonal` on Clerk's organization components, so a personal account is not offered.
 - **Role** (Clerk custom organization roles): `org:owner`, `org:editor`, `org:viewer`.
 - **Platform admin**: not a workspace role. It is a server-side allowlist of verified emails (`PLATFORM_ADMIN_EMAILS`), checked against the Clerk user's verified primary email. It grants only `/api/platform/*`.
 
@@ -48,12 +48,12 @@ workspace_usage(workspace_id, month TEXT, whatsapp_sent INTEGER, PRIMARY KEY(wor
 
 `workspace_id TEXT NOT NULL REFERENCES workspaces(id)` is added to every tenant table: `companies`, `ministries`, `document_types`, `positions`, `employees`, `documents`, `settings` (key becomes `(workspace_id, key)`), `email_log`, `expiry_notifications_v2`, `pending_uploads`, `form_defaults`, `whatsapp_recipients`, `whatsapp_jobs`, `whatsapp_attempts`, `document_drafts`, `upload_cleanup_queue`. Every table is re-audited during implementation, and any table not listed must be classified as tenant or platform with a reason.
 
-- Unique constraints become per workspace, e.g. company name unique on `(workspace_id, name)`. One workspace can then reuse names another uses without the error revealing that the name exists elsewhere.
+- Catalog names have no uniqueness constraint, so workspaces can reuse names. Companies, ministries, document types and positions are not unique on name, inside a workspace or across workspaces.
 - Every tenant index leads with `workspace_id`.
 - Platform-level settings (SMTP transport, Evolution URL, cron schedule) move to a `platform_settings` table, or stay in env. They are never readable from workspace APIs.
-- Files are stored at `uploads/<workspace_id>/YYYY/MM/<uuid>-<name>`.
+- New uploads are stored at `uploads/<workspace_id>/YYYY/MM/<uuid>-<name>`. Migration 010 does not move existing upload files; their `YYYY/MM` paths stay valid. Only new uploads go under the workspace folder.
 
-**Backfill of existing data.** The migration creates one workspace `ws_romani_legacy`, with `legacy_claim_email` set to Romani's login email (open item O1). It assigns every existing tenant row to it and moves existing upload files under its folder. The first time a Clerk user with that **verified** email signs in, the server links the workspace to that user's Clerk organization as `org:owner`, and clears `legacy_claim_email`. A non-verified email can never claim it. `admin_users` is retired: the table is kept read-only for rollback and is no longer used for login.
+**Backfill of existing data.** The migration creates one workspace `ws_romani_legacy`, with `legacy_claim_email` set to Romani's login email (open item O1). It assigns every existing tenant row to it. It does not move existing upload files; their `YYYY/MM` paths stay valid, and only new uploads go under the workspace folder. The first time a Clerk user with that **verified** email signs in, the server links the workspace to that user's Clerk organization as `org:owner`, and clears `legacy_claim_email`. A non-verified email can never claim it. `admin_users` is retired: the table is kept read-only for rollback and is no longer used for login.
 
 ## 5. Isolation enforcement (replacing RLS)
 
@@ -72,7 +72,7 @@ workspace_usage(workspace_id, month TEXT, whatsapp_sent INTEGER, PRIMARY KEY(wor
 - The SPA wraps the app in the Clerk provider and uses Clerk's sign-in/sign-up components (email + password, Google, email verification) plus the organization switcher and member management.
 - The server uses `clerkMiddleware()` for all `/api` routes. The current `romani_session` cookie login, `/api/auth/login` and password handling are removed once Clerk is live.
 - A Clerk webhook (`/api/webhooks/clerk`, verified with `verifyWebhook`, raw body) syncs `user.created/updated/deleted` and `organization.*`/`organizationMembership.*` into `users`/`workspaces`. It is idempotent by event id.
-- A user who signs up and has no organization gets one created via the Clerk Backend API, with the user as `org:owner`.
+- A user with no organization must create or join one before the app loads a workspace. The app does not create a personal workspace, and the organization UI uses `hidePersonal`.
 - **Privacy note:** Clerk (a US service) stores user names, emails and login metadata. Documents, employees and files never go to Clerk.
 - Secrets: `CLERK_SECRET_KEY`, `CLERK_WEBHOOK_SIGNING_SECRET` are server-only env. `VITE_CLERK_PUBLISHABLE_KEY` is the only client value. They're collected through the secure secret prompt and never in chat.
 
@@ -115,7 +115,7 @@ This suite runs in CI on every PR from then on.
 ## 11. Delivery plan (separate PRs, each gated)
 
 1. **P1 Workspace data layer.** Migration 010, `TenantDb`, all routes and jobs scoped, files per workspace, isolation suite. The old login stays, mapped to the legacy workspace, so production behavior is unchanged. A migration rehearsal runs on a copy of the production DB.
-2. **P2 Clerk auth.** Clerk sign-up/sign-in, Google, verification, organizations and roles, the webhook, the auto personal workspace, the Romani legacy claim, the owner's personal workspace, and retirement of the old login.
+2. **P2 Clerk auth.** Clerk sign-up/sign-in, Google, verification, organizations and roles, the webhook, creating or joining an organization (no automatic personal workspace; the UI uses `hidePersonal`), the Romani legacy claim, the owner's personal workspace, and retirement of the old login.
 3. **P3 Admin dashboard and quotas.**
 4. **P4 Per-workspace WhatsApp.**
 

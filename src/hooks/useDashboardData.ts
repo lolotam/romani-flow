@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react';
 import { api, endpoints } from '@/lib/api';
+import { useAuth } from '@/hooks/useAuth';
+import { isOwner } from '@/lib/permissions';
 import type {
   Company,
   DocumentWithRelations,
@@ -149,6 +151,7 @@ export interface DashboardData {
 }
 
 export function useDashboardData(t: Translate): DashboardData {
+  const owner = isOwner(useAuth().user?.role);
   const [stats, setStats] = useState<DashboardStats>(EMPTY_STATS);
   const [activities, setActivities] = useState<RecentActivity[]>([]);
   const [expiringItems, setExpiringItems] = useState<ExpiringItem[]>([]);
@@ -165,7 +168,7 @@ export function useDashboardData(t: Translate): DashboardData {
             api.from<DocumentWithRelations>('documents').select('*').execute(),
             api.from<EmployeeWithRelations>('employees').select('*').execute(),
             api.from<Company>('companies').select('*').execute(),
-            endpoints.settings.read(),
+            owner ? endpoints.settings.read() : Promise.resolve({ data: null, error: null }),
           ]);
 
         if (cancelled) return;
@@ -210,7 +213,7 @@ export function useDashboardData(t: Translate): DashboardData {
     return () => {
       cancelled = true;
     };
-  }, [t]);
+  }, [t, owner]);
 
   return { stats, activities, expiringItems, isLoading, error };
 }
