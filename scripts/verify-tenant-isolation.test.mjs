@@ -164,6 +164,9 @@ test("B saves its own settings without touching legacy's, and cannot set WhatsAp
 
   const saved = await asB(f, '/api/settings', { method: 'PUT', body: { settings: { 'email.recipients': [B_TO], 'cron.schedule': schedule } } });
   assert.equal(saved.status, 200, JSON.stringify(saved.json));
+  const savedWithoutSchedule = await asB(f, '/api/settings', { method: 'PUT', body: { settings: { 'email.from_name': 'Tenant B' } } });
+  assert.equal(savedWithoutSchedule.status, 200, JSON.stringify(savedWithoutSchedule.json));
+  assert.equal(JSON.parse(f.db.prepare("SELECT value FROM workspace_settings WHERE workspace_id='ws_b' AND key='email.from_name'").get().value), 'Tenant B');
   assert.deepEqual(JSON.parse(f.db.prepare("SELECT value FROM workspace_settings WHERE workspace_id='ws_b' AND key='email.recipients'").get().value), [B_TO]);
   assert.deepEqual(JSON.parse(f.db.prepare("SELECT value FROM workspace_settings WHERE workspace_id='ws_legacy' AND key='email.recipients'").get().value), [LEGACY_TO]);
 

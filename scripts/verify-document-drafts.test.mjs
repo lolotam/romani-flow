@@ -11,6 +11,33 @@ import { createDocumentSchema } from '../src/components/documents/documentFormSc
 import fs from 'node:fs';
 import path from 'node:path';
 
+test('a workspace mismatch rejects prepare and reference while background flush stays quiet', () => reminderApi(async f => {
+  const api = transport(f);
+  let mismatch = false;
+  const transportWithMismatch = async (path, options) => {
+    if (mismatch && options?.method === 'PUT') {
+      return { data: null, error: new ApiRequestError('Draft workspace changed.', 'draft_workspace_mismatch', 409) };
+    }
+    return api(path, options);
+  };
+  const states = [];
+  const session = new DocumentDraftSession('new', () => {}, state => states.push(state), transportWithMismatch);
+  await session.flush();
+  mismatch = true;
+  await assert.rejects(session.prepare({ title: 'Stale revision' }), error => error instanceof ApiRequestError && error.code === 'draft_workspace_mismatch');
+  await session.flush();
+  session.change({ title: 'Background after mismatch' });
+  await session.flush();
+  const referenced = new DocumentDraftSession('employee:' + f.employee.id, () => {}, () => {}, transportWithMismatch);
+  await referenced.flush();
+  referenced.change({ notes: 'Pending reference' });
+  await assert.rejects(referenced.reference(), error => error instanceof ApiRequestError && error.code === 'draft_workspace_mismatch');
+  await referenced.flush();
+  assert.ok(states.includes('failed'));
+  session.dispose();
+  referenced.dispose();
+}));
+
 test('save preparation waits for discard and persists the new values', () => reminderApi(async f => {
   const api = transport(f); let release;
   const gate = new Promise(resolve => { release = resolve; });

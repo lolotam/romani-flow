@@ -9,6 +9,11 @@ export interface Identity {
   emailVerified: boolean;
   name: string;
   orgName?: string | null;
+  /**
+   * False when the email profile was served from a stale cache after a failed
+   * refresh. Missing means the profile was read fresh (or injected by a test).
+   */
+  profileFresh?: boolean;
 }
 
 /** Clerk is the system boundary; tests inject this resolver and nothing else. */

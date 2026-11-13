@@ -12,7 +12,7 @@ export interface WorkspaceLink {
   suspended_at: string | null;
 }
 
-type WorkspaceIdentity = Pick<Identity, 'userId' | 'orgId' | 'orgRole' | 'orgName' | 'email' | 'emailVerified'> & { orgId: string };
+type WorkspaceIdentity = Pick<Identity, 'userId' | 'orgId' | 'orgRole' | 'orgName' | 'email' | 'emailVerified' | 'profileFresh'> & { orgId: string };
 
 function isWorkspaceOwner(identity: WorkspaceIdentity): boolean {
   return identity.orgRole === 'org:owner' || identity.orgRole === 'owner';
@@ -62,6 +62,8 @@ function handOverOwnership(db: Db, workspaceId: string, fromUserId: string, toUs
 }
 
 function claimLegacyWorkspace(db: Db, identity: WorkspaceIdentity): WorkspaceLink | null {
+  // A stale email must not be trusted to take ownership of the legacy workspace.
+  if (identity.profileFresh === false) return null;
   const email = identity.email?.trim().toLowerCase();
   if (!email || !identity.emailVerified || !isWorkspaceOwner(identity)) return null;
 
@@ -103,6 +105,8 @@ function provisionWorkspace(db: Db, identity: WorkspaceIdentity): WorkspaceLink 
 export function resolveWorkspace(db: Db, identity: WorkspaceIdentity): WorkspaceLink | null {
   const linked = linkedWorkspace(db, identity.orgId);
   if (linked) return linked;
+  // Stale profile: do not claim and do not provision. The caller asks the user to retry.
+  if (identity.profileFresh === false) return null;
   if (!isWorkspaceOwner(identity)) return null;
   try {
     return claimLegacyWorkspace(db, identity) ?? provisionWorkspace(db, identity);

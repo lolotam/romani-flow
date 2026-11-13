@@ -18,6 +18,8 @@ export function ClerkAuthProvider({ children }: { children: ReactNode }) {
   const [isPlatformAdmin, setIsPlatformAdmin] = useState(false);
   const [scheduleEditable, setScheduleEditable] = useState(true);
   const [whatsappAvailable, setWhatsappAvailable] = useState(false);
+  const [workspaceId, setWorkspaceId] = useState<string | null>(null);
+  const [expiryWarningDays, setExpiryWarningDays] = useState(30);
   const previousIdentity = useRef<string | null>(null);
 
   useEffect(() => {
@@ -38,6 +40,8 @@ export function ClerkAuthProvider({ children }: { children: ReactNode }) {
     setIsPlatformAdmin(false);
     setScheduleEditable(true);
     setWhatsappAvailable(false);
+    setWorkspaceId(null);
+    setExpiryWarningDays(30);
 
     if (!isSignedIn) {
       setSessionLoading(false);
@@ -63,6 +67,8 @@ export function ClerkAuthProvider({ children }: { children: ReactNode }) {
       const capabilities = sessionCapabilities(session.data, false);
       setScheduleEditable(capabilities.scheduleEditable);
       setWhatsappAvailable(capabilities.whatsappAvailable);
+      setWorkspaceId(capabilities.workspaceId);
+      setExpiryWarningDays(capabilities.expiryWarningDays);
       setUser(session.data.user);
     }).finally(() => {
       if (active) setSessionLoading(false);
@@ -84,6 +90,8 @@ export function ClerkAuthProvider({ children }: { children: ReactNode }) {
     await signOut({ redirectUrl: '/login' });
     queryClient.clear();
     setUser(null);
+    setWorkspaceId(null);
+    setExpiryWarningDays(30);
   }, [queryClient, signOut]);
 
   const value = useMemo<AuthContextValue>(() => ({
@@ -91,14 +99,16 @@ export function ClerkAuthProvider({ children }: { children: ReactNode }) {
     isLoading: !isLoaded || sessionLoading,
     user,
     provider: 'clerk',
-    workspaceId: orgId ?? null,
+    workspaceId,
+    organizationId: orgId ?? null,
+    expiryWarningDays,
     workspaceRequired,
     isPlatformAdmin,
     scheduleEditable,
     whatsappAvailable,
     login,
     logout,
-  }), [isLoaded, sessionLoading, user, orgId, workspaceRequired, isPlatformAdmin, scheduleEditable, whatsappAvailable, login, logout]);
+  }), [isLoaded, sessionLoading, user, orgId, workspaceId, expiryWarningDays, workspaceRequired, isPlatformAdmin, scheduleEditable, whatsappAvailable, login, logout]);
 
   const arabic = language === 'ar';
   return (

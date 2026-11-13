@@ -29,8 +29,12 @@ export interface AuthContextValue {
   isLoading: boolean;
   user: SessionUser | null;
   provider: 'legacy' | 'clerk';
-  /** The verified Clerk organization, never a client-selected tenant override. */
+  /** Database workspace id from `/api/auth/me`, never a client-selected tenant. */
   workspaceId: string | null;
+  /** Clerk organization id. Tenant calls and drafts use `workspaceId`. */
+  organizationId: string | null;
+  /** Workspace expiry warning window, in days, for every role. */
+  expiryWarningDays: number;
   workspaceRequired: boolean;
   isPlatformAdmin: boolean;
   /**
@@ -67,6 +71,16 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
   const [user, setUser] = useState<SessionUser | null>(null);
   const [scheduleEditable, setScheduleEditable] = useState(true);
   const [whatsappAvailable, setWhatsappAvailable] = useState(true);
+  const [workspaceId, setWorkspaceId] = useState<string | null>(null);
+  const [expiryWarningDays, setExpiryWarningDays] = useState(30);
+
+  const applyCapabilities = useCallback((data: AuthMePayload | null | undefined) => {
+    const capabilities = sessionCapabilities(data, true);
+    setScheduleEditable(capabilities.scheduleEditable);
+    setWhatsappAvailable(capabilities.whatsappAvailable);
+    setWorkspaceId(capabilities.workspaceId);
+    setExpiryWarningDays(capabilities.expiryWarningDays);
+  }, []);
 
   const applySession = useCallback((nextUser: SessionUser | null) => {
     setUser(nextUser);
@@ -80,9 +94,7 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
     request<AuthMePayload>('/api/auth/me')
       .then(({ data, error }) => {
         if (!active) return;
-        const capabilities = sessionCapabilities(data, true);
-        setScheduleEditable(capabilities.scheduleEditable);
-        setWhatsappAvailable(capabilities.whatsappAvailable);
+        applyCapabilities(data);
         applySession(error ? null : (data?.user ?? null));
       })
       .finally(() => {
@@ -92,12 +104,15 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
     return () => {
       active = false;
     };
-  }, [applySession]);
+  }, [applyCapabilities, applySession]);
 
   useEffect(() => {
     // A 401 from any request means the session expired.
-    onUnauthorized(() => applySession(null));
-  }, [applySession]);
+    onUnauthorized(() => {
+      applyCapabilities(null);
+      applySession(null);
+    });
+  }, [applyCapabilities, applySession]);
 
   const login = useCallback(
     async (email: string, password: string): Promise<{ success: boolean; error?: string }> => {
@@ -110,19 +125,18 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
         return { success: false, error: error.message };
       }
 
-      const capabilities = sessionCapabilities(data, true);
-      setScheduleEditable(capabilities.scheduleEditable);
-      setWhatsappAvailable(capabilities.whatsappAvailable);
+      applyCapabilities(data);
       applySession(data?.user ?? null);
       return { success: true };
     },
-    [applySession],
+    [applyCapabilities, applySession],
   );
 
   const logout = useCallback(async () => {
     await request('/api/auth/logout', { method: 'POST' });
+    applyCapabilities(null);
     applySession(null);
-  }, [applySession]);
+  }, [applyCapabilities, applySession]);
 
   const value = useMemo<AuthContextValue>(
     () => ({
@@ -130,7 +144,9 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
       isLoading,
       user,
       provider: 'legacy',
-      workspaceId: null,
+      workspaceId,
+      organizationId: null,
+      expiryWarningDays,
       workspaceRequired: false,
       isPlatformAdmin: false,
       scheduleEditable,
@@ -138,7 +154,7 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
       login,
       logout,
     }),
-    [isAuthenticated, isLoading, user, scheduleEditable, whatsappAvailable, login, logout],
+    [isAuthenticated, isLoading, user, workspaceId, expiryWarningDays, scheduleEditable, whatsappAvailable, login, logout],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

@@ -4,7 +4,7 @@ import { createHmac } from 'node:crypto';
 import { reminderApi } from './fixtures/whatsapp-api.mjs';
 import { loadConfig, validateConfig } from '../server/config.ts';
 import { applyLegacyClaimEmail } from '../server/repositories/workspaces.ts';
-import { SETTING_DEFINITIONS, isTenantSetting } from '../server/repositories/settings.ts';
+import { SETTING_DEFINITIONS, isTenantSetting, setSetting } from '../server/repositories/settings.ts';
 import { STARTER_MINISTRIES, STARTER_POSITIONS } from '../server/db/starterCatalog.ts';
 import { clerkClient } from '@clerk/express';
 import { createClerkIdentityResolver } from '../server/auth/clerkIdentity.ts';
@@ -25,6 +25,9 @@ const identities = {
   secondLegacy: { userId: 'clerk-second-legacy', orgId: 'org-second-legacy', orgRole: 'org:owner', email: 'legacy@example.invalid', emailVerified: true, name: 'Second Legacy' },
   multiOrgA: { userId: 'clerk-multi-org', orgId: 'org-a', orgRole: 'org:owner', orgName: 'Organization A', email: 'multi@example.invalid', emailVerified: true, name: 'Multi Org' },
   multiOrgB: { userId: 'clerk-multi-org', orgId: 'org-b', orgRole: 'org:owner', orgName: 'Organization B', email: 'multi@example.invalid', emailVerified: true, name: 'Multi Org' },
+  staleLegacyOwner: { userId: 'clerk-stale-legacy', orgId: 'org-stale-legacy', orgRole: 'org:owner', email: 'legacy@example.invalid', emailVerified: true, name: 'Stale Legacy', profileFresh: false },
+  stalePlatform: { userId: 'clerk-stale-platform', orgId: null, orgRole: null, email: 'platform@example.invalid', emailVerified: true, name: 'Stale Platform', profileFresh: false },
+  staleLinked: { userId: 'clerk-owner', orgId: 'org-a', orgRole: 'org:owner', orgName: 'Organization A', email: 'owner@example.invalid', emailVerified: true, name: 'Owner A', profileFresh: false },
 };
 const clerkEnv = {
   AUTH_PROVIDER: 'clerk',
@@ -361,8 +364,54 @@ test('legacy auth/me keeps the existing session response', () => reminderApi(asy
   assert.deepEqual(response.json.data.user, {
     id: 'admin', email: 'admin@example.invalid', name: 'Synthetic', role: 'admin',
   });
+  assert.equal(response.json.data.workspaceId, 'ws_legacy');
+  assert.equal(response.json.data.expiryWarningDays, 30);
   assert.equal(response.json.data.scheduleEditable, true);
   assert.equal(response.json.data.whatsappAvailable, true);
+}));
+
+test('auth/me returns the database workspace id for a claimed legacy org', () => clerkApi(async f => {
+  f.db.prepare("UPDATE workspaces SET legacy_claim_email='legacy@example.invalid' WHERE id='ws_legacy'").run();
+  const response = await f.request('/api/auth/me', { identity: 'legacyOwner' });
+  assert.equal(response.status, 200, JSON.stringify(response.json));
+  assert.equal(response.json.data.workspaceId, 'ws_legacy');
+  assert.notEqual(response.json.data.workspaceId, 'org-legacy');
+}));
+
+test('auth/me exposes expiryWarningDays to every role', () => clerkApi(async f => {
+  assert.equal((await f.request('/api/companies', { identity: 'owner' })).status, 200);
+  const workspace = workspaceFor(f, 'org-a');
+  setSetting(f.db, { workspaceId: workspace.id }, 'expiry_warning_days', 14);
+  const editor = await f.request('/api/auth/me', { identity: 'editor' });
+  assert.equal(editor.status, 200, JSON.stringify(editor.json));
+  assert.equal(editor.json.data.expiryWarningDays, 14);
+  assert.equal(editor.json.data.workspaceId, workspace.id);
+  assert.notEqual(editor.json.data.workspaceId, 'org-a');
+}));
+
+test('a stale profile cannot claim or provision a workspace', () => clerkApi(async f => {
+  f.db.prepare("UPDATE workspaces SET legacy_claim_email='legacy@example.invalid' WHERE id='ws_legacy'").run();
+  const before = f.db.prepare('SELECT count(*) n FROM workspaces').get().n;
+  const response = await f.request('/api/documents', { identity: 'staleLegacyOwner' });
+  assert.equal(response.status, 503, JSON.stringify(response.json));
+  assert.equal(response.json.error.code, 'workspace_not_ready');
+  assert.equal(f.db.prepare("SELECT clerk_org_id, legacy_claim_email FROM workspaces WHERE id='ws_legacy'").get().clerk_org_id, null);
+  assert.equal(f.db.prepare('SELECT count(*) n FROM workspaces').get().n, before);
+  assert.equal(workspaceFor(f, 'org-stale-legacy'), null);
+}));
+
+test('a stale profile is not a platform admin', () => clerkApi(async f => {
+  const response = await f.request('/api/platform/me', { identity: 'stalePlatform' });
+  assert.equal(response.status, 200, JSON.stringify(response.json));
+  assert.equal(response.json.data.isPlatformAdmin, false);
+}));
+
+test('a stale profile still serves an already-linked workspace', () => clerkApi(async f => {
+  assert.equal((await f.request('/api/companies', { identity: 'owner' })).status, 200);
+  const workspace = workspaceFor(f, 'org-a');
+  const response = await f.request('/api/companies', { identity: 'staleLinked' });
+  assert.equal(response.status, 200, JSON.stringify(response.json));
+  assert.equal(workspaceFor(f, 'org-a').id, workspace.id);
 }));
 
 test('auth/me hides the schedule and WhatsApp outside the legacy workspace', () => clerkApi(async f => {
@@ -455,11 +504,44 @@ test('Clerk identity reads use stale cached profiles and organizations when the 
   now += 31_000;
   unavailable = true;
   const stale = await resolve(clerkRequest('cache-user', 'cache-org'));
-  assert.deepEqual(stale, fresh);
+  assert.equal(fresh.profileFresh, true);
+  assert.equal(stale.profileFresh, false);
+  assert.equal(stale.email, fresh.email);
+  assert.equal(stale.orgName, fresh.orgName);
   assert.equal(getUser.mock.callCount(), 2);
   assert.equal(getOrganization.mock.callCount(), 2);
   await assert.rejects(() => resolve(clerkRequest('cache-user', 'uncached-org')), /Clerk backend unavailable/);
   await assert.rejects(() => createClerkIdentityResolver()(clerkRequest('uncached-user')), /Clerk backend unavailable/);
+});
+
+test('Clerk identity refreshes share one in-flight read per key', async t => {
+  let now = 1_800_000_000_000;
+  t.mock.method(Date, 'now', () => now);
+  let release = () => {};
+  let gate = Promise.resolve();
+  const getUser = t.mock.method(clerkClient.users, 'getUser', async userId => {
+    await gate;
+    return {
+      primaryEmailAddress: { emailAddress: `${userId}@example.invalid`, verification: { status: 'verified' } },
+      fullName: 'Cached User', username: null,
+    };
+  });
+  t.mock.method(clerkClient.organizations, 'getOrganization', async ({ organizationId }) => ({ name: `Organization ${organizationId}` }));
+  const resolve = createClerkIdentityResolver();
+  await resolve(clerkRequest('flight-user', 'flight-org'));
+  assert.equal(getUser.mock.callCount(), 1);
+
+  now += 61_000;
+  gate = new Promise(resolveGate => { release = resolveGate; });
+  const first = resolve(clerkRequest('flight-user', 'flight-org'));
+  const second = resolve(clerkRequest('flight-user', 'flight-org'));
+  await new Promise(resolveWait => setImmediate(resolveWait));
+  assert.equal(getUser.mock.callCount(), 2, 'the second caller waits on the refresh already in flight');
+  release();
+  const [left, right] = await Promise.all([first, second]);
+  assert.equal(left.profileFresh, true);
+  assert.equal(right.email, left.email);
+  assert.equal(getUser.mock.callCount(), 2);
 });
 
 test('Clerk identity user and organization caches drop expired and oldest entries', async t => {

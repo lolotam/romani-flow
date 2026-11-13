@@ -95,7 +95,8 @@ function toForm(settings: Record<string, unknown>): EmailForm {
 }
 
 export function useEmailSettings() {
-  const owner = isOwner(useAuth().user?.role);
+  const { user, scheduleEditable } = useAuth();
+  const owner = isOwner(user?.role);
   const [form, setForm] = useState<EmailForm>(EMPTY_FORM);
   const [smtp, setSmtp] = useState<SmtpStatus | null>(null);
   const [cron, setCron] = useState<CronStatus | null>(null);
@@ -170,7 +171,9 @@ export function useEmailSettings() {
       'email.language': form.language,
       'email.notification_intervals': form.intervals,
       'cron.enabled': form.cronEnabled,
-      'cron.schedule': form.cronSchedule.trim(),
+      // A workspace that cannot edit the platform schedule must not send it:
+      // a changed value would reject the whole save.
+      ...(scheduleEditable ? { 'cron.schedule': form.cronSchedule.trim() } : {}),
       'cron.days': form.cronDays,
       'cron.include_employees': form.includeEmployees,
       'cron.include_documents': form.includeDocuments,

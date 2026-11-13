@@ -65,6 +65,10 @@ export function requireWorkspace(db: Db): RequestHandler {
 
     const workspace = resolveWorkspace(db, { ...identity, orgId: identity.orgId });
     if (!workspace) {
+      if (identity.profileFresh === false) {
+        fail(res, 503, 'workspace_not_ready', 'Workspace identity could not be refreshed. Retry.');
+        return;
+      }
       fail(res, 403, 'workspace_not_ready', 'An organization owner must initialize this workspace.');
       return;
     }
@@ -80,6 +84,7 @@ export function requireWorkspace(db: Db): RequestHandler {
 
 /** Platform administration is an email allowlist, never a workspace permission. */
 export function isPlatformAdmin(config: AppConfig, req: Request): boolean {
+  if (req.identity?.profileFresh === false) return false;
   const email = req.identity?.email?.trim().toLowerCase();
   return Boolean(req.identity?.emailVerified && email && config.platformAdminEmails.includes(email));
 }

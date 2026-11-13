@@ -255,3 +255,37 @@ test('formatted structured identities suppress only the matching item',t=>withMa
  insertRow(f.db, { workspaceId: 'ws_legacy' }, 'documents',{title:'New eligible document',employee_id:f.employee.id,document_type_id:f.type.id,expiry_date:expiry});setSetting(f.db, { workspaceId: 'ws_legacy' }, 'email.recipients',[TO[0]]);
  await sendExpiryReport(f.db, { workspaceId: 'ws_legacy' },f.mailer,'cron');assert.equal(calls.length,1);assert.ok(calls[0].text.includes('New eligible document'));assert.equal(calls[0].text.includes('Already attempted'),false);
 }));
+
+test('suspension before the next expiry handoff stops the remaining groups', t => {
+  const calls = [];
+  let database = null;
+  t.mock.method(nodemailer, 'createTransport', () => ({
+    verify: async () => true,
+    sendMail: async message => {
+      calls.push(message);
+      if (calls.length === 2 && database) {
+        database.prepare("UPDATE workspaces SET suspended_at=? WHERE id='ws_legacy'").run(new Date().toISOString());
+      }
+      return { messageId: 'synthetic-' + calls.length, accepted: [...(message.to ?? []), ...(message.cc ?? [])], rejected: [] };
+    },
+  }));
+  return reminderApi(async f => {
+    database = f.db;
+    const expiry = new Date().toISOString().slice(0, 10);
+    f.db.prepare('UPDATE documents SET title=?,expiry_date=?').run('Synthetic A', expiry);
+    f.db.prepare('UPDATE employees SET residency_expiry_date=NULL').run();
+    setSetting(f.db, { workspaceId: 'ws_legacy' }, 'email.recipients', [TO[0]]);
+    setSetting(f.db, { workspaceId: 'ws_legacy' }, 'email.cc', []);
+    assert.equal((await sendExpiryReport(f.db, { workspaceId: 'ws_legacy' }, f.mailer, 'cron')).sent, true);
+    insertRow(f.db, { workspaceId: 'ws_legacy' }, 'documents', { title: 'Synthetic B', employee_id: f.employee.id, document_type_id: f.type.id, expiry_date: expiry });
+    setSetting(f.db, { workspaceId: 'ws_legacy' }, 'email.cc', [CC]);
+    const result = await sendExpiryReport(f.db, { workspaceId: 'ws_legacy' }, f.mailer, 'cron');
+    assert.equal(result.sent, false, JSON.stringify(result));
+    assert.equal(calls.length, 2, 'the group that has not been handed to SMTP is stopped');
+    assert.deepEqual(calls[1].to, [TO[0]]);
+    assert.equal(calls[1].cc, undefined);
+    assert.equal(f.db.prepare('SELECT count(*) n FROM expiry_notifications WHERE recipient=?').get(CC).n, 0);
+  }, undefined, {
+    SMTP_HOST: '127.0.0.1', SMTP_PORT: '2525', SMTP_USER: 'synthetic', SMTP_PASS: randomBytes(24).toString('hex'), SMTP_FROM: 'synthetic@example.invalid',
+  });
+});

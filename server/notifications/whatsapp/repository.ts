@@ -128,7 +128,7 @@ export class ReminderStore {
     if (!this.instance) return;
     atomic(this.db, () => {
       const now = this.clock().toISOString();
-      this.db.prepare("UPDATE whatsapp_attempts SET state='unknown',error_code='interrupted_restart',finished_at=? WHERE state='sending' AND workspace_id=? AND job_id IN (SELECT id FROM whatsapp_jobs WHERE workspace_id=? AND instance=?)")
+      this.db.prepare("UPDATE whatsapp_attempts SET state='unknown',error_code='interrupted_restart',finished_at=? WHERE state='sending' AND whatsapp_attempts.workspace_id=? AND job_id IN (SELECT id FROM whatsapp_jobs WHERE whatsapp_jobs.workspace_id=? AND instance=?)")
         .run(now, this.ws, this.ws, this.instance);
       this.db.prepare("UPDATE whatsapp_jobs SET state='unknown',error_code='interrupted_restart',updated_at=? WHERE state='sending' AND workspace_id=? AND instance=?").run(now, this.ws, this.instance);
     });

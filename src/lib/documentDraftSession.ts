@@ -72,6 +72,11 @@ export class DocumentDraftSession {
     if (!this.disposed) this.status(this.pending ? 'saving' : 'saved');
   }
 
+  /** A workspace mismatch must not hand back the revision this form loaded. */
+  private assertSameWorkspace(): void {
+    if (this.workspaceMismatch) throw this.failure ?? new Error('draft_workspace_mismatch');
+  }
+
   private fail(error: Error): void {
     if (draftWorkspaceMismatch(error)) {
       this.workspaceMismatch = true;
@@ -127,9 +132,11 @@ export class DocumentDraftSession {
 
   async prepare(values: DraftValues): Promise<DraftReference> {
     if (this.discarding) await this.discarding;
+    this.assertSameWorkspace();
     if (!this.ready) throw new Error('Wait for the draft to load before saving.');
     this.change(values);
     await this.flush();
+    this.assertSameWorkspace();
     this.paused = true;
     this.prepared = values;
     return { scope: this.scope, revision: this.revision };
@@ -138,8 +145,10 @@ export class DocumentDraftSession {
   /** Flush metadata before a draft-owned file operation without pausing future edits. */
   async reference(): Promise<DraftReference> {
     if (this.discarding) await this.discarding;
+    this.assertSameWorkspace();
     if (!this.ready) throw new Error('Wait for the draft to load before continuing.');
     await this.flush();
+    this.assertSameWorkspace();
     return { scope: this.scope, revision: this.revision };
   }
 

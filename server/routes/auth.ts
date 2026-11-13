@@ -15,6 +15,7 @@ import {
   verifyPassword,
 } from '../repositories/adminUsers.js';
 import { mayChangeSchedule } from '../services/cronService.js';
+import { getNumber } from '../repositories/settings.js';
 import { LEGACY_WORKSPACE_ID } from '../repositories/workspaces.js';
 
 /**
@@ -112,8 +113,16 @@ export function createAuthRouter(
 
       const user = toSessionUser(admin);
       setSessionCookie(config, res, signSession(config, user));
+      const scope = { workspaceId: admin.workspace_id };
 
-      res.json({ data: { user }, error: null });
+      res.json({
+        data: {
+          user,
+          workspaceId: scope.workspaceId,
+          expiryWarningDays: getNumber(db, scope, 'expiry_warning_days', 30),
+        },
+        error: null,
+      });
     }),
   );
 
@@ -130,6 +139,8 @@ export function createAuthRouter(
     res.json({
       data: {
         user: req.user,
+        workspaceId: scope.workspaceId,
+        expiryWarningDays: getNumber(db, scope, 'expiry_warning_days', 30),
         scheduleEditable: mayChangeSchedule(scope),
         whatsappAvailable: scope.workspaceId === whatsappWorkspaceId,
       },

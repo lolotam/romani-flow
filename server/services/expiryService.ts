@@ -8,6 +8,7 @@ import {
   getStringList,
   setSetting,
 } from '../repositories/settings.js';
+import { isWorkspaceSuspended } from '../repositories/workspaces.js';
 import { daysUntil } from '../utils/dates.js';
 import {
   finishEmailAttempt,
@@ -338,18 +339,39 @@ export async function sendExpiryReport(
     for (const item of group.report.employees) items.add('employee:' + item.id);
     for (const item of group.report.documents) items.add('document:' + item.id);
   }
+  let stoppedForSuspension = false;
   for (const group of groups.values()) {
     if (deadline - performance.now() < (options.minimumSendMs ?? 15_000)) {
+      break;
+    }
+    if (isWorkspaceSuspended(db, scope.workspaceId)) {
+      stoppedForSuspension = true;
       break;
     }
     for (const item of group.report.employees) items.add('employee:' + item.id);
     for (const item of group.report.documents) items.add('document:' + item.id);
     const result = await sendReportGroup(db, scope, mailer, triggerSource, group.report, group.to, group.cc, intervals, deadline);
     results.push(result);
-    // Never start another handoff after a transport error or expired wait.
+    // A suspension stops every group that has not left yet. A transport error
+    // still defers the rest, the same way a short deadline does.
+    if (result.skipped === 'workspace_suspended') {
+      stoppedForSuspension = true;
+      break;
+    }
     if (result.error) break;
   }
   const completedGroups = results.length;
+  if (stoppedForSuspension) {
+    const sentAny = results.some(result => result.sent);
+    const recipients = results.flatMap(result => result.recipients);
+    setSetting(db, scope, 'email.last_result', sentAny ? 'partial' : 'skipped: workspace_suspended');
+    return {
+      sent: false,
+      ...(sentAny ? {} : { skipped: 'workspace_suspended' }),
+      recipients,
+      itemCount: items.size,
+    };
+  }
   for (const group of [...groups.values()].slice(completedGroups)) {
     const deferred = { sent: false, error: 'Email group deferred before SMTP handoff.', recipients: [...group.to, ...group.cc], itemCount: group.report.employees.length + group.report.documents.length };
     writeEmailLog(db, scope, { kind: 'expiry_report', recipients: deferred.recipients, subject: expiryReportSubject(group.report), status: 'deferred', error: deferred.error, triggerSource,
@@ -385,6 +407,11 @@ async function sendReportGroup(db: Db, scope: Scope, mailer: Mailer, triggerSour
   });
 
   try {
+    // Suspension can land after the report was assembled. Recheck at the send.
+    if (isWorkspaceSuspended(db, scope.workspaceId)) {
+      finishEmailAttempt(db, scope, logId, { status: 'skipped', error: 'This workspace is suspended.' });
+      return { sent: false, skipped: 'workspace_suspended', recipients: [...targetRecipients, ...targetCc], itemCount };
+    }
     const result = await withinEmailDeadline(mailer.send({
       to: targetRecipients,
       cc: targetCc.length > 0 ? targetCc : undefined,
