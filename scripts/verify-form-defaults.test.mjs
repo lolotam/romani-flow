@@ -102,6 +102,13 @@ test('deleted catalog references are not restored into a new document form',asyn
  const defaults=(await call('/api/form-defaults/documents')).payload.data;
  assert.equal('ministry_id' in defaults,false);assert.equal(defaults.title,'Reference fixture');
 });
+test('a custom ministry choice is remembered for the next document form',async()=>{
+ const type=db.prepare('SELECT id FROM document_types LIMIT 1').get().id;
+ assert.equal((await call('/api/documents',{method:'POST',body:{title:'Custom ministry fixture',document_type_id:type,ministry_id:'other',entity_name:'Fixture custom ministry'}})).status,201);
+ // The sentinel is resolved to a real ministry before the defaults are stored, so the choice survives.
+ const custom=db.prepare("SELECT id FROM ministries WHERE name_ar='Fixture custom ministry'").get();
+ assert.equal((await call('/api/form-defaults/documents')).payload.data.ministry_id,custom.id);
+});
 test('all catalog add request objects are accepted and remembered',async()=>{
  const payloads={companies:{name:'Fixture company',name_ar:'Fixture company AR'},ministries:{name:'Fixture ministry',name_ar:'Fixture ministry AR'},positions:{name:'Fixture position',name_ar:'Fixture position AR',value:'fixture-position'},document_types:{name:'Fixture document type',name_ar:'Fixture document type AR'}};
  for(const [table,body] of Object.entries(payloads)){

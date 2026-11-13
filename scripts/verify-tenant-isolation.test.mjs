@@ -155,6 +155,10 @@ test('the WhatsApp reminder and pairing routes do not exist for B', () => remind
   assert.equal((await asB(f, '/api/whatsapp/recipients', { method: 'POST', body: { label: 'B', phone: '+99900000098' } })).status, 404);
   assert.equal(f.db.prepare("SELECT count(*) n FROM whatsapp_recipients WHERE workspace_id='ws_b'").get().n, 0);
   assert.equal((await f.request('/api/whatsapp/recipients')).status, 200, 'legacy keeps its reminder routes');
+  // Availability is checked before the role: a B viewer gets the same 404, not 403.
+  f.db.prepare("INSERT INTO admin_users(workspace_id,id,email,name,role,password_hash,created_at,updated_at) VALUES('ws_b','viewer-b','viewer-b@example.invalid','Synthetic B viewer','viewer','not-a-login-fixture','2026-01-01','2026-01-01')").run();
+  const viewer = await f.request('/api/whatsapp/recipients', { role: 'viewer', user: 'viewer-b' });
+  assert.equal(viewer.status, 404); assert.equal(viewer.json.error.code, 'whatsapp_unavailable');
 }));
 
 test("B saves its own settings without touching legacy's, and cannot set WhatsApp keys", () => reminderApi(async f => {

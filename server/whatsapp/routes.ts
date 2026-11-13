@@ -30,7 +30,7 @@ export function createPairingRouter(config: PairingConfig, env: NodeEnv, reminde
   let lastDisconnectAt = 0;
   const pendingPairingUntil = () => getNumber(reminders.db, PLATFORM, PENDING_PAIRING_KEY, 0);
   const setPendingPairingUntil = (until: number) => setSetting(reminders.db, PLATFORM, PENDING_PAIRING_KEY, until);
-  router.use(requireAdmin, requireReminderWorkspace(reminders), (_req, res, next) => {
+  router.use(requireReminderWorkspace(reminders), requireAdmin, (_req, res, next) => {
     res.setHeader('Cache-Control', 'no-store');
     res.setHeader('Referrer-Policy', 'no-referrer');
     next();

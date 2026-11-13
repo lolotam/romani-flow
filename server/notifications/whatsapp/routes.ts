@@ -32,7 +32,9 @@ export function requireReminderWorkspace(reminders: WhatsAppReminders): RequestH
 
 export function createReminderRouter(reminders: WhatsAppReminders, env: NodeEnv): Router {
   const router = Router(), db = reminders.db;
-  router.use(requireAdmin, requireReminderWorkspace(reminders), (req, res, next) => {
+  // Availability is decided before the role, so every role in a workspace without the
+  // instance gets the same 404 whatsapp_unavailable.
+  router.use(requireReminderWorkspace(reminders), requireAdmin, (req, res, next) => {
     res.setHeader('Cache-Control', 'no-store');
     if (['x-project', 'x-project-id', 'x-instance', 'x-instance-name'].some(name => req.get(name)) ||
         ['instance', 'instanceName', 'project', 'url', 'apikey'].some(name => name in req.query)) {

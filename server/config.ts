@@ -39,7 +39,9 @@ export interface AppConfig {
   platformAdminEmails: string[];
   /**
    * The address that may claim the legacy workspace after the Clerk switch.
-   * Optional: without it the legacy workspace simply stays unclaimed.
+   * Required in Clerk mode until the legacy workspace is claimed: while it is
+   * unset, a new organization gets 503 legacy_claim_pending instead of a new
+   * workspace, so the legacy data can never be taken by the wrong owner.
    */
   legacyClaimEmail: string | null;
   smtp: SmtpConfig;
