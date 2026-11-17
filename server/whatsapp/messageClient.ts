@@ -20,7 +20,7 @@ export class MessageClient implements WhatsAppTransport {
     if (normalizeWhatsAppPhone(phone) !== phone) return { kind: 'permanent_failed', code: 'invalid_number' };
     if (!isValidReminderText(text)) return { kind: 'permanent_failed', code: 'invalid_text' };
     try {
-      const response = await fetch(`${origin}/message/sendText/romani`, {
+      const response = await fetch(`${origin}/message/sendText/${encodeURIComponent(this.config.instance)}`, {
         method: 'POST', headers: { apikey: this.config.apiKey, 'content-type': 'application/json' },
         body: JSON.stringify({ number: phone.slice(1), text, linkPreview: false }),
         redirect: 'error', signal: AbortSignal.timeout(15_000),

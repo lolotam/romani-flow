@@ -22,7 +22,6 @@ import {
   useSidebar,
 } from "@/components/ui/sidebar";
 import { Button } from "@/components/ui/button";
-import { UserButton } from '@clerk/react';
 import { useAuth } from "@/hooks/useAuth";
 import { useLanguage } from "@/contexts/LanguageContext";
 import { ThemeToggle } from "@/components/ThemeToggle";
@@ -101,20 +100,14 @@ export function AppSidebar() {
         {/* Footer */}
         <div className="mt-auto p-2 border-t border-[hsl(var(--sidebar-border))] space-y-1">
           <ThemeToggle collapsed={collapsed} />
-          {provider === 'clerk' ? (
-            <div className={`flex py-2 ${collapsed ? 'justify-center' : 'px-3'}`}>
-              <UserButton />
-            </div>
-          ) : (
-            <Button
-              variant="ghost"
-              onClick={logout}
-              className={`w-full flex items-center gap-2 ${collapsed ? "px-2 justify-center" : "px-3 justify-start"} py-3 text-red-300 hover:bg-red-500/20 hover:text-red-200 transition-colors`}
-            >
-              <LogOut className="h-5 w-5" />
-              {!collapsed && <span>{t('nav.logout')}</span>}
-            </Button>
-          )}
+          <Button
+            variant="ghost"
+            onClick={logout}
+            className={`w-full flex items-center gap-2 ${collapsed ? "px-2 justify-center" : "px-3 justify-start"} py-3 text-red-300 hover:bg-red-500/20 hover:text-red-200 transition-colors`}
+          >
+            <LogOut className="h-5 w-5" />
+            {!collapsed && <span>{t('nav.logout')}</span>}
+          </Button>
         </div>
       </SidebarContent>
     </Sidebar>

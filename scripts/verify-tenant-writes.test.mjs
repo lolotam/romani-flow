@@ -11,7 +11,7 @@ import { addWorkspaceB, asB, B, LEG, plantLegacyFiles } from './fixtures/workspa
  * someone decides how B is kept out of it.
  */
 
-const WRITE_SOURCES = ['app.ts', ...fs.readdirSync('server/routes').map(file => 'routes/' + file), 'whatsapp/routes.ts', 'notifications/whatsapp/routes.ts', 'auth/webhook.ts'];
+const WRITE_SOURCES = ['app.ts', ...fs.readdirSync('server/routes').map(file => 'routes/' + file), 'whatsapp/routes.ts', 'notifications/whatsapp/routes.ts'];
 
 function writeHandlers() {
   const handlers = [];
@@ -25,6 +25,7 @@ function writeHandlers() {
 }
 
 const NO_FOREIGN_ROWS = {
+  'routes/auth.ts POST /register': 'Creates an isolated workspace for a new user; no foreign rows touched.',
   'routes/auth.ts POST /login': 'Signs in; the account row yields the workspace.',
   'routes/auth.ts POST /logout': 'Clears the caller\'s own session.',
   'app.ts PUT /api/cron/schedule': 'Platform gate proved in verify-tenant-isolation.',
@@ -33,9 +34,10 @@ const NO_FOREIGN_ROWS = {
   'routes/documentExtraction.ts POST /': 'The body carries the caller\'s images only, never a row id.',
   'routes/email.ts POST /test': 'Sends a test message to an address the caller types; no row id.',
   'routes/email.ts POST /expiry-report': 'Reports the caller\'s workspace only; the tick test proves the per-workspace report.',
+  'routes/email.ts PUT /smtp': 'Saves custom SMTP for caller workspace only; proved in verify-tenant-isolation.',
+  'routes/email.ts DELETE /smtp': 'Deletes custom SMTP for caller workspace only; proved in verify-tenant-isolation.',
   'routes/files.ts POST /upload': 'Stages new files into the caller\'s workspace; no row id.',
   'whatsapp/routes.ts POST /': 'Provider webhook without a session; carries no tenant rows.',
-  'auth/webhook.ts POST /': 'Verified Clerk synchronization is covered by signature, replay and suspension tests in verify-clerk-auth.',
   'notifications/whatsapp/routes.ts POST /recipients': 'Refused for B in verify-tenant-isolation.',
 };
 
@@ -65,11 +67,11 @@ function attempts(ids) {
     { covers: 'routes/documentDrafts.ts PUT|DELETE /:scope', method: 'DELETE', url: '/api/document-drafts/new', body: { revision: draft.revision }, status: 409, code: 'draft_workspace_mismatch', draftHeader: true, draftWorkspace: 'ws_legacy' },
     { covers: 'routes/documentDrafts.ts PUT|DELETE /:scope', method: 'PUT', url: `/api/document-drafts/employee:${employee}`, body: { revision: 'none', values: {} }, status: 404, draftHeader: true },
     { covers: 'routes/email.ts POST /send-documents', method: 'POST', url: '/api/email/send-documents', body: { document_ids: [doc], to: ['tenant-b@example.invalid'] }, status: 409, code: 'missing_files' },
-    { covers: 'notifications/whatsapp/routes.ts PATCH /recipients/:id', method: 'PATCH', url: '/api/whatsapp/recipients/synthetic', body: { label: 'B' }, status: 404, code: 'whatsapp_unavailable' },
-    { covers: 'notifications/whatsapp/routes.ts DELETE /recipients/:id', method: 'DELETE', url: '/api/whatsapp/recipients/synthetic', status: 404, code: 'whatsapp_unavailable' },
-    { covers: 'notifications/whatsapp/routes.ts POST /jobs/:id/retry', method: 'POST', url: '/api/whatsapp/jobs/synthetic/retry', body: {}, status: 404, code: 'whatsapp_unavailable' },
-    { covers: 'whatsapp/routes.ts POST /connect', method: 'POST', url: '/api/whatsapp/connect', body: {}, status: 404, code: 'whatsapp_unavailable' },
-    { covers: 'whatsapp/routes.ts POST /disconnect', method: 'POST', url: '/api/whatsapp/disconnect', body: {}, status: 404, code: 'whatsapp_unavailable' },
+    { covers: 'notifications/whatsapp/routes.ts PATCH /recipients/:id', method: 'PATCH', url: '/api/whatsapp/recipients/synthetic', body: { label: 'B' }, status: 404, code: 'not_found' },
+    { covers: 'notifications/whatsapp/routes.ts DELETE /recipients/:id', method: 'DELETE', url: '/api/whatsapp/recipients/synthetic', status: 404, code: 'not_found' },
+    { covers: 'notifications/whatsapp/routes.ts POST /jobs/:id/retry', method: 'POST', url: '/api/whatsapp/jobs/synthetic/retry', body: {}, status: 404, code: 'not_found' },
+    { covers: 'whatsapp/routes.ts POST /connect', method: 'POST', url: '/api/whatsapp/connect', body: {}, status: 503, code: 'whatsapp_not_configured' },
+    { covers: 'whatsapp/routes.ts POST /disconnect', method: 'POST', url: '/api/whatsapp/disconnect', body: {}, status: 503, code: 'whatsapp_not_configured' },
   ];
 }
 

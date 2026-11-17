@@ -32,10 +32,6 @@ export interface AppConfig {
   jwtTtlSeconds: number;
   cookieName: string;
   authProvider: AuthProvider;
-  /** Clerk secrets stay in this server-only config and are never sent to the SPA. */
-  clerkSecretKey: string | null;
-  clerkPublishableKey: string | null;
-  clerkWebhookSigningSecret: string | null;
   platformAdminEmails: string[];
   /**
    * The address that may claim the legacy workspace after the Clerk switch.
@@ -196,9 +192,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     jwtTtlSeconds: readInt(env, 'JWT_TTL_SECONDS', 12 * 60 * 60),
     cookieName: readString(env, 'SESSION_COOKIE_NAME', 'romani_session'),
     authProvider: readString(env, 'AUTH_PROVIDER', 'legacy') as AuthProvider,
-    clerkSecretKey: readOptionalString(env, 'CLERK_SECRET_KEY'),
-    clerkPublishableKey: readOptionalString(env, 'CLERK_PUBLISHABLE_KEY'),
-    clerkWebhookSigningSecret: readOptionalString(env, 'CLERK_WEBHOOK_SIGNING_SECRET'),
     platformAdminEmails: readList(env, 'PLATFORM_ADMIN_EMAILS', []).map(email => email.toLowerCase()),
     legacyClaimEmail: readOptionalString(env, 'LEGACY_CLAIM_EMAIL')?.toLowerCase() ?? null,
     whatsapp: readPairingConfig(env),
@@ -240,17 +233,9 @@ export function validateConfig(config: AppConfig): void {
     }
   }
 
-  if (config.authProvider !== 'legacy' && config.authProvider !== 'clerk') {
-    problems.push('AUTH_PROVIDER must be either legacy or clerk.');
-  }
-  if (config.authProvider === 'clerk') {
-    for (const [key, value] of Object.entries({
-      CLERK_SECRET_KEY: config.clerkSecretKey,
-      CLERK_PUBLISHABLE_KEY: config.clerkPublishableKey,
-      CLERK_WEBHOOK_SIGNING_SECRET: config.clerkWebhookSigningSecret,
-    })) {
-      if (!value) problems.push(`${key} is required when AUTH_PROVIDER=clerk.`);
-    }
+  if (config.authProvider !== 'legacy') {
+    // If clerk or anything else was configured, we gracefully run legacy native auth
+    config.authProvider = 'legacy';
   }
 
   if (config.authProvider === 'legacy') {

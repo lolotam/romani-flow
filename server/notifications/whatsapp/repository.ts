@@ -136,7 +136,10 @@ export class ReminderStore {
 
   retry(id: string): void {
     const job = this.db.prepare('SELECT state,error_code,text,recipient FROM whatsapp_jobs WHERE id=? AND workspace_id=? AND instance=?').get(id, this.ws, this.instance);
-    if (job && (!isValidReminderText(job.text) || normalizeWhatsAppPhone(job.recipient) !== job.recipient)) {
+    if (!job) {
+      throw new RepositoryError('Job not found.', 'not_found', 404);
+    }
+    if (!isValidReminderText(job.text) || normalizeWhatsAppPhone(job.recipient) !== job.recipient) {
       throw new RepositoryError('Correct the reminder text or destination before retrying.', 'invalid_retry', 409);
     }
     if (job?.state === 'permanent_failed' && isManualRetryFailure(job.error_code) &&

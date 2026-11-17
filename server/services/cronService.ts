@@ -57,7 +57,8 @@ function combine(results: CronResult[]): CronResult {
 export class CronService {
   private task: ScheduledTask | null = null;
   private inFlight = false;
-  private reminderEnqueue: { scope: Scope; action: () => Promise<unknown> } | null = null;
+  private readonly reminderEnqueues = new Map<string, { scope: Scope; action: () => Promise<unknown> }>();
+  private reminderEnqueueResolver?: (scope: Scope) => (() => Promise<unknown>) | undefined;
   private readonly activeRuns = new Set<Promise<CronResult>>();
   private closing = false;
 
@@ -67,19 +68,32 @@ export class CronService {
   ) {}
 
   /**
-   * The WhatsApp selection of the workspace that owns the instance. It only runs
-   * when that workspace enabled its scheduled reminders: another workspace
-   * enabling its own report must never select or queue messages here.
+   * Register reminder selection for a workspace. It only runs
+   * when that workspace enabled its scheduled reminders.
    */
-  setReminderEnqueue(scope: Scope, action: () => Promise<unknown>): void { this.reminderEnqueue = { scope, action }; }
+  setReminderEnqueue(scope: Scope, action: () => Promise<unknown>): void {
+    this.reminderEnqueues.set(scope.workspaceId, { scope, action });
+  }
+
+  setReminderEnqueueResolver(resolver: (scope: Scope) => (() => Promise<unknown>) | undefined): void {
+    this.reminderEnqueueResolver = resolver;
+  }
 
   private async enqueueReminders(source: 'cron' | 'manual'): Promise<void> {
-    if (source !== 'cron' || !this.reminderEnqueue) return;
-    if (!getBoolean(this.db, this.reminderEnqueue.scope, 'cron.enabled')) return;
-    // A suspended workspace keeps its data but sends nothing.
-    if (isWorkspaceSuspended(this.db, this.reminderEnqueue.scope.workspaceId)) return;
-    try { await this.reminderEnqueue.action(); }
-    catch { console.error('[whatsapp] scheduled selection failed; details suppressed'); }
+    if (source !== 'cron') return;
+    const scopes = listWorkspaceIds(this.db).map(workspaceId => ({ workspaceId }));
+    for (const scope of scopes) {
+      if (!getBoolean(this.db, scope, 'cron.enabled')) continue;
+      // A suspended workspace keeps its data but sends nothing.
+      if (isWorkspaceSuspended(this.db, scope.workspaceId)) continue;
+      const action = this.reminderEnqueueResolver?.(scope) ?? this.reminderEnqueues.get(scope.workspaceId)?.action;
+      if (!action) continue;
+      try {
+        await action();
+      } catch {
+        console.error(`[whatsapp] scheduled selection failed for workspace ${scope.workspaceId}; details suppressed`);
+      }
+    }
   }
 
   /** The active workspaces whose administrators turned the scheduled report on. */

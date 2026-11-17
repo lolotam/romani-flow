@@ -73,12 +73,6 @@ const ALLOWED = [
     reason: 'Re-reads the role of the authenticated account itself.' },
   { file: 'server/index.ts', statement: 'SELECT COUNT(*) AS total FROM admin_users',
     reason: 'Boot-time bootstrap check for whether any account exists; no request context.' },
-  { file: 'server/auth/webhook.ts', statement: 'DELETE FROM document_drafts WHERE user_id = ?',
-    reason: 'user.deleted restores the pre-011 cascade: a Clerk user is a platform identity, so their drafts are removed in every workspace.' },
-  { file: 'server/auth/webhook.ts', statement: 'DELETE FROM form_defaults WHERE user_id = ?',
-    reason: 'user.deleted restores the pre-011 cascade: form defaults belonged to the deleted platform user in every workspace.' },
-  { file: 'server/auth/webhook.ts', statement: 'UPDATE pending_uploads SET draft_user_id = NULL WHERE draft_user_id = ?',
-    reason: 'user.deleted restores the pre-011 ON DELETE SET NULL so a staged upload survives without a deleted draft owner.' },
 ];
 
 function* sourceFiles(dir) {

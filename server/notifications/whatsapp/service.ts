@@ -8,22 +8,50 @@ import { atomic, ReminderStore } from './repository.js';
 import { selectReminders } from './selection.js';
 import { changedDestinations, snapshotDestinations, type DestinationSnapshot } from './destinations.js';
 
+import { getWorkspaceInstance } from '../../whatsapp/instance.js';
+
 export class WhatsAppReminders {
-  /** D9: the one WhatsApp instance belongs to the legacy workspace until P4 adds one per workspace. */
-  readonly scope: Scope = { workspaceId: LEGACY_WORKSPACE_ID };
+  readonly scope: Scope;
   readonly coordinator = new NotificationCoordinator();
   readonly store: ReminderStore;
   readonly auditInstance: string;
   private timer: ReturnType<typeof setInterval> | null = null;
   private draining: Promise<number> | null = null;
   private stopped = false;
+  private started = false;
   private beforeDestinations: DestinationSnapshot | null = null;
+  private readonly workspaceRuntimes = new Map<string, WhatsAppReminders>();
 
-  constructor(readonly db: Db, readonly instance: string, private readonly transport: WhatsAppTransport,
-    readonly clock: () => Date = () => new Date()) {
+  constructor(
+    readonly db: Db,
+    readonly instance: string,
+    readonly transport: WhatsAppTransport,
+    readonly clock: () => Date = () => new Date(),
+    scope: Scope = { workspaceId: LEGACY_WORKSPACE_ID },
+    readonly transportFactory?: (instance: string, scope?: Scope) => WhatsAppTransport,
+  ) {
+    this.scope = scope;
     this.store = new ReminderStore(db, this.scope, instance, clock);
     // Invalid sending configuration must not hide this backend's existing audit.
     this.auditInstance = instance || 'romani';
+  }
+
+  forWorkspace(scope: Scope, instance?: string, transport?: WhatsAppTransport): WhatsAppReminders {
+    const inst = instance ?? this.instance;
+    if (scope.workspaceId === this.scope.workspaceId && inst === this.instance) {
+      return this;
+    }
+    const key = `${scope.workspaceId}:${inst}`;
+    let runtime = this.workspaceRuntimes.get(key);
+    if (!runtime) {
+      const childTransport = transport ?? (this.transportFactory ? this.transportFactory(inst, scope) : this.transport);
+      runtime = new WhatsAppReminders(this.db, inst, childTransport, this.clock, scope, this.transportFactory);
+      this.workspaceRuntimes.set(key, runtime);
+      if (this.started) {
+        runtime.start();
+      }
+    }
+    return runtime;
   }
 
   /** Call inside the business write's transaction and the shared coordinator. */
@@ -71,44 +99,45 @@ export class WhatsAppReminders {
     await this.mutate(() => { this.reconcile(); this.store.retry(id); });
   }
 
+  async retryForWorkspace(scope: Scope, id: string): Promise<void> {
+    await this.mutate(() => {
+      const job = this.db.prepare(
+        'SELECT id, workspace_id, instance, state, error_code, text, recipient FROM whatsapp_jobs WHERE id = ? AND workspace_id = ? AND instance = ?',
+      ).get(id, scope.workspaceId, this.instance);
+      if (!job) {
+        throw new RepositoryError('Job not found.', 'not_found', 404);
+      }
+      this.reconcile();
+      this.store.retry(id);
+    });
+  }
+
   async setEnabled(enabled: boolean): Promise<void> {
     await this.saveSettings(this.scope, { 'whatsapp.enabled': enabled });
   }
 
   /**
    * Saves settings under the shared coordinator.
-   *
-   * The optional beforeWrite assertion is the last authority a caller may
-   * prove before its settings reach the database. It runs inside the acquired
-   * coordinator callback, after every await — including the enable check of
-   * the transport — and directly before the settings are applied, so nothing
-   * can change between the assertion and the write. A caller that omits the
-   * callback keeps its former behaviour, and a callback that throws refuses
-   * the whole write before a single setting, notification or job changes.
-   *
-   * Workspace keys are written for `scope`; a platform key (the schedule) is
-   * written once for the platform. Only the reminder workspace has WhatsApp.
    */
   async saveSettings(
     scope: Scope,
     settings: Record<string, SettingValue>,
     beforeWrite?: () => void,
   ): Promise<void> {
-    if (scope.workspaceId !== this.scope.workspaceId && Object.keys(settings).some(key => key.startsWith('whatsapp.'))) {
-      throw new RepositoryError('WhatsApp reminders are not available for this workspace.', 'whatsapp_unavailable', 403);
-    }
     await this.aroundWrite(async () => {
-      if (settings['whatsapp.enabled'] === true && !getBoolean(this.db, this.scope, 'whatsapp.enabled')) await this.assertCanEnable();
+      if (settings['whatsapp.enabled'] === true && !getBoolean(this.db, scope, 'whatsapp.enabled')) await this.assertCanEnable();
       beforeWrite?.();
       this.applySettings(scope, settings);
     });
   }
 
-  /** Disable and disconnect share one lock; queued enables must observe the resulting connection state. */
-  withSendingDisabled<T>(disconnect: () => Promise<T>): Promise<T> {
+  /** Disable and disconnect share one lock; disconnect happens first so failures do not mutate settings. */
+  withSendingDisabled<T>(disconnect: () => Promise<T>, targetScope?: Scope): Promise<T> {
+    const scope = targetScope ?? this.scope;
     return this.aroundWrite(async () => {
-      this.applySettings(this.scope, { 'whatsapp.enabled': false });
-      return disconnect();
+      const result = await disconnect();
+      this.applySettings(scope, { 'whatsapp.enabled': false });
+      return result;
     });
   }
 
@@ -162,19 +191,45 @@ export class WhatsAppReminders {
   }
 
   start(): void {
-    if (this.timer || !this.instance) return;
+    if (this.started) return;
+    this.started = true;
     this.stopped = false;
-    this.store.recover();
-    this.timer = setInterval(() => {
-      void this.drain().catch(() => console.error('[whatsapp] worker failed; details suppressed'));
-    }, 60_000);
-    this.timer.unref();
+    if (this.instance) {
+      this.store.recover();
+      this.timer = setInterval(() => {
+        void this.drain().catch(() => console.error('[whatsapp] worker failed; details suppressed'));
+      }, 60_000);
+      this.timer.unref();
+    }
+
+    for (const child of this.workspaceRuntimes.values()) {
+      child.start();
+    }
+
+    if (this.scope.workspaceId === LEGACY_WORKSPACE_ID) {
+      try {
+        const rows = this.db.prepare('SELECT id FROM workspaces WHERE id != ?').all(LEGACY_WORKSPACE_ID) as { id: string }[];
+        for (const row of rows) {
+          const inst = getWorkspaceInstance(this.db, row.id, '');
+          const runtime = this.forWorkspace({ workspaceId: row.id }, inst);
+          runtime.start();
+        }
+      } catch {
+        // Ignored if table not initialized in unit tests
+      }
+    }
   }
 
   async stop(): Promise<void> {
+    this.started = false;
     this.stopped = true;
     if (this.timer) clearInterval(this.timer);
     this.timer = null;
-    await this.draining;
+    const stops: (Promise<number> | Promise<void>)[] = [];
+    if (this.draining) stops.push(this.draining);
+    for (const child of this.workspaceRuntimes.values()) {
+      stops.push(child.stop());
+    }
+    await Promise.all(stops);
   }
 }

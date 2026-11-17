@@ -13,6 +13,8 @@ import type { CandidateValidation } from '../extraction/candidates.js';
 import { NOTIFICATION_INTERVALS } from '../services/intervals.js';
 import { mayChangeSchedule, type CronService } from '../services/cronService.js';
 import type { WhatsAppReminders } from '../notifications/whatsapp/service.js';
+import type { Mailer } from '../services/mailer.js';
+import { getWorkspaceInstance } from '../whatsapp/instance.js';
 
 /**
  * Settings endpoints.
@@ -229,12 +231,9 @@ async function validateExtractionSelection(
  * the platform dashboard exists (the caller drops an unchanged schedule first).
  * WhatsApp settings exist only for the workspace that owns the instance (D9).
  */
-function workspaceRestriction(workspaceId: string, reminderWorkspaceId: string, key: string): string | null {
+function workspaceRestriction(workspaceId: string, _reminderWorkspaceId: string, key: string): string | null {
   if (key === 'cron.schedule' && !mayChangeSchedule({ workspaceId })) {
     return 'The reminder schedule is managed by the platform.';
-  }
-  if (key.startsWith('whatsapp.') && workspaceId !== reminderWorkspaceId) {
-    return 'WhatsApp reminders are not available for this workspace.';
   }
   return null;
 }
@@ -252,16 +251,18 @@ export function createSettingsRouter(
   cron: CronService,
   reminders: WhatsAppReminders,
   extraction: ExtractionService,
+  mailer?: Mailer,
 ): Router {
   const router = Router();
 
   // The settings reveal the relay of the workspace, so only an owner reads them.
   router.get('/', requireAdmin, (req, res) => {
+    const scope = tenantOf(req);
     res.json({
       data: {
-        settings: readAllSettings(db, tenantOf(req)),
+        settings: readAllSettings(db, scope),
         smtp: {
-          configured: Boolean(config.smtp.host && config.smtp.user && config.smtp.pass),
+          configured: mailer ? mailer.isConfigured(scope) : Boolean(config.smtp.host && config.smtp.user && config.smtp.pass),
         },
       },
       error: null,
@@ -389,7 +390,9 @@ export function createSettingsRouter(
         : undefined;
 
       try {
-        await reminders.saveSettings(scope, accepted, beforeWrite);
+        const inst = getWorkspaceInstance(db, scope.workspaceId, reminders.instance);
+        const tenantReminders = reminders.forWorkspace(scope, inst);
+        await tenantReminders.saveSettings(scope, accepted, beforeWrite);
       } catch (error) {
         if (!(error instanceof SettingsWriteRefused)) throw error;
         res.status(400).json({

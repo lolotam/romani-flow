@@ -418,7 +418,7 @@ async function sendReportGroup(db: Db, scope: Scope, mailer: Mailer, triggerSour
       subject,
       text: expiryReportText(finalReport),
       html: expiryReportHtml(finalReport),
-    }), deadline - performance.now());
+    }, scope), deadline - performance.now());
 
     // Only the recipients that accepted the message are marked as notified, so a
     // rejected recipient is retried on its own while the others are not.

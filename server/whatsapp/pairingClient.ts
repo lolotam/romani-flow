@@ -88,7 +88,29 @@ export class PairingClient {
     throw new PairingError('invalid_provider_response', 502);
   }
 
+  async ensureProvisioned(): Promise<void> {
+    if (pairingConfiguration(this.config) !== 'valid') return;
+    const url = `${this.config.url.replace(/\/+$/, '')}/instance/create`;
+    try {
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: { apikey: this.config.apiKey, 'content-type': 'application/json' },
+        body: JSON.stringify({
+          instanceName: this.config.instance,
+          token: this.config.webhookSecret,
+          qrcode: true,
+        }),
+        redirect: 'error',
+        signal: AbortSignal.timeout(10_000),
+      });
+      await response.body?.cancel();
+    } catch {
+      // Best effort instance provisioning
+    }
+  }
+
   async connect(): Promise<PairingResult> {
+    await this.ensureProvisioned();
     const status = await this.status();
     if (!status.configured) throw new PairingError('whatsapp_not_configured');
     if (status.state === 'connected') return status;

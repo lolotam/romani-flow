@@ -68,8 +68,22 @@ export async function createAdmin(
   db: Db,
   input: { email: string; name: string; password: string; role?: string; workspaceId: string },
 ): Promise<AdminUser> {
+  const hash = await hashPassword(input.password);
+  return createAdminWithHash(db, {
+    email: input.email,
+    name: input.name,
+    passwordHash: hash,
+    role: input.role,
+    workspaceId: input.workspaceId,
+  });
+}
+
+export function createAdminWithHash(
+  db: Db,
+  input: { id?: string; email: string; name: string; passwordHash: string; role?: string; workspaceId: string },
+): AdminUser {
   const now = new Date().toISOString();
-  const id = createId();
+  const id = input.id ?? createId();
 
   db.prepare(
     `INSERT INTO admin_users (id, email, name, password_hash, role, workspace_id, is_active, last_login_at, created_at, updated_at)
@@ -78,7 +92,7 @@ export async function createAdmin(
     id,
     normalizeEmail(input.email),
     input.name,
-    await hashPassword(input.password),
+    input.passwordHash,
     input.role ?? 'admin',
     input.workspaceId,
     now,

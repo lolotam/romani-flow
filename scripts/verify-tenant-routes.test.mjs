@@ -18,7 +18,6 @@ const NO_TENANT_DATA = {
   '/api/auth': 'Sign-in and the caller\'s own identity; the account row yields the workspace.',
   '/api/health': 'Liveness and database reachability only.',
   '/api/whatsapp/webhook': 'Provider callback without a session; it carries no tenant rows.',
-  '/api/webhooks/clerk': 'Verified identity and organization synchronization; never returns tenant rows.',
   '/api/platform/me': 'Returns only the caller\'s platform-admin boolean, never tenant data.',
   '/api/cron/schedule': 'A write; its platform gate is proved in verify-tenant-isolation.',
   '/api/documents/:id/file': 'A write; the record is looked up through the caller\'s scope first.',
@@ -42,7 +41,7 @@ const PROBES = {
   '/api/document-drafts': () => [['/api/document-drafts/new', 200, { 'x-draft-account': 'admin-b' }]],
   // catalog, candidates and models list a provider's models over the network; they read no tenant rows.
   '/api/document-extraction': () => ['/api/document-extraction/status'],
-  '/api/whatsapp': () => [['/api/whatsapp/recipients', 404], ['/api/whatsapp/log', 404], ['/api/whatsapp/status', 404]],
+  '/api/whatsapp': () => ['/api/whatsapp/recipients', '/api/whatsapp/log', ['/api/whatsapp/status', 503]],
 };
 
 const LEGACY_MARKER = 'legacy-only@example.invalid';

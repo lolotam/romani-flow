@@ -11,39 +11,82 @@ import { Eye, EyeOff, Shield, Stethoscope } from 'lucide-react';
 import { ThemeToggle } from '@/components/ThemeToggle';
 import { LanguageToggle } from '@/components/ui/LanguageToggle';
 import { useLanguage } from '@/contexts/LanguageContext';
+import { request } from '@/lib/api/http';
 
-export default function Login() {
+interface LoginProps {
+  initialMode?: 'login' | 'register';
+}
+
+export default function Login({ initialMode = 'login' }: LoginProps) {
+  const [isRegister, setIsRegister] = useState(initialMode === 'register');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [name, setName] = useState('');
+  const [workspaceName, setWorkspaceName] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const { login } = useAuth();
   const { toast } = useToast();
   const navigate = useNavigate();
-  const { t } = useLanguage();
+  const { t, language } = useLanguage();
+  const arabic = language === 'ar';
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsLoading(true);
 
     try {
-      const result = await login(email, password);
-      if (result.success) {
-        toast({
-          title: t('login.success'),
-          description: "مرحباً بك في نظام Romani CureMed",
+      if (isRegister) {
+        const { data, error } = await request<{ success: boolean; message?: string }>('/api/auth/register', {
+          method: 'POST',
+          body: {
+            email: email.trim(),
+            password,
+            name: name.trim() || undefined,
+            workspaceName: workspaceName.trim() || undefined,
+          },
         });
-        navigate('/dashboard');
+
+        if (error) {
+          toast({
+            title: arabic ? "خطأ في إنشاء الحساب" : "Registration Error",
+            description: error.message,
+            variant: "destructive",
+          });
+          return;
+        }
+
+        toast({
+          title: arabic ? "تم إنشاء الحساب بنجاح" : "Account Created",
+          description: arabic ? "جاري تسجيل الدخول..." : "Logging in...",
+        });
+
+        // Automatically log in after registration
+        const loginRes = await login(email.trim(), password);
+        if (loginRes.success) {
+          navigate('/dashboard');
+        } else {
+          setIsRegister(false);
+        }
       } else {
-        toast({
-          title: "خطأ في تسجيل الدخول",
-          description: result.error || t('login.error'),
-          variant: "destructive",
-        });
+        const result = await login(email.trim(), password);
+        if (result.success) {
+          toast({
+            title: t('login.success'),
+            description: "مرحباً بك في نظام Romani CureMed",
+          });
+          navigate('/dashboard');
+        } else {
+          toast({
+            title: "خطأ في تسجيل الدخول",
+            description: result.error || t('login.error'),
+            variant: "destructive",
+          });
+        }
       }
-    } catch (error) {
+    } catch {
       toast({
-        title: "خطأ في تسجيل الدخول",
+        title: "خطأ",
         description: "حدث خطأ غير متوقع",
         variant: "destructive",
       });
@@ -65,7 +108,6 @@ export default function Login() {
         <LanguageToggle />
       </div>
 
-      {/* Login stays visible even when animation frames are delayed or suspended. */}
       <motion.div
         initial={false}
         animate={{ opacity: 1, y: 0 }}
@@ -91,19 +133,50 @@ export default function Login() {
                 Romani CureMed
               </CardTitle>
               <CardDescription className="text-muted-foreground mt-2">
-                نظام إدارة الوثائق الطبية المتقدم
+                {isRegister
+                  ? (arabic ? 'إنشاء حساب جديد ومساحة عمل مستقلة' : 'Create new account & private workspace')
+                  : (arabic ? 'نظام إدارة الوثائق الطبية المتقدم' : 'Advanced Medical Document Management')}
               </CardDescription>
             </div>
           </CardHeader>
 
           <CardContent>
-            <form onSubmit={handleSubmit} className="space-y-6">
-              <motion.div
-                initial={false}
-                animate={{ opacity: 1, x: 0 }}
-                transition={{ delay: 0.3 }}
-                className="space-y-2"
-              >
+            <form onSubmit={handleSubmit} className="space-y-4">
+              {isRegister && (
+                <>
+                  <div className="space-y-2">
+                    <Label htmlFor="name" className="text-start block">
+                      {arabic ? 'الاسم' : 'Full Name'}
+                    </Label>
+                    <Input
+                      id="name"
+                      type="text"
+                      value={name}
+                      onChange={(e) => setName(e.target.value)}
+                      className="text-start neomorphism-inset"
+                      placeholder={arabic ? 'د. وليد' : 'Dr. Waleed'}
+                      required
+                    />
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="workspaceName" className="text-start block">
+                      {arabic ? 'اسم مساحة العمل / الشركة' : 'Company / Workspace Name'}
+                    </Label>
+                    <Input
+                      id="workspaceName"
+                      type="text"
+                      value={workspaceName}
+                      onChange={(e) => setWorkspaceName(e.target.value)}
+                      className="text-start neomorphism-inset"
+                      placeholder={arabic ? 'مساحة عمل كيور ميد' : 'CureMed Workspace'}
+                      required
+                    />
+                  </div>
+                </>
+              )}
+
+              <div className="space-y-2">
                 <Label htmlFor="email" className="text-start block">
                   {t('login.email')}
                 </Label>
@@ -112,18 +185,13 @@ export default function Login() {
                   type="email"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
-                  className="text-start neomorphism-inset transition-all duration-300 focus:shadow-glow"
+                  className="text-start neomorphism-inset"
                   placeholder="admin@example.com"
                   required
                 />
-              </motion.div>
+              </div>
 
-              <motion.div
-                initial={false}
-                animate={{ opacity: 1, x: 0 }}
-                transition={{ delay: 0.4 }}
-                className="space-y-2"
-              >
+              <div className="space-y-2">
                 <Label htmlFor="password" className="text-start block">
                   {t('login.password')}
                 </Label>
@@ -133,7 +201,7 @@ export default function Login() {
                     type={showPassword ? "text" : "password"}
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
-                    className="text-start neomorphism-inset transition-all duration-300 focus:shadow-glow pl-10"
+                    className="text-start neomorphism-inset pl-10"
                     placeholder="••••••••"
                     required
                   />
@@ -151,31 +219,37 @@ export default function Login() {
                     )}
                   </Button>
                 </div>
-              </motion.div>
+              </div>
 
-              <motion.div
-                initial={false}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: 0.5 }}
+              <Button
+                type="submit"
+                className="w-full bg-gradient-primary hover:opacity-90 text-primary-foreground shadow-elegant hover:shadow-glow transition-all duration-300 mt-2"
+                disabled={isLoading}
               >
+                {isLoading
+                  ? (arabic ? 'جارٍ المعالجة...' : 'Processing...')
+                  : isRegister
+                  ? (arabic ? 'إنشاء الحساب ومساحة العمل' : 'Create Account & Workspace')
+                  : t('login.loginButton')}
+              </Button>
+
+              <div className="text-center pt-2">
                 <Button
-                  type="submit"
-                  className="w-full bg-gradient-primary hover:opacity-90 text-primary-foreground shadow-elegant hover:shadow-glow transition-all duration-300 transform hover:scale-105"
-                  disabled={isLoading}
+                  type="button"
+                  variant="link"
+                  onClick={() => setIsRegister(!isRegister)}
+                  className="text-sm text-primary"
                 >
-                  {isLoading ? 'جارٍ تسجيل الدخول...' : t('login.loginButton')}
+                  {isRegister
+                    ? (arabic ? 'لديك حساب بالفعل؟ تسجيل الدخول' : 'Already have an account? Sign In')
+                    : (arabic ? 'ليس لديك حساب؟ إنشاء حساب ومساحة عمل جديدة' : "Don't have an account? Sign Up")}
                 </Button>
-              </motion.div>
+              </div>
             </form>
 
-            <motion.div
-              initial={false}
-              animate={{ opacity: 1 }}
-              transition={{ delay: 0.6 }}
-              className="mt-6 text-center text-sm text-muted-foreground"
-            >
+            <div className="mt-6 text-center text-sm text-muted-foreground">
               <p>للدعم الفني: support@romani-curemed.com</p>
-            </motion.div>
+            </div>
           </CardContent>
         </Card>
       </motion.div>
