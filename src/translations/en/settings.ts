@@ -56,6 +56,7 @@ export const settings = {
     disconnected: 'Not connected', connecting: 'Waiting for QR scan', connected: 'Connected',
     unavailable: 'Connection status unavailable', loading: 'Please wait…',
     error: 'Check the dedicated project setup or refresh the status. No other account was changed.',
+    issues: 'Server settings required:', issueMissing: 'not set', issueInvalid: 'invalid value',
     disconnect: 'Disconnect account', disconnectConfirm: 'Disconnect this project account and stop WhatsApp reminders? You can then scan a new QR with another account. Existing reminder audit is retained. Sending will require deliberate re-enable.',
     refresh: 'Check connection', showQr: 'Show / renew QR', hideQr: 'Hide QR',
     qrAlt: 'QR code for WhatsApp connection',

@@ -57,6 +57,7 @@ export const settings = {
     disconnected: 'غير متصل', connecting: 'بانتظار مسح رمز QR', connected: 'متصل',
     unavailable: 'تعذّر التحقق من الاتصال', loading: 'جارٍ الانتظار…',
     error: 'تحقق من إعداد اتصال المشروع أو حدّث الحالة. لم يتم تغيير حساب آخر.',
+    issues: 'إعدادات السيرفر المطلوبة:', issueMissing: 'غير مضبوط', issueInvalid: 'قيمة غير صالحة',
     refresh: 'التحقق من الاتصال', showQr: 'عرض / تجديد QR', hideQr: 'إخفاء QR',
     qrAlt: 'رمز QR لربط واتساب',
     scan: 'صاحب الحساب يمسح الرمز من واتساب ← الأجهزة المرتبطة.',

@@ -15,6 +15,8 @@ import { setSetting } from '../server/repositories/settings.ts';
 import { StorageService } from '../server/services/storageService.ts';
 import { DocumentService } from '../server/services/documentService.ts';
 import { CronService } from '../server/services/cronService.ts';
+import { MailError } from '../server/services/mailer.ts';
+import { request } from '../src/lib/api/http.ts';
 
 // Loopback-only synthetic fixture. No .env, external SMTP or production database.
 async function fixture(run) {
@@ -31,11 +33,11 @@ async function fixture(run) {
     .run(role, `${role}@example.invalid`, 'Isolated fixture', role, passwordHash, '2026-01-01', '2026-01-01');
   const deliveries = [];
   let mode = 'sent';
-  let verifyOk = true;
-  const mailer = { isConfigured: () => true, verify: async () => ({ ok: verifyOk, message: 'Synthetic verification result' }),
+  const mailer = { isConfigured: () => true,
     send: async message => {
       deliveries.push(message);
       if (mode === 'failed') throw new Error('Synthetic relay failure');
+      if (mode === 'timeout') throw new MailError('The mail server did not answer within 20 seconds.', 'smtp_timeout', 504);
       return { status: mode, messageId: 'fixture-message',
         accepted: mode === 'partial' ? [] : message.to, rejected: mode === 'partial' ? message.to : [] };
     } };
@@ -60,7 +62,7 @@ async function fixture(run) {
     return result.headers.get('set-cookie').split(';')[0];
   }
   try { await run({ db, dir, request, login, cron, config, password, mailer, deliveries, reminderType,
-    setMode: value => { mode = value; }, setVerify: value => { verifyOk = value; } }); }
+    setMode: value => { mode = value; } }); }
   finally { cron.stop(); await new Promise(r => server.close(r)); db.close(); fs.rmSync(dir, { recursive: true, force: true }); }
 }
 
@@ -127,12 +129,35 @@ test('SMTP test records partial outcome rather than claiming delivery', () => fi
   assert.equal(db.prepare('SELECT status FROM email_log').get().status, 'partial');
 }));
 
-test('SMTP verification failure is durable and never reaches send', () => fixture(async ({ request, login, db, deliveries, setVerify }) => {
-  const cookie = await login(); setVerify(false);
+test('a relay failure is durable and never reports delivery', () => fixture(async ({ request, login, db, setMode }) => {
+  const cookie = await login(); setMode('failed');
   const r = await request('/api/email/test', { method: 'POST', cookie, body: { to: ['test@example.invalid'] } });
-  assert.equal(r.status, 502); assert.equal(deliveries.length, 0);
+  assert.equal(r.status, 502); assert.equal(r.json.error.code, 'send_failed');
   assert.equal(db.prepare('SELECT status FROM email_log').get().status, 'failed');
 }));
+
+test('a relay that does not answer inside the deadline is reported as a timeout', () => fixture(async ({ request, login, db, setMode }) => {
+  const cookie = await login(); setMode('timeout');
+  const r = await request('/api/email/test', { method: 'POST', cookie, body: { to: ['test@example.invalid'] } });
+  assert.equal(r.status, 504); assert.equal(r.json.error.code, 'smtp_timeout');
+  assert.equal(db.prepare('SELECT status FROM email_log').get().status, 'failed');
+}));
+
+test('a proxy error page is reported with its status instead of a broken connection', async t => {
+  t.mock.method(globalThis, 'fetch', async () => new Response('<html>502 Bad Gateway</html>', { status: 502, headers: { 'content-type': 'text/html' } }));
+  const result = await request('/api/email/test', { method: 'POST', body: {} });
+  assert.equal(result.data, null);
+  assert.equal(result.error.code, 'invalid_response');
+  assert.equal(result.error.status, 502);
+  assert.match(result.error.message, /unreadable response \(502\)/);
+});
+
+test('a rejected connection stays a connection failure', async t => {
+  t.mock.method(globalThis, 'fetch', async () => { throw new TypeError('Failed to fetch'); });
+  const result = await request('/api/email/test', { method: 'POST', body: {} });
+  assert.equal(result.error.code, 'network_error');
+  assert.match(result.error.message, /could not be reached/);
+});
 
 test('actual scheduler fires, records success, deduplicates and reports a future run', () => fixture(async ({ db, cron, deliveries, reminderType }) => {
   setSetting(db, { workspaceId: 'ws_legacy' }, 'email.enabled', true); setSetting(db, { workspaceId: 'ws_legacy' }, 'email.recipients', ['test@example.invalid']);

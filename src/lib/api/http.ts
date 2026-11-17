@@ -111,7 +111,26 @@ export async function request<T>(
     }
 
     const text = await response.text();
-    const payload = text ? (JSON.parse(text) as WireEnvelope<T>) : null;
+    let payload: WireEnvelope<T> | null = null;
+    if (text) {
+      try {
+        payload = JSON.parse(text) as WireEnvelope<T>;
+      } catch {
+        // A proxy error page, a crash page or a truncated body is not an
+        // envelope. Reporting it as a broken connection hides the status that
+        // explains it, so the status is named instead.
+        const message = `The server returned an unreadable response (${response.status}). Please try again.`;
+        return {
+          data: null,
+          error: new ApiRequestError(message, 'invalid_response', response.status, {
+            message,
+            code: 'invalid_response',
+            status: response.status,
+            contentType: response.headers.get('content-type') ?? '',
+          }),
+        };
+      }
+    }
 
     if (!response.ok) {
       return { data: null, error: errorFromPayload(payload?.error, response.status) };
@@ -140,7 +159,14 @@ export async function request<T>(
         ? 'The request was cancelled.'
         : 'The server could not be reached. Please check your connection.';
 
-    return { data: null, error: new ApiRequestError(message, 'network_error', 0) };
+    return {
+      data: null,
+      error: new ApiRequestError(message, 'network_error', 0, {
+        message,
+        code: 'network_error',
+        cause: error instanceof Error ? error.name : 'unknown',
+      }),
+    };
   } finally {
     clearTimeout(timeout);
   }

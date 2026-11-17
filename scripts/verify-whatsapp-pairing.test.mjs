@@ -13,7 +13,7 @@ import { signSession } from '../server/middleware/auth.ts';
 import { StorageService } from '../server/services/storageService.ts';
 import { DocumentService } from '../server/services/documentService.ts';
 import { CronService } from '../server/services/cronService.ts';
-import { pairingConfiguration, readPairingConfig } from '../server/whatsapp/config.ts';
+import { pairingConfiguration, pairingConfigurationIssues, readPairingConfig } from '../server/whatsapp/config.ts';
 import { createServer as createViteServer } from 'vite';
 import { stopRequestWork } from '../server/middleware/requestWork.ts';
 import { createReminderRuntime } from '../server/whatsapp/runtime.ts';
@@ -90,10 +90,34 @@ test('optional pairing is absent by default; wrong project and shared secret con
 
 test('absent config preserves status and makes no provider calls', () => fixture(async f => {
   const r = await f.request('/api/whatsapp/status');
-  assert.equal(r.status, 200); assert.deepEqual(r.json.data, { configured: false, state: 'unconfigured' });
+  assert.equal(r.status, 200);
+  assert.equal(r.json.data.configured, false); assert.equal(r.json.data.state, 'unconfigured');
+  assert.deepEqual(r.json.data.issues.map(issue => issue.variable), ['ROMANI_EVOLUTION_URL', 'ROMANI_EVOLUTION_INSTANCE', 'ROMANI_EVOLUTION_API_KEY', 'ROMANI_EVOLUTION_WEBHOOK_SECRET']);
+  assert.ok(r.json.data.issues.every(issue => issue.problem === 'missing'));
   assert.equal((await f.request('/api/whatsapp/connect', { method: 'POST', body: {} })).status, 503);
   assert.equal(f.calls.length, 0);
 }, { ROMANI_EVOLUTION_URL: '', ROMANI_EVOLUTION_API_KEY: '', ROMANI_EVOLUTION_INSTANCE: '', ROMANI_EVOLUTION_WEBHOOK_SECRET: '' }));
+
+test('a malformed server configuration names the variables that block the pairing', () => fixture(async f => {
+  const r = await f.request('/api/whatsapp/status');
+  assert.equal(r.status, 503);
+  assert.equal(r.json.error.code, 'whatsapp_not_configured');
+  assert.deepEqual(r.json.error.issues, [{ variable: 'ROMANI_EVOLUTION_WEBHOOK_SECRET', problem: 'missing' }]);
+  assert.equal(f.calls.length, 0);
+}, { ROMANI_EVOLUTION_WEBHOOK_SECRET: '' }));
+
+test('the pairing diagnostics name variables without revealing their values', () => {
+  const valid = { url: 'http://service:8080/api', apiKey: randomBytes(32).toString('hex'), instance: 'romani-fixture', webhookSecret: randomBytes(32).toString('hex') };
+  assert.deepEqual(pairingConfigurationIssues(valid), []);
+  const malformed = pairingConfigurationIssues({ ...valid, instance: 'curemed', webhookSecret: 'too-short' });
+  assert.deepEqual(malformed.map(issue => issue.variable), ['ROMANI_EVOLUTION_INSTANCE', 'ROMANI_EVOLUTION_WEBHOOK_SECRET']);
+  assert.deepEqual(malformed.map(issue => issue.problem), ['invalid', 'invalid']);
+  const missing = pairingConfigurationIssues({ url: '', apiKey: '', instance: '', webhookSecret: '' });
+  assert.equal(missing.length, 4);
+  assert.ok(missing.every(issue => issue.problem === 'missing'));
+  assert.ok(!JSON.stringify(missing).includes(valid.apiKey));
+  assert.ok(!JSON.stringify(missing).includes(valid.webhookSecret));
+});
 
 test('unauthenticated, viewer, foreign-project JWT and demoted account cannot contact provider', () => fixture(async f => {
   const foreign = { ...f.config, jwtSecret: randomBytes(32).toString('hex') };
