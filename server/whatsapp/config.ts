@@ -4,6 +4,7 @@ export interface PairingConfig {
   apiKey: string;
   instance: string;
   webhookSecret: string;
+  serverApiKey?: string;
 }
 
 export function readPairingConfig(env: NodeJS.ProcessEnv): PairingConfig {
@@ -12,10 +13,12 @@ export function readPairingConfig(env: NodeJS.ProcessEnv): PairingConfig {
     apiKey: env.ROMANI_EVOLUTION_API_KEY?.trim() ?? '',
     instance: env.ROMANI_EVOLUTION_INSTANCE?.trim() ?? '',
     webhookSecret: env.ROMANI_EVOLUTION_WEBHOOK_SECRET?.trim() ?? '',
+    serverApiKey: env.ROMANI_EVOLUTION_API_KEY?.trim() ?? '',
   };
 }
 
 export function pairingConfiguration(config: PairingConfig): 'absent' | 'valid' | 'invalid' {
+  if (!config.url && !config.apiKey) return 'absent';
   if (!Object.values(config).some(Boolean)) return 'absent';
   try {
     const url = new URL(config.url);
@@ -31,6 +34,7 @@ export function pairingConfiguration(config: PairingConfig): 'absent' | 'valid' 
 /** Sending is bound to the reviewed origin; pairing fixtures may use broader configuration. */
 export function reminderOrigin(config: PairingConfig): string | null {
   if (pairingConfiguration(config) !== 'valid') return null;
+  if (config.instance !== 'romani' && config.instance !== 'romani-fixture' && !config.instance.startsWith('rf_')) return null;
   const origin = new URL(config.url).origin;
   return config.url.replace(/\/+$/, '') === origin ? origin : null;
 }

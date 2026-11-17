@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { endpoints, rejectedSettings } from '@/lib/api';
-import type { CronStatus, EmailLogEntry, ExpiryPreview, SmtpStatus } from '@/lib/api';
+import type { CronStatus, EmailLogEntry, ExpiryPreview, SmtpDetails, SmtpStatus } from '@/lib/api';
 import { ApiRequestError } from '@/lib/api/http';
 import { validEmailSettings, writeLoadedEmailSettings } from '@/lib/emailSettingsWrite';
 import { useAuth } from './useAuth';
@@ -30,10 +30,28 @@ export interface EmailForm {
   includeDocuments: boolean;
 }
 
+export interface SmtpForm {
+  host: string;
+  port: number;
+  secure: boolean;
+  user: string;
+  pass: string;
+  from: string;
+}
+
 export interface ActionResult {
   ok: boolean;
   message: string;
 }
+
+export const EMPTY_SMTP_FORM: SmtpForm = {
+  host: '',
+  port: 587,
+  secure: false,
+  user: '',
+  pass: '',
+  from: '',
+};
 
 const EMPTY_FORM: EmailForm = {
   enabled: true,
@@ -103,11 +121,13 @@ export function useEmailSettings() {
   identityRef.current = identity;
   const [form, setForm] = useState<EmailForm>(EMPTY_FORM);
   const [smtp, setSmtp] = useState<SmtpStatus | null>(null);
+  const [smtpDetails, setSmtpDetails] = useState<SmtpDetails | null>(null);
+  const [smtpForm, setSmtpForm] = useState<SmtpForm>(EMPTY_SMTP_FORM);
   const [cron, setCron] = useState<CronStatus | null>(null);
   const [preview, setPreview] = useState<ExpiryPreview | null>(null);
   const [log, setLog] = useState<EmailLogEntry[]>([]);
   const [isLoading, setIsLoading] = useState(true);
-  const [busy, setBusy] = useState<'save' | 'test' | 'report' | null>(null);
+  const [busy, setBusy] = useState<'save' | 'test' | 'report' | 'smtp_save' | 'smtp_delete' | null>(null);
   const [settingsReady, setSettingsReady] = useState(false);
   const ready = useRef(false);
 
@@ -135,20 +155,32 @@ export function useEmailSettings() {
     }
     setIsLoading(true);
     ready.current = false; setSettingsReady(false);
-    const [{ data, error }, status] = await Promise.all([
+    const [{ data, error }, status, smtpRes] = await Promise.all([
       endpoints.settings.read(),
       endpoints.email.status(),
+      endpoints.email.getSmtp(),
     ]);
     if (identityRef.current !== requested) return;
     if (forbidden(error)) {
       setIsLoading(false);
       return;
     }
+    if (smtpRes?.data) {
+      setSmtpDetails(smtpRes.data);
+      setSmtpForm({
+        host: smtpRes.data.host || '',
+        port: smtpRes.data.port || 587,
+        secure: Boolean(smtpRes.data.secure),
+        user: smtpRes.data.user || '',
+        pass: '',
+        from: smtpRes.data.from || '',
+      });
+    }
     if (!error && validEmailSettings(data?.settings)) {
       setForm(toForm(data.settings));
       const configured = typeof status.data?.configured === 'boolean'
         ? status.data.configured
-        : data.smtp?.configured === true;
+        : (smtpRes?.data?.configured ?? data.smtp?.configured === true);
       setSmtp({ configured });
       ready.current = true; setSettingsReady(true);
     }
@@ -160,6 +192,8 @@ export function useEmailSettings() {
   useEffect(() => {
     setForm(EMPTY_FORM);
     setSmtp(null);
+    setSmtpDetails(null);
+    setSmtpForm(EMPTY_SMTP_FORM);
     setCron(null);
     setPreview(null);
     setLog([]);
@@ -209,6 +243,59 @@ export function useEmailSettings() {
     return { ok: true, message: '' };
   };
 
+  const saveSmtp = async (payload: SmtpForm): Promise<ActionResult> => {
+    setBusy('smtp_save');
+    const { data, error } = await endpoints.email.updateSmtp({
+      host: payload.host.trim(),
+      port: Number(payload.port) || 587,
+      secure: Boolean(payload.secure),
+      user: payload.user.trim(),
+      pass: payload.pass,
+      from: payload.from.trim(),
+    });
+    setBusy(null);
+    if (error || !data) {
+      return { ok: false, message: error?.message ?? 'Failed to save SMTP settings.' };
+    }
+    setSmtpDetails(data);
+    setSmtp({ configured: data.configured });
+    setSmtpForm((prev) => ({
+      ...prev,
+      host: data.host,
+      port: data.port,
+      secure: data.secure,
+      user: data.user,
+      from: data.from,
+      pass: '',
+    }));
+    await loadStatus();
+    return { ok: true, message: '' };
+  };
+
+  const deleteSmtp = async (): Promise<ActionResult> => {
+    setBusy('smtp_delete');
+    const { data, error } = await endpoints.email.deleteSmtp();
+    setBusy(null);
+    if (error || !data?.deleted) {
+      return { ok: false, message: error?.message ?? 'Failed to delete SMTP settings.' };
+    }
+    const res = await endpoints.email.getSmtp();
+    if (res.data) {
+      setSmtpDetails(res.data);
+      setSmtp({ configured: res.data.configured });
+      setSmtpForm({
+        host: res.data.host || '',
+        port: res.data.port || 587,
+        secure: Boolean(res.data.secure),
+        user: res.data.user || '',
+        pass: '',
+        from: res.data.from || '',
+      });
+    }
+    await loadStatus();
+    return { ok: true, message: '' };
+  };
+
   const sendTest = async (): Promise<ActionResult> => {
     if (!ready.current) return { ok: false, message: 'Load email settings successfully before sending.' };
     setBusy('test');
@@ -234,6 +321,9 @@ export function useEmailSettings() {
     form,
     setForm,
     smtp,
+    smtpDetails,
+    smtpForm,
+    setSmtpForm,
     cron,
     preview,
     log,
@@ -243,6 +333,8 @@ export function useEmailSettings() {
     busy,
     toggleInterval,
     save,
+    saveSmtp,
+    deleteSmtp,
     sendTest,
     sendReport,
     refresh: loadStatus,

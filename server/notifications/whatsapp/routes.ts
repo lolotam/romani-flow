@@ -120,7 +120,7 @@ export function createReminderRouter(reminders: WhatsAppReminders, env: NodeEnv)
       }
       const items = jobs
         .map(job => ({ ...job,
-          retry_allowed: Boolean(instance) && isValidReminderText(job.text) && normalizeWhatsAppPhone(job.recipient) === job.recipient &&
+          retry_allowed: Boolean(reminders.instance) && Boolean(instance) && isValidReminderText(job.text) && normalizeWhatsAppPhone(job.recipient) === job.recipient &&
             Number(job.attempt_count) < 4 && (job.state === 'retryable_failed' || (hasCapacity && job.state === 'permanent_failed' && isManualRetryFailure(job.error_code))),
           attempts: attemptsByJob.get(String(job.id)) ?? [] }));
       res.json({ data: { items, total }, error: null });
@@ -130,7 +130,7 @@ export function createReminderRouter(reminders: WhatsAppReminders, env: NodeEnv)
     const payload = req.body === undefined ? {} : body(req);
     if (Object.keys(payload).length || Object.keys(req.query).length) throw new RepositoryError('Retry accepts no overrides.', 'invalid_body', 400);
     const scope = tenantOf(req);
-    const instance = getWorkspaceInstance(reminders.db, scope.workspaceId, reminders.instance);
+    const instance = reminders.instance ? getWorkspaceInstance(reminders.db, scope.workspaceId, reminders.instance) : '';
     const workspaceRuntime = reminders.forWorkspace(scope, instance);
     await workspaceRuntime.retryForWorkspace(scope, String(req.params.id));
     res.json({ data: { queued: true }, error: null });

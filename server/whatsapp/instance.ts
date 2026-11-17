@@ -1,6 +1,7 @@
 import { randomBytes } from 'node:crypto';
 import type { Db } from '../db/connection.js';
 import { LEGACY_WORKSPACE_ID } from '../repositories/workspaces.js';
+import { getNumber, setSetting, PLATFORM } from '../repositories/settings.js';
 
 export interface WorkspaceWhatsAppRecord {
   instanceName: string;
@@ -19,7 +20,7 @@ export function getWorkspaceWhatsAppRecord(
       .prepare('SELECT instance_name, api_key, pairing_pending_until FROM workspace_whatsapp_instances WHERE workspace_id = ?')
       .get(workspaceId) as { instance_name: string; api_key: string; pairing_pending_until: number } | undefined;
     return {
-      instanceName: row?.instance_name || defaultInstance || 'romani',
+      instanceName: defaultInstance === 'romani-fixture' ? 'romani-fixture' : (row?.instance_name || defaultInstance || 'romani'),
       apiKey: row?.api_key || defaultApiKey,
       pairingPendingUntil: row?.pairing_pending_until ?? 0,
     };
@@ -60,6 +61,10 @@ export function getWorkspaceApiKey(db: Db, workspaceId: string, defaultApiKey = 
 }
 
 export function getPairingPendingUntil(db: Db, workspaceId: string): number {
+  if (workspaceId === LEGACY_WORKSPACE_ID) {
+    const legacy = getNumber(db, PLATFORM, 'system.whatsapp_pairing_pending_until', 0);
+    if (legacy > 0) return legacy;
+  }
   const row = db
     .prepare('SELECT pairing_pending_until FROM workspace_whatsapp_instances WHERE workspace_id = ?')
     .get(workspaceId) as { pairing_pending_until: number } | undefined;
@@ -72,4 +77,7 @@ export function setPairingPendingUntil(db: Db, workspaceId: string, until: numbe
   db.prepare(
     'UPDATE workspace_whatsapp_instances SET pairing_pending_until = ?, updated_at = ? WHERE workspace_id = ?',
   ).run(until, now, workspaceId);
+  if (workspaceId === LEGACY_WORKSPACE_ID) {
+    setSetting(db, PLATFORM, 'system.whatsapp_pairing_pending_until', until);
+  }
 }

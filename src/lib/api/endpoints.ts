@@ -51,6 +51,26 @@ export interface SmtpStatus {
   configured: boolean;
 }
 
+export interface SmtpDetails {
+  configured: boolean;
+  isCustom: boolean;
+  host: string;
+  port: number;
+  secure: boolean;
+  user: string;
+  from: string;
+  updatedAt?: string | null;
+}
+
+export interface SmtpPayload {
+  host: string;
+  port?: number;
+  secure?: boolean;
+  user: string;
+  pass: string;
+  from: string;
+}
+
 /**
  * `GET /api/email/status`: mail is configured, plus the caller's workspace settings.
  * SMTP host, port and username are not part of this response.
@@ -131,6 +151,9 @@ const email = {
     message?: string;
   }) => request<SendDocumentsResult>('/api/email/send-documents', { method: 'POST', body: payload }),
   log: () => request<EmailLogEntry[]>('/api/email/log'),
+  getSmtp: () => request<SmtpDetails>('/api/email/smtp'),
+  updateSmtp: (payload: SmtpPayload) => request<SmtpDetails>('/api/email/smtp', { method: 'PUT', body: payload }),
+  deleteSmtp: () => request<{ deleted: boolean }>('/api/email/smtp', { method: 'DELETE' }),
 };
 
 const cron = {

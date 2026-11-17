@@ -16,7 +16,7 @@ interface EmailConfigCardProps {
   setForm: Dispatch<SetStateAction<EmailForm>>;
   smtp: SmtpStatus | null;
   cron: CronStatus | null;
-  busy: 'save' | 'test' | 'report' | null;
+  busy: 'save' | 'test' | 'report' | 'smtp_save' | 'smtp_delete' | null;
   onToggleInterval: (days: number, selected: boolean) => void;
   onSave: () => void;
   onTest: () => void;
@@ -56,10 +56,10 @@ export function EmailConfigCard({
         </CardTitle>
         <CardDescription>
           {smtp?.configured
-            ? L('SMTP مفعّل.', 'SMTP is configured.')
+            ? L('خدمة البريد جاهزة لإرسال التنبيهات المجدولة وتقارير الصلاحية.', 'Mail service is ready to send scheduled reminders and expiry reports.')
             : L(
-                'SMTP غير مُعدّ. ضع بيانات الإرسال في متغيرات البيئة على الخادم (كلمة المرور لا تُحفظ هنا).',
-                'SMTP is not configured. Set the sending credentials in the server environment (the password is never stored here).',
+                'SMTP غير مُعدّ لهذا المشروع. يرجى ضبط إعدادات خادم البريد (SMTP) أعلاه لتفعيل التنبيهات.',
+                'SMTP is not configured for this workspace. Please configure SMTP settings above to enable reminders.',
               )}
         </CardDescription>
       </CardHeader>

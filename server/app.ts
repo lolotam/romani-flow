@@ -61,7 +61,7 @@ export interface AppDependencies {
 
 export function createApp(deps: AppDependencies): Express {
   const { config, db, mailer, cron, storage, documents, staticDir } = deps;
-  mailer.setDb(db);
+  mailer.setDb?.(db);
   const reminders = deps.reminders ?? createReminderRuntime(db, config.whatsapp);
   const workspaceRuntime = (scope: Scope) => {
     const inst = getWorkspaceInstance(db, scope.workspaceId, config.whatsapp.instance);

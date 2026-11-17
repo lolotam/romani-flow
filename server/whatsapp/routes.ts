@@ -34,6 +34,10 @@ export function createPairingRouter(config: PairingConfig, env: NodeEnv, reminde
   router.use(requireReminderWorkspace(reminders), requireAdmin, (_req, res, next) => {
     res.setHeader('Cache-Control', 'no-store');
     res.setHeader('Referrer-Policy', 'no-referrer');
+    if (pairingConfiguration(config) === 'invalid') {
+      fail(res, 503, 'whatsapp_not_configured');
+      return;
+    }
     next();
   });
 
@@ -145,6 +149,9 @@ export function createPairingWebhook(config: PairingConfig): Router {
     if (!timingSafeEqual(hash(token), hash(config.webhookSecret))) { fail(res, 401, 'webhook_unauthorized'); return; }
     const body = req.body;
     if (Object.keys(req.query).length || !body || typeof body !== 'object' || Array.isArray(body)) {
+      fail(res, 403, 'project_mismatch'); return;
+    }
+    if (typeof body.instance === 'string' && body.instance !== config.instance) {
       fail(res, 403, 'project_mismatch'); return;
     }
     if (body.event !== 'connection.update' || !body.data || !['open', 'close', 'connecting'].includes(body.data.state)) {

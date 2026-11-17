@@ -25,6 +25,8 @@ export function atomic<T>(db: Db, action: () => T): T {
 export class ReminderStore {
   constructor(readonly db: Db, readonly scope: Scope, readonly instance: string, readonly clock: () => Date = () => new Date()) {}
 
+  get auditInstance(): string { return this.instance || 'romani'; }
+
   private get ws(): string { return this.scope.workspaceId; }
 
   reconcile(candidates: ReminderCandidate[], replacements: DestinationReplacement[] = []): void {
@@ -135,7 +137,7 @@ export class ReminderStore {
   }
 
   retry(id: string): void {
-    const job = this.db.prepare('SELECT state,error_code,text,recipient FROM whatsapp_jobs WHERE id=? AND workspace_id=? AND instance=?').get(id, this.ws, this.instance);
+    const job = this.db.prepare('SELECT state,error_code,text,recipient FROM whatsapp_jobs WHERE id=? AND workspace_id=? AND instance=?').get(id, this.ws, this.auditInstance);
     if (!job) {
       throw new RepositoryError('Job not found.', 'not_found', 404);
     }

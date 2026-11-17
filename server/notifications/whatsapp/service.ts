@@ -103,7 +103,7 @@ export class WhatsAppReminders {
     await this.mutate(() => {
       const job = this.db.prepare(
         'SELECT id, workspace_id, instance, state, error_code, text, recipient FROM whatsapp_jobs WHERE id = ? AND workspace_id = ? AND instance = ?',
-      ).get(id, scope.workspaceId, this.instance);
+      ).get(id, scope.workspaceId, this.auditInstance);
       if (!job) {
         throw new RepositoryError('Job not found.', 'not_found', 404);
       }
@@ -131,13 +131,12 @@ export class WhatsAppReminders {
     });
   }
 
-  /** Disable and disconnect share one lock; disconnect happens first so failures do not mutate settings. */
+  /** Disable and disconnect share one lock; settings are disabled before disconnect so failures still stop reminders. */
   withSendingDisabled<T>(disconnect: () => Promise<T>, targetScope?: Scope): Promise<T> {
     const scope = targetScope ?? this.scope;
     return this.aroundWrite(async () => {
-      const result = await disconnect();
       this.applySettings(scope, { 'whatsapp.enabled': false });
-      return result;
+      return await disconnect();
     });
   }
 

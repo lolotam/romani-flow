@@ -73,8 +73,15 @@ export class PairingClient {
 
   async status(): Promise<PairingStatus> {
     if (pairingConfiguration(this.config) === 'absent') return { configured: false, state: 'unconfigured' };
-    const payload = await this.call('connectionState');
-    return this.instanceStatus(payload.instance);
+    try {
+      const payload = await this.call('connectionState');
+      return this.instanceStatus(payload.instance);
+    } catch (error) {
+      if (error instanceof PairingError && error.code === 'instance_not_ready') {
+        return { configured: true, state: 'disconnected' };
+      }
+      throw error;
+    }
   }
 
   private instanceStatus(payload: unknown): PairingStatus {
@@ -94,10 +101,10 @@ export class PairingClient {
     try {
       const response = await fetch(url, {
         method: 'POST',
-        headers: { apikey: this.config.apiKey, 'content-type': 'application/json' },
+        headers: { apikey: this.config.serverApiKey || this.config.apiKey, 'content-type': 'application/json' },
         body: JSON.stringify({
           instanceName: this.config.instance,
-          token: this.config.webhookSecret,
+          token: this.config.apiKey,
           qrcode: true,
         }),
         redirect: 'error',
@@ -110,7 +117,9 @@ export class PairingClient {
   }
 
   async connect(): Promise<PairingResult> {
-    await this.ensureProvisioned();
+    if (this.config.instance.startsWith('rf_')) {
+      await this.ensureProvisioned();
+    }
     const status = await this.status();
     if (!status.configured) throw new PairingError('whatsapp_not_configured');
     if (status.state === 'connected') return status;
@@ -130,7 +139,8 @@ export class PairingClient {
     if (before.state === 'disconnected' && !revokePending) return { status: before, logoutVerified: false };
     if (before.state === 'unknown') throw new PairingError('connection_state_unknown');
     const result = await this.call('logout');
-    if (result.status !== 'SUCCESS' || result.error !== false) throw new PairingError('invalid_provider_response', 502);
+    const ok = result.status === 'SUCCESS' || result.status === 200 || result.error === false || result.message === 'Instance logged out';
+    if (!ok) throw new PairingError('invalid_provider_response', 502);
     // Provider acknowledgement is not proof of completed logout; read actual state.
     const after = await this.status();
     if (after.state !== 'disconnected') throw new PairingError('disconnect_pending', 409);

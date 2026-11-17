@@ -24,6 +24,8 @@ export type {
   ExpiryPreview,
   ExpiryPreviewItem,
   SendDocumentsResult,
+  SmtpDetails,
+  SmtpPayload,
   SmtpStatus,
   UploadedFile,
 } from './endpoints';

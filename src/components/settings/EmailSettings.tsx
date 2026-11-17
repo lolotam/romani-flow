@@ -2,14 +2,15 @@ import { useLanguage } from '@/contexts/LanguageContext';
 import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/hooks/useAuth';
 import { useEmailSettings, type ActionResult } from '@/hooks/useEmailSettings';
+import { SmtpConfigCard } from './SmtpConfigCard';
 import { EmailConfigCard } from './EmailConfigCard';
 import { EmailLogCard } from './EmailLogCard';
 import { ExpiryPreviewCard } from './ExpiryPreviewCard';
 import { Button } from '@/components/ui/button';
 
 /**
- * The e-mail tab. All state is on the server; this component only wires the
- * hook to the three cards and tells the user how each action went.
+ * The e-mail tab. All state is on the server; this component wires the
+ * hook to the cards and tells the user how each action went.
  */
 export default function EmailSettings() {
   const { language } = useLanguage();
@@ -38,6 +39,36 @@ export default function EmailSettings() {
 
   return (
     <div className="space-y-6">
+      <SmtpConfigCard
+        details={state.smtpDetails}
+        form={state.smtpForm}
+        setForm={state.setSmtpForm}
+        busy={state.busy}
+        onSave={async (payload) => {
+          const res = await state.saveSmtp(payload);
+          report(
+            res,
+            L('تم حفظ وتفعيل إعدادات SMTP بنجاح', 'SMTP settings saved and verified'),
+            L('تعذر حفظ إعدادات SMTP', 'Could not save SMTP settings'),
+          );
+        }}
+        onDelete={async () => {
+          const res = await state.deleteSmtp();
+          report(
+            res,
+            L('تمت إزالة إعدادات SMTP المخصصة', 'Custom SMTP removed'),
+            L('تعذر حذف إعدادات SMTP', 'Could not delete SMTP settings'),
+          );
+        }}
+        onTest={async () => {
+          const res = await state.sendTest();
+          report(
+            res,
+            L('تم إرسال رسالة التجربة بنجاح', 'Test message sent successfully'),
+            L('تعذر إرسال التجربة', 'The test could not be sent'),
+          );
+        }}
+      />
       <EmailConfigCard
         form={state.form}
         setForm={state.setForm}
