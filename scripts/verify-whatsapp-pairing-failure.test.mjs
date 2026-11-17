@@ -71,3 +71,16 @@ test('every pairing failure has a sentence in both languages', () => {
     assert.ok(english.length > 10, `the English sentence of ${code} says something`);
   }
 });
+
+test('the Arabic sentences keep the register of the panel', () => {
+  // The pairing panel speaks Modern Standard Arabic. A colloquial sentence in
+  // the middle of it is the mix a reviewer named, and it reads like a
+  // different product in the same card.
+  const colloquial = ['مش ', 'اتأكد', 'بتاع', 'استنى', 'رجّع', 'شغال', 'تاني', 'أوي', 'لسه', 'كمان', 'لازم', 'يعني ', 'بس '];
+  for (const code of PAIRING_FAILURE_CODES) {
+    const arabic = arabicSettings.whatsapp.failures[code];
+    for (const word of colloquial) {
+      assert.equal(arabic.includes(word), false, `${code} keeps the register of the panel (no ${word})`);
+    }
+  }
+});
