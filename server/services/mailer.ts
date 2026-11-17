@@ -97,6 +97,19 @@ function withDeadline<T>(work: Promise<T>, deadlineMs: number): Promise<T> {
 }
 
 /**
+ * A host is a value the member typed: it reaches the log, so it never carries
+ * a control character that could rewrite the terminal.
+ */
+function safeHost(host: string): string {
+  let out = '';
+  for (const character of host) {
+    const code = character.codePointAt(0) ?? 0;
+    out += code < 0x20 || code === 0x7f ? '?' : character;
+  }
+  return out.slice(0, 253);
+}
+
+/**
  * One line about one exchange with a relay.
  *
  * The line names the relay and the state of the process. It never carries a
@@ -106,7 +119,7 @@ function withDeadline<T>(work: Promise<T>, deadlineMs: number): Promise<T> {
 function smtpLine(stage: string, relay: { kind: string; host: string; port: number }, extra: string): string {
   const snapshot = runtimeSnapshot();
   return (
-    `[smtp] ${stage} kind=${relay.kind} host=${relay.host} port=${relay.port} ` +
+    `[smtp] ${stage} kind=${relay.kind} host=${safeHost(relay.host)} port=${relay.port} ` +
     `uptime=${snapshot.uptimeSeconds}s rss=${snapshot.memory.rssMb}MB heap=${snapshot.memory.heapUsedMb}MB ` +
     extra.trim()
   );
@@ -399,7 +412,12 @@ export class Mailer {
         rejected: [...rejected, ...missing],
       };
     } catch (error) {
-      if (error instanceof MailError) throw error;
+      if (error instanceof MailError) {
+        // A deadline and a refusal are failures of the exchange as well: the
+        // log names them, so the stage is never missing from the trail.
+        console.log(smtpLine('fail', relay, `ms=${Date.now() - startedAt} outcome=${error.code}`));
+        throw error;
+      }
       const detail = error instanceof Error ? error.message : String(error);
       const code = error && typeof error === 'object' && 'code' in error ? String(error.code) : '';
       const provenUnsent = ['ENOTFOUND', 'EAI_AGAIN', 'ECONNREFUSED', 'EDNS'].includes(code);

@@ -15,7 +15,7 @@ import { StorageService } from './services/storageService.js';
 import { createReminderRuntime } from './whatsapp/runtime.js';
 import { drainApplication } from './shutdown.js';
 import { stopRequestWork } from './middleware/requestWork.js';
-import { runtimeLine } from './services/runtime.js';
+import { runtimeLine, safeErrorLine } from './services/runtime.js';
 
 /**
  * Server bootstrap.
@@ -55,28 +55,22 @@ function assertVolumeIsMounted(dataDir: string, isProduction: boolean): void {
 }
 
 /**
- * The API must not die because one request failed.
+ * A fatal error stops the process instead of leaving it half-broken.
  *
- * An uncaught error used to take the whole process down: the proxy then
- * answered the open request with its own error page, and the operator saw a
- * gateway error instead of the reason. The error is written to the log with
- * the state of the process, and the process keeps serving the other requests.
+ * An uncaught exception means execution already left its recovery boundary,
+ * so the state of the process is unknown: serving more traffic on it would
+ * turn one failure into many. The process stops accepting traffic, writes
+ * what broke to the log, and exits with a failing code so the supervisor
+ * starts a clean one.
  */
-function guardProcess(): void {
-  process.on('uncaughtException', (error: unknown) => {
-    console.error(`[server] uncaught exception, the API keeps serving: ${describe(error)}`);
+function guardProcess(stop: () => void): void {
+  const fatal = (kind: string, error: unknown) => {
+    console.error(`[server] fatal ${kind}, the process stops: ${safeErrorLine(error)}`);
     console.error(runtimeLine('runtime'));
-  });
-  process.on('unhandledRejection', (reason: unknown) => {
-    console.error(`[server] unhandled rejection, the API keeps serving: ${describe(reason)}`);
-    console.error(runtimeLine('runtime'));
-  });
-}
-
-/** One short description of an unknown failure. No stack, no secret. */
-function describe(error: unknown): string {
-  if (error instanceof Error) return `${error.name}: ${error.message.slice(0, 300)}`;
-  return String(error).slice(0, 300);
+    stop();
+  };
+  process.on('uncaughtException', (error: unknown) => fatal('exception', error));
+  process.on('unhandledRejection', (reason: unknown) => fatal('rejection', reason));
 }
 
 /**
@@ -92,7 +86,6 @@ function startHeartbeat(): void {
 }
 
 async function main(): Promise<void> {
-  guardProcess();
   const config = loadConfig();
   validateConfig(config);
   if (!isSmtpConfigured(config)) console.warn('[server] WARNING: mail not configured');
@@ -182,6 +175,19 @@ async function main(): Promise<void> {
 
   process.on('SIGTERM', () => shutdown('SIGTERM'));
   process.on('SIGINT', () => shutdown('SIGINT'));
+
+  // A fatal error stops the process. The state after an uncaught exception is
+  // unknown, so the API stops accepting traffic and leaves the restart to the
+  // supervisor. The exit code is a failure, never a success.
+  guardProcess(() => {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    const forced = setTimeout(() => process.exit(1), 5_000);
+    server.close(() => {
+      clearTimeout(forced);
+      process.exit(1);
+    });
+  });
 }
 
 main().catch((error) => {

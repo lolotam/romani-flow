@@ -7,7 +7,7 @@ import { getWorkspaceSmtp, upsertWorkspaceSmtp, deleteWorkspaceSmtp } from '../r
 import { LEGACY_WORKSPACE_ID } from '../repositories/workspaces.js';
 import { mailboxOf } from '../services/emailAddress.js';
 import type { Mailer } from '../services/mailer.js';
-import { assertPublicHost, SmtpSecurityError } from '../services/smtpSecurity.js';
+import { assertPublicHost, hasControlCharacter, SmtpSecurityError } from '../services/smtpSecurity.js';
 
 /**
  * The relay settings of one workspace.
@@ -97,6 +97,16 @@ export function registerWorkspaceSmtpRoutes(
         res.status(400).json({
           data: null,
           error: { message: 'host, user, pass, and from address are required.', code: 'invalid_smtp_settings' },
+        });
+        return;
+      }
+
+      // The host reaches the container log, so it never carries a control
+      // character that could rewrite the line of a terminal.
+      if (hasControlCharacter(host)) {
+        res.status(400).json({
+          data: null,
+          error: { message: 'The host must not carry a control character.', code: 'invalid_smtp_settings' },
         });
         return;
       }

@@ -50,3 +50,19 @@ export function runtimeLine(prefix: string): string {
     `rss=${snapshot.memory.rssMb}MB heap=${snapshot.memory.heapUsedMb}/${snapshot.memory.heapTotalMb}MB`
   );
 }
+
+/**
+ * A safe description of an unknown failure.
+ *
+ * The message of an exception may carry a credential, a token or a recipient,
+ * so it never reaches the log. The name and the frames say what broke and
+ * where; the values stay inside the process.
+ */
+export function safeErrorLine(error: unknown): string {
+  if (!(error instanceof Error)) return `non-error value of type ${typeof error}`;
+  const frames = (error.stack ?? '')
+    .split('\n')
+    .filter(line => line.trimStart().startsWith('at '))
+    .slice(0, 6);
+  return frames.length > 0 ? `${error.name}\n${frames.join('\n')}` : error.name;
+}
