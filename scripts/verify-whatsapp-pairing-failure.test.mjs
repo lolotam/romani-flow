@@ -15,10 +15,11 @@ import { settings as englishSettings } from '../src/translations/en/settings.ts'
  */
 
 test('the pairing failure keeps the code the server named', () => {
-  assert.equal(pairingFailureCode(new ApiRequestError('x', 'provider_unauthorized', 502)), 'provider_unauthorized');
-  assert.equal(pairingFailureCode(new ApiRequestError('x', 'provider_unavailable', 502)), 'provider_unavailable');
-  assert.equal(pairingFailureCode(new ApiRequestError('x', 'instance_not_ready', 502)), 'instance_not_ready');
-  assert.equal(pairingFailureCode(new ApiRequestError('x', 'project_mismatch', 502)), 'project_mismatch');
+  // Every documented code round-trips: a typo in the catalog would otherwise
+  // fall back to the general alert at runtime without failing a test.
+  for (const code of PAIRING_FAILURE_CODES) {
+    assert.equal(pairingFailureCode(new ApiRequestError('x', code, 502)), code, `${code} keeps its name`);
+  }
 });
 
 test('a failure without a known code stays unnamed', () => {
