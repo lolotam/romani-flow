@@ -1,7 +1,7 @@
 import { createHash, timingSafeEqual } from 'node:crypto';
 import { Router, type Request, type Response } from 'express';
 import type { PairingConfig } from './config.js';
-import { pairingConfiguration } from './config.js';
+import { pairingConfiguration, pairingConfigurationIssues } from './config.js';
 import { PairingClient, PairingError } from './pairingClient.js';
 import { requireAdmin, tenantOf } from '../middleware/auth.js';
 import { asyncHandler } from '../middleware/errorHandler.js';
@@ -16,8 +16,8 @@ import {
 } from './instance.js';
 export { getWorkspaceInstance };
 
-function fail(res: Response, status: number, code: string): void {
-  res.status(status).json({ data: null, error: { code, message: 'WhatsApp connection request could not be completed.' } });
+function fail(res: Response, status: number, code: string, details: Record<string, unknown> = {}): void {
+  res.status(status).json({ data: null, error: { code, message: 'WhatsApp connection request could not be completed.', ...details } });
 }
 
 function emptyInput(req: Request): boolean {
@@ -35,7 +35,9 @@ export function createPairingRouter(config: PairingConfig, env: NodeEnv, reminde
     res.setHeader('Cache-Control', 'no-store');
     res.setHeader('Referrer-Policy', 'no-referrer');
     if (pairingConfiguration(config) === 'invalid') {
-      fail(res, 503, 'whatsapp_not_configured');
+      // Name the variables that block the pairing, so the operator can fix the
+      // server setup instead of guessing why the panel stays unusable.
+      fail(res, 503, 'whatsapp_not_configured', { issues: pairingConfigurationIssues(config) });
       return;
     }
     next();
@@ -50,12 +52,11 @@ export function createPairingRouter(config: PairingConfig, env: NodeEnv, reminde
 
     try {
       const status = await client.status();
-      res.json({
-        data: status.configured && status.state === 'disconnected' && pendingPairingUntil() > Date.now()
-          ? { ...status, state: 'connecting' }
-          : status,
-        error: null,
-      });
+      const issues = pairingConfigurationIssues(config);
+      const data = status.configured && status.state === 'disconnected' && pendingPairingUntil() > Date.now()
+        ? { ...status, state: 'connecting' }
+        : status;
+      res.json({ data: issues.length ? { ...data, issues } : data, error: null });
     }
     catch (error) {
       const e = error instanceof PairingError ? error : new PairingError('provider_unavailable');

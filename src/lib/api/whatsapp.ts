@@ -1,9 +1,17 @@
 import { request } from './http';
 import { formPatch } from '../formPatch';
 
+/** A server variable that blocks the pairing, named but never valued. */
+export interface WhatsAppPairingIssue {
+  variable: string;
+  problem: 'missing' | 'invalid';
+}
+
 export interface WhatsAppPairingStatus {
   configured: boolean;
   state: 'unconfigured' | 'connected' | 'connecting' | 'disconnected' | 'unknown';
+  /** The server variables that keep the pairing from working. */
+  issues?: WhatsAppPairingIssue[];
 }
 
 export interface WhatsAppPairingResult extends WhatsAppPairingStatus {

@@ -5,16 +5,14 @@ import { asyncHandler } from '../middleware/errorHandler.js';
 import { requireAdmin, tenantOf } from '../middleware/auth.js';
 import { findRow, type Row } from '../repositories/base.js';
 import { getBoolean, getNumber, getRawList, getString, getStringList } from '../repositories/settings.js';
-import type { Mailer } from '../services/mailer.js';
+import { MailError, type Mailer } from '../services/mailer.js';
 import type { CronService } from '../services/cronService.js';
 import { collectExpiring, startEmailAttempt, finishEmailAttempt } from '../services/expiryService.js';
 import { parseIntervals } from '../services/intervals.js';
 import { emailIdentity, emailIdentities } from '../services/emailAddress.js';
 import { documentEmailHtml, documentEmailText } from '../services/templates/index.js';
 import type { StorageService } from '../services/storageService.js';
-import { LEGACY_WORKSPACE_ID } from '../repositories/workspaces.js';
-import { getWorkspaceSmtp, upsertWorkspaceSmtp, deleteWorkspaceSmtp } from '../repositories/smtpSettings.js';
-import { assertPublicHost, SmtpSecurityError } from '../services/smtpSecurity.js';
+import { registerWorkspaceSmtpRoutes } from './emailSmtp.js';
 
 /**
  * Email endpoints.
@@ -24,6 +22,13 @@ import { assertPublicHost, SmtpSecurityError } from '../services/smtpSecurity.js
  */
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
+
+/**
+ * The whole SMTP exchange of a test message has to answer inside the deadline of
+ * the browser request, so a relay that never replies cannot turn into a request
+ * that hangs and is reported as a broken connection.
+ */
+const SMTP_TEST_DEADLINE_MS = 20_000;
 
 function parseAddressList(value: unknown): { valid: string[]; invalid: string[] } {
   const raw = Array.isArray(value)
@@ -82,121 +87,7 @@ export function createEmailRouter(
     }),
   );
 
-  router.get(
-    '/smtp',
-    requireAdmin,
-    asyncHandler(async (req, res) => {
-      const scope = tenantOf(req);
-      const custom = getWorkspaceSmtp(db, scope.workspaceId);
-      if (custom) {
-        res.json({
-          data: {
-            configured: true,
-            isCustom: true,
-            host: custom.host,
-            port: custom.port,
-            secure: custom.secure,
-            user: custom.user,
-            from: custom.from,
-            updatedAt: custom.updated_at,
-          },
-          error: null,
-        });
-        return;
-      }
-
-      const isLegacy = scope.workspaceId === LEGACY_WORKSPACE_ID;
-      res.json({
-        data: {
-          configured: isLegacy && mailer.isConfigured(scope),
-          isCustom: false,
-          host: isLegacy ? config.smtp.host : '',
-          port: isLegacy ? config.smtp.port : 587,
-          secure: isLegacy ? config.smtp.secure : false,
-          user: isLegacy ? config.smtp.user : '',
-          from: isLegacy ? config.smtp.from : '',
-          updatedAt: null,
-        },
-        error: null,
-      });
-    }),
-  );
-
-  router.put(
-    '/smtp',
-    requireAdmin,
-    asyncHandler(async (req, res) => {
-      const scope = tenantOf(req);
-      const host = typeof req.body?.host === 'string' ? req.body.host.trim() : '';
-      const rawPort = req.body?.port;
-      const rawSecure = req.body?.secure;
-      const user = typeof req.body?.user === 'string' ? req.body.user.trim() : '';
-      const pass = typeof req.body?.pass === 'string' ? req.body.pass : '';
-      const from = typeof req.body?.from === 'string' ? req.body.from.trim() : '';
-
-      if (rawPort !== undefined && (!Number.isInteger(rawPort) || rawPort < 1 || rawPort > 65535)) {
-        res.status(400).json({
-          data: null,
-          error: { message: 'Port must be an integer between 1 and 65535.', code: 'invalid_smtp_settings' },
-        });
-        return;
-      }
-      const port = rawPort === undefined ? 587 : rawPort;
-
-      if (rawSecure !== undefined && typeof rawSecure !== 'boolean') {
-        res.status(400).json({
-          data: null,
-          error: { message: 'Secure must be a boolean.', code: 'invalid_smtp_settings' },
-        });
-        return;
-      }
-      const secure = rawSecure === true;
-
-      if (!host || !user || !pass || !from) {
-        res.status(400).json({
-          data: null,
-          error: { message: 'host, user, pass, and from address are required.', code: 'invalid_smtp_settings' },
-        });
-        return;
-      }
-
-      try {
-        await assertPublicHost(host);
-      } catch (err: unknown) {
-        const error = err instanceof Error ? err : new Error(String(err));
-        const code = err instanceof SmtpSecurityError ? err.code : 'smtp_host_forbidden';
-        res.status(400).json({
-          data: null,
-          error: { message: error.message || 'SMTP host is forbidden.', code },
-        });
-        return;
-      }
-
-      upsertWorkspaceSmtp(db, scope.workspaceId, { host, port, secure, user, pass, from });
-      res.json({
-        data: {
-          configured: true,
-          isCustom: true,
-          host,
-          port,
-          secure,
-          user,
-          from,
-        },
-        error: null,
-      });
-    }),
-  );
-
-  router.delete(
-    '/smtp',
-    requireAdmin,
-    asyncHandler(async (req, res) => {
-      const scope = tenantOf(req);
-      deleteWorkspaceSmtp(db, scope.workspaceId);
-      res.json({ data: { deleted: true }, error: null });
-    }),
-  );
+  registerWorkspaceSmtpRoutes(router, { config, db, mailer });
 
   router.post(
     '/test',
@@ -221,24 +112,17 @@ export function createEmailRouter(
       const logId = startEmailAttempt(db, scope, {
         kind: 'test', recipients: allRecipients, subject: 'ROMANI Flow — SMTP test', details: { invalid },
       });
-      const verification = await mailer.verify(scope);
-      if (!verification.ok) {
-        finishEmailAttempt(db, scope, logId, { status: 'failed', error: verification.message });
-        res.status(502).json({
-          data: null,
-          error: { message: verification.message, code: 'smtp_unavailable' },
-        });
-        return;
-      }
 
       try {
+        // One handshake, not two. The send proves the credentials as well, and a
+        // second round trip doubles the time a broken relay can hold the request.
         const result = await mailer.send({
           to: recipients,
           cc,
           subject: 'ROMANI Flow — SMTP test',
           text: 'This is a test message from ROMANI Flow. SMTP is configured correctly.',
           html: '<p style="font-family:Segoe UI,Arial,sans-serif">This is a test message from <strong>ROMANI Flow</strong>. SMTP is configured correctly.</p>',
-        }, scope);
+        }, scope, { deadlineMs: SMTP_TEST_DEADLINE_MS });
 
         finishEmailAttempt(db, scope, logId, {
           status: result.status,
@@ -254,8 +138,10 @@ export function createEmailRouter(
         res.json({ data: { sent: true, recipients: allRecipients, invalid, messageId: result.messageId }, error: null });
       } catch (error) {
         const detail = error instanceof Error ? error.message : String(error);
+        const status = error instanceof MailError ? error.status : 502;
+        const code = error instanceof MailError ? error.code : 'send_failed';
         finishEmailAttempt(db, scope, logId, { status: 'failed', error: detail });
-        res.status(502).json({ data: null, error: { message: detail, code: 'send_failed' } });
+        res.status(status).json({ data: null, error: { message: detail, code } });
       }
     }),
   );

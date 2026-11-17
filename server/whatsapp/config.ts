@@ -31,6 +31,49 @@ export function pairingConfiguration(config: PairingConfig): 'absent' | 'valid' 
   }
 }
 
+/** One environment variable that blocks the pairing, named but never valued. */
+export interface PairingConfigurationIssue {
+  variable: string;
+  problem: 'missing' | 'invalid';
+}
+
+/**
+ * The variables that keep the pairing from working.
+ *
+ * The operator sees one unusable panel and no way to tell which setting is
+ * wrong. Only the name of the variable and whether it is missing or malformed
+ * is reported, so a secret never leaves the server.
+ */
+export function pairingConfigurationIssues(config: PairingConfig): PairingConfigurationIssue[] {
+  const issues: PairingConfigurationIssue[] = [];
+  if (!config.url) issues.push({ variable: 'ROMANI_EVOLUTION_URL', problem: 'missing' });
+  else if (!isPairingUrl(config.url)) issues.push({ variable: 'ROMANI_EVOLUTION_URL', problem: 'invalid' });
+
+  if (!config.instance) issues.push({ variable: 'ROMANI_EVOLUTION_INSTANCE', problem: 'missing' });
+  else if (!/^(?:romani|rf_[a-zA-Z0-9_-]+)(?:[-_][a-z0-9]+)*$/.test(config.instance)) {
+    issues.push({ variable: 'ROMANI_EVOLUTION_INSTANCE', problem: 'invalid' });
+  }
+
+  if (!config.apiKey) issues.push({ variable: 'ROMANI_EVOLUTION_API_KEY', problem: 'missing' });
+  else if (config.apiKey.length < 16) issues.push({ variable: 'ROMANI_EVOLUTION_API_KEY', problem: 'invalid' });
+
+  if (!config.webhookSecret) issues.push({ variable: 'ROMANI_EVOLUTION_WEBHOOK_SECRET', problem: 'missing' });
+  else if (config.webhookSecret.length < 32 || config.webhookSecret === config.apiKey) {
+    issues.push({ variable: 'ROMANI_EVOLUTION_WEBHOOK_SECRET', problem: 'invalid' });
+  }
+
+  return issues;
+}
+
+function isPairingUrl(value: string): boolean {
+  try {
+    const url = new URL(value);
+    return ['http:', 'https:'].includes(url.protocol) && !url.username && !url.password && !url.search && !url.hash;
+  } catch {
+    return false;
+  }
+}
+
 /** Sending is bound to the reviewed origin; pairing fixtures may use broader configuration. */
 export function reminderOrigin(config: PairingConfig): string | null {
   if (pairingConfiguration(config) !== 'valid') return null;

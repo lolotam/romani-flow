@@ -1,7 +1,7 @@
 import nodemailer, { type Transporter } from 'nodemailer';
 import type { AppConfig } from '../config.js';
 import { isSmtpConfigured } from '../config.js';
-import { emailIdentity, emailIdentities } from './emailAddress.js';
+import { emailIdentity, emailIdentities, mailboxOf } from './emailAddress.js';
 import type { Db } from '../db/connection.js';
 import type { Scope } from '../repositories/base.js';
 import { LEGACY_WORKSPACE_ID } from '../repositories/workspaces.js';
@@ -50,6 +50,40 @@ export class MailError extends Error {
   }
 }
 
+/** The relay did not answer inside the deadline of the request. */
+export class MailTimeoutError extends MailError {
+  constructor(readonly timeoutMs: number) {
+    super(`The mail server did not answer within ${Math.round(timeoutMs / 1000)} seconds.`, 'smtp_timeout', 504);
+    this.name = 'MailTimeoutError';
+  }
+}
+
+/**
+ * Socket deadlines for one SMTP exchange.
+ *
+ * A relay that blackholes the connection has to fail inside the deadline of the
+ * browser request. A request that hangs is aborted by the proxy or by the
+ * browser, and the operator then sees a broken connection instead of the
+ * reason the mail did not go out.
+ */
+export const SMTP_CONNECTION_TIMEOUT_MS = 8_000;
+export const SMTP_GREETING_TIMEOUT_MS = 8_000;
+export const SMTP_SOCKET_TIMEOUT_MS = 12_000;
+
+/** Stops waiting for the relay when it does not answer inside the deadline. */
+function withDeadline<T>(work: Promise<T>, deadlineMs: number): Promise<T> {
+  if (!deadlineMs || deadlineMs <= 0) return work;
+  let timer: NodeJS.Timeout | undefined;
+  const deadline = new Promise<never>((_resolve, reject) => {
+    const handle = setTimeout(() => reject(new MailTimeoutError(deadlineMs)), deadlineMs);
+    handle.unref();
+    timer = handle;
+  });
+  return Promise.race([work, deadline]).finally(() => {
+    if (timer) clearTimeout(timer);
+  });
+}
+
 export class Mailer {
   private defaultTransporter: Transporter | null = null;
   private workspaceTransporters = new Map<string, { transporter: Transporter; from: string; signature: string }>();
@@ -91,9 +125,9 @@ export class Mailer {
             user: custom.user,
             pass: custom.pass,
           },
-          connectionTimeout: 15_000,
-          greetingTimeout: 15_000,
-          socketTimeout: 30_000,
+          connectionTimeout: SMTP_CONNECTION_TIMEOUT_MS,
+          greetingTimeout: SMTP_GREETING_TIMEOUT_MS,
+          socketTimeout: SMTP_SOCKET_TIMEOUT_MS,
           lookup: createSecureLookup(),
         } as nodemailer.TransportOptions);
         this.workspaceTransporters.set(scope.workspaceId, {
@@ -130,17 +164,22 @@ export class Mailer {
           user: this.config.smtp.user,
           pass: this.config.smtp.pass as string,
         },
-        connectionTimeout: 15_000,
-        greetingTimeout: 15_000,
-        socketTimeout: 30_000,
+        connectionTimeout: SMTP_CONNECTION_TIMEOUT_MS,
+        greetingTimeout: SMTP_GREETING_TIMEOUT_MS,
+        socketTimeout: SMTP_SOCKET_TIMEOUT_MS,
       });
     }
 
     return { transporter: this.defaultTransporter, from: this.config.smtp.from };
   }
 
-  /** Sends one message. Rejects empty recipient lists before touching the network. */
-  async send(message: MailMessage, scope?: Scope): Promise<MailResult> {
+  /**
+   * Sends one message. Rejects empty recipient lists before touching the network.
+   *
+   * `deadlineMs` bounds the whole exchange, so a relay that never answers still
+   * produces a reply with a reason instead of a request that hangs.
+   */
+  async send(message: MailMessage, scope?: Scope, options: { deadlineMs?: number } = {}): Promise<MailResult> {
     const to = emailIdentities(message.to);
     const cc = message.cc ? emailIdentities(message.cc).filter(address => !to.some(primary => emailIdentity(primary) === emailIdentity(address))) : undefined;
     const bcc = message.bcc ? emailIdentities(message.bcc).filter(address => ![...to, ...(cc ?? [])].some(primary => emailIdentity(primary) === emailIdentity(address))) : undefined;
@@ -150,21 +189,32 @@ export class Mailer {
 
     const { transporter, from } = this.getTransport(scope);
 
+    if (!mailboxOf(from)) {
+      throw new MailError(
+        'The sender address must contain an email address, for example "Company <no-reply@example.com>".',
+        'smtp_from_invalid',
+        502,
+      );
+    }
+
     try {
-      const info = await transporter.sendMail({
-        from,
-        to,
-        cc,
-        bcc,
-        subject: message.subject,
-        text: message.text,
-        html: message.html,
-        attachments: message.attachments?.map((attachment) => ({
-          filename: attachment.filename,
-          content: attachment.content,
-          contentType: attachment.contentType,
-        })),
-      });
+      const info = await withDeadline(
+        transporter.sendMail({
+          from,
+          to,
+          cc,
+          bcc,
+          subject: message.subject,
+          text: message.text,
+          html: message.html,
+          attachments: message.attachments?.map((attachment) => ({
+            filename: attachment.filename,
+            content: attachment.content,
+            contentType: attachment.contentType,
+          })),
+        }),
+        options.deadlineMs ?? 0,
+      );
 
       const accepted = emailIdentities((info.accepted ?? []).map((address: unknown) => String(address))).map(emailIdentity);
       const rejected = emailIdentities((info.rejected ?? []).map((address: unknown) => String(address))).map(emailIdentity);
@@ -181,6 +231,7 @@ export class Mailer {
         rejected: [...rejected, ...missing],
       };
     } catch (error) {
+      if (error instanceof MailError) throw error;
       const detail = error instanceof Error ? error.message : String(error);
       const code = error && typeof error === 'object' && 'code' in error ? String(error.code) : '';
       const provenUnsent = ['ENOTFOUND', 'EAI_AGAIN', 'ECONNREFUSED', 'EDNS'].includes(code);

@@ -67,6 +67,28 @@ designated mailbox/relay before retrying to avoid duplicates. Failed reminders
 remain retryable; a successful automated day is deduplicated. Selection is based
 on enabled intervals and due dates, not on the mere existence of a document.
 
+### Reading an SMTP test failure
+
+The test button answers with a reason, and the reason is a stable code. The
+message in the toast carries the same code:
+
+| Code | Meaning | Next step |
+| --- | --- | --- |
+| `invalid_smtp_settings` | The saved sender carries no mailbox | Save the sender as `Company <no-reply@example.com>` |
+| `smtp_not_configured` | The workspace has no relay | Save a relay in Settings |
+| `smtp_host_forbidden` | The host resolves to a private or reserved address | Use a public relay host |
+| `smtp_timeout` | The relay did not answer inside 20 seconds | Check egress to the relay port from the container |
+| `smtp_rejected` | The relay refused the credentials or the envelope | Correct the user, the app password or the sender |
+| `connection_failed` | The relay was never reached | Check DNS and the outbound relay port |
+| `invalid_response` | A proxy answered instead of the application | Check the reverse proxy and the container state |
+| `network_error` | The browser never reached the application | Check the origin, the certificate and the container logs |
+
+`invalid_response` and `network_error` never come from the SMTP exchange: the
+request did not reach the application, or the answer was not a JSON envelope.
+Read the container logs and the proxy before changing the relay. The test uses
+one SMTP exchange with a 20-second deadline, so a relay that never answers
+still produces a reason instead of a request that hangs.
+
 The scheduler runs inside the single API process. It uses the process timezone.
 Production's configured expression is `0 8 * * *`; a separate read-only runtime
 check resolved the actual process timezone as `UTC`. This is a direct
