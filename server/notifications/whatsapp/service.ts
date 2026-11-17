@@ -28,7 +28,7 @@ export class WhatsAppReminders {
     readonly transport: WhatsAppTransport,
     readonly clock: () => Date = () => new Date(),
     scope: Scope = { workspaceId: LEGACY_WORKSPACE_ID },
-    readonly transportFactory?: (instance: string) => WhatsAppTransport,
+    readonly transportFactory?: (instance: string, scope?: Scope) => WhatsAppTransport,
   ) {
     this.scope = scope;
     this.store = new ReminderStore(db, this.scope, instance, clock);
@@ -44,7 +44,7 @@ export class WhatsAppReminders {
     const key = `${scope.workspaceId}:${inst}`;
     let runtime = this.workspaceRuntimes.get(key);
     if (!runtime) {
-      const childTransport = transport ?? (this.transportFactory ? this.transportFactory(inst) : this.transport);
+      const childTransport = transport ?? (this.transportFactory ? this.transportFactory(inst, scope) : this.transport);
       runtime = new WhatsAppReminders(this.db, inst, childTransport, this.clock, scope, this.transportFactory);
       this.workspaceRuntimes.set(key, runtime);
       if (this.started) {

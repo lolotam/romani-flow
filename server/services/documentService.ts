@@ -49,19 +49,40 @@ const STORAGE_COLUMNS = ['file_path', 'file_name', 'file_size', 'mime_type'] as 
 export interface UploadOwner { userId: string; scope: string }
 interface DocumentWriteHooks { completed?: (row: Row) => void; uploadOwner?: UploadOwner }
 
+export type NotificationHooks = {
+  coordinator: NotificationCoordinator;
+  changed: () => void;
+  aroundWrite?: <T>(action: () => Promise<T>) => Promise<T>;
+};
+
+export type NotificationResolver = (scope: Scope) => NotificationHooks;
+
 export class DocumentService {
-  private notifications: { coordinator: NotificationCoordinator; changed: () => void } | null = null;
+  private notifications: NotificationHooks | NotificationResolver | null = null;
   constructor(
     private readonly db: Db,
     private readonly storage: StorageService,
   ) {}
 
-  configureNotifications(hooks: { coordinator: NotificationCoordinator; changed: () => void }): void {
+  configureNotifications(hooks: NotificationHooks | NotificationResolver): void {
     this.notifications = hooks;
   }
 
-  private serialize<T>(action: () => Promise<T>): Promise<T> {
-    return this.notifications ? this.notifications.coordinator.runExclusive(action) : action();
+  private getNotifications(scope?: Scope): NotificationHooks | null {
+    if (!this.notifications) return null;
+    if (typeof this.notifications === 'function') {
+      return scope ? this.notifications(scope) : null;
+    }
+    return this.notifications;
+  }
+
+  private serialize<T>(action: () => Promise<T>, scope?: Scope): Promise<T> {
+    const hooks = this.getNotifications(scope);
+    if (!hooks) return action();
+    if (hooks.aroundWrite) {
+      return hooks.aroundWrite(action);
+    }
+    return hooks.coordinator.runExclusive(action);
   }
 
   /** Stage files under erase's coordinator and check the draft before writing any bytes. */
@@ -90,7 +111,7 @@ export class DocumentService {
         await this.cleanupTrackedFiles(paths);
         throw error;
       }
-    });
+    }, scope);
   }
 
   /** Reuse a still-pending upload only after validating the current draft. */
@@ -101,7 +122,7 @@ export class DocumentService {
       const upload = this.resolveUpload(scope, uploadId);
       if (!upload || !this.storage.exists(upload.filePath)) throw new RepositoryError('Upload is no longer pending.', 'invalid_upload', 404);
       return upload;
-    });
+    }, scope);
   }
 
   /** Revoke claimability before unlink; failed cleanup remains durable and retryable. */
@@ -132,7 +153,7 @@ export class DocumentService {
   }
 
   /** Failed removals retain durable tracking and never hide the staging error. */
-  async cleanupTrackedFiles(paths: string[]): Promise<number> {
+  async cleanupTrackedFiles(paths: string[], _scope?: Scope): Promise<number> {
     let removed = 0;
     for (const path of paths) {
       try {
@@ -232,7 +253,7 @@ export class DocumentService {
    */
   async createDocument(scope: Scope, payload: Row, status: (expiry: string | null) => string, hooks?: DocumentWriteHooks): Promise<Row> {
     // Same coordinator as update/delete, so a create cannot interleave with a backup erase.
-    return this.serialize(async () => this.createDocumentLocked(scope, payload, status, hooks));
+    return this.serialize(async () => this.createDocumentLocked(scope, payload, status, hooks), scope);
   }
 
   private createDocumentLocked(scope: Scope, payload: Row, status: (expiry: string | null) => string, hooks?: DocumentWriteHooks): Row {
@@ -256,7 +277,7 @@ export class DocumentService {
 
       if (uploadId) this.claimUpload(scope, uploadId);
       hooks?.completed?.(row);
-      this.notifications?.changed();
+      this.getNotifications(scope)?.changed();
       this.db.exec('COMMIT');
       return row;
     } catch (error) {
@@ -278,7 +299,7 @@ export class DocumentService {
     status: (expiry: string | null) => string,
     hooks?: DocumentWriteHooks,
   ): Promise<Row | null> {
-    return this.serialize(() => this.updateDocumentLocked(scope, documentId, payload, status, hooks));
+    return this.serialize(() => this.updateDocumentLocked(scope, documentId, payload, status, hooks), scope);
   }
 
   private async updateDocumentLocked(
@@ -316,7 +337,7 @@ export class DocumentService {
 
       if (row) hooks?.completed?.(row);
       if (uploadId) this.claimUpload(scope, uploadId);
-      this.notifications?.changed();
+      this.getNotifications(scope)?.changed();
       this.db.exec('COMMIT');
 
       // Only a replacement upload retires the old file; a data-only update keeps it.
@@ -368,7 +389,7 @@ export class DocumentService {
 
   /** Deletes a document and its file together. */
   async deleteDocument(scope: Scope, documentId: string): Promise<boolean> {
-    return this.serialize(() => this.deleteDocumentLocked(scope, documentId));
+    return this.serialize(() => this.deleteDocumentLocked(scope, documentId), scope);
   }
 
   private async deleteDocumentLocked(scope: Scope, documentId: string): Promise<boolean> {
@@ -377,7 +398,7 @@ export class DocumentService {
 
     const deleted = atomic(this.db, () => {
       const result = this.db.prepare('DELETE FROM documents WHERE id = ? AND workspace_id = ?').run(documentId, scope.workspaceId);
-      this.notifications?.changed();
+      this.getNotifications(scope)?.changed();
       return result.changes !== 0;
     });
     if (!deleted) return false;
@@ -388,7 +409,7 @@ export class DocumentService {
 
   /** Replaces the attachment of a document, keeping the old file until the swap succeeded. */
   async replaceFile(scope: Scope, documentId: string, uploadId: string, owner?: UploadOwner, guard?: () => void): Promise<Row | null> {
-    return this.serialize(() => this.replaceFileLocked(scope, documentId, uploadId, owner, guard));
+    return this.serialize(() => this.replaceFileLocked(scope, documentId, uploadId, owner, guard), scope);
   }
 
   private async replaceFileLocked(scope: Scope, documentId: string, uploadId: string, owner?: UploadOwner, guard?: () => void): Promise<Row | null> {
@@ -428,7 +449,7 @@ export class DocumentService {
 
   /** Detaches the file from a document without deleting the record. */
   async detachFile(scope: Scope, documentId: string): Promise<Row | null> {
-    return this.serialize(() => this.detachFileLocked(scope, documentId));
+    return this.serialize(() => this.detachFileLocked(scope, documentId), scope);
   }
 
   private async detachFileLocked(scope: Scope, documentId: string): Promise<Row | null> {

@@ -17,10 +17,12 @@ CREATE TABLE IF NOT EXISTS workspace_smtp_settings (
 CREATE TABLE IF NOT EXISTS workspace_whatsapp_instances (
   workspace_id TEXT PRIMARY KEY REFERENCES workspaces(id) ON DELETE CASCADE,
   instance_name TEXT NOT NULL UNIQUE,
+  api_key TEXT NOT NULL DEFAULT '',
+  pairing_pending_until INTEGER NOT NULL DEFAULT 0,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );
 
 -- Register default instance for the legacy Romani workspace
-INSERT OR IGNORE INTO workspace_whatsapp_instances (workspace_id, instance_name, created_at, updated_at)
-VALUES ('ws_legacy', 'romani', strftime('%Y-%m-%dT%H:%M:%fZ','now'), strftime('%Y-%m-%dT%H:%M:%fZ','now'));
+INSERT OR IGNORE INTO workspace_whatsapp_instances (workspace_id, instance_name, api_key, pairing_pending_until, created_at, updated_at)
+VALUES ('ws_legacy', 'romani', '', 0, strftime('%Y-%m-%dT%H:%M:%fZ','now'), strftime('%Y-%m-%dT%H:%M:%fZ','now'));

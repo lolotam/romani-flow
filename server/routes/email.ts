@@ -14,6 +14,7 @@ import { documentEmailHtml, documentEmailText } from '../services/templates/inde
 import type { StorageService } from '../services/storageService.js';
 import { LEGACY_WORKSPACE_ID } from '../repositories/workspaces.js';
 import { getWorkspaceSmtp, upsertWorkspaceSmtp, deleteWorkspaceSmtp } from '../repositories/smtpSettings.js';
+import { assertPublicHost, SmtpSecurityError } from '../services/smtpSecurity.js';
 
 /**
  * Email endpoints.
@@ -127,16 +128,45 @@ export function createEmailRouter(
     asyncHandler(async (req, res) => {
       const scope = tenantOf(req);
       const host = typeof req.body?.host === 'string' ? req.body.host.trim() : '';
-      const port = Number(req.body?.port) || 587;
-      const secure = Boolean(req.body?.secure);
+      const rawPort = req.body?.port;
+      const rawSecure = req.body?.secure;
       const user = typeof req.body?.user === 'string' ? req.body.user.trim() : '';
       const pass = typeof req.body?.pass === 'string' ? req.body.pass : '';
       const from = typeof req.body?.from === 'string' ? req.body.from.trim() : '';
+
+      if (rawPort !== undefined && (!Number.isInteger(rawPort) || rawPort < 1 || rawPort > 65535)) {
+        res.status(400).json({
+          data: null,
+          error: { message: 'Port must be an integer between 1 and 65535.', code: 'invalid_smtp_settings' },
+        });
+        return;
+      }
+      const port = rawPort === undefined ? 587 : rawPort;
+
+      if (rawSecure !== undefined && typeof rawSecure !== 'boolean') {
+        res.status(400).json({
+          data: null,
+          error: { message: 'Secure must be a boolean.', code: 'invalid_smtp_settings' },
+        });
+        return;
+      }
+      const secure = rawSecure === true;
 
       if (!host || !user || !pass || !from) {
         res.status(400).json({
           data: null,
           error: { message: 'host, user, pass, and from address are required.', code: 'invalid_smtp_settings' },
+        });
+        return;
+      }
+
+      try {
+        await assertPublicHost(host);
+      } catch (err: any) {
+        const code = err instanceof SmtpSecurityError ? err.code : 'smtp_host_forbidden';
+        res.status(400).json({
+          data: null,
+          error: { message: err.message || 'SMTP host is forbidden.', code },
         });
         return;
       }

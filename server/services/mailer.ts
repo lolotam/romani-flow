@@ -6,6 +6,7 @@ import type { Db } from '../db/connection.js';
 import type { Scope } from '../repositories/base.js';
 import { LEGACY_WORKSPACE_ID } from '../repositories/workspaces.js';
 import { getWorkspaceSmtp } from '../repositories/smtpSettings.js';
+import { createSecureLookup } from './smtpSecurity.js';
 
 /**
  * SMTP transport.
@@ -93,7 +94,8 @@ export class Mailer {
           connectionTimeout: 15_000,
           greetingTimeout: 15_000,
           socketTimeout: 30_000,
-        });
+          lookup: createSecureLookup(),
+        } as any);
         this.workspaceTransporters.set(scope.workspaceId, {
           transporter,
           from: custom.from,

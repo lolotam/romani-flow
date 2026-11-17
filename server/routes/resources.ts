@@ -28,8 +28,8 @@ export interface ResourceOptions {
   defaultRelations?: string[];
   /** Hook applied to every write payload before it reaches the database. */
   transformWrite?: (payload: Row, db: Db, scope: Scope, existing?: Row) => Row;
-  aroundWrite?: <T>(action: () => Promise<T>) => Promise<T>;
-  afterWrite?: () => void;
+  aroundWrite?: <T>(action: () => Promise<T>, scope: Scope) => Promise<T>;
+  afterWrite?: (scope: Scope) => void;
   /** Hook that shapes a row on the way out, for derived or typed values. */
   transformRead?: (row: Row, db: Db) => Row;
   /** Hook that performs the delete and any cleanup it owns. */
@@ -70,7 +70,8 @@ export function createResourceRouter(
   options: ResourceOptions = {},
 ): Router {
   const router = Router();
-  const write = <T>(action: () => Promise<T>): Promise<T> => options.aroundWrite ? options.aroundWrite(action) : action();
+  const write = <T>(action: () => Promise<T>, scope: Scope): Promise<T> =>
+    options.aroundWrite ? options.aroundWrite(action, scope) : action();
 
   const relationsFor = (req: Request): string[] => {
     const parsed = parseListOptions(req.query, tableName);
@@ -96,32 +97,34 @@ export function createResourceRouter(
   router.post(
     '/',
     requireRole('editor'),
-    asyncHandler(async (req, res) => write(async () => {
-      const payload = readPayload(req);
-      const records = Array.isArray(payload) ? payload : [payload];
+    asyncHandler(async (req, res) => {
       const scope = tenantOf(req);
+      return write(async () => {
+        const payload = readPayload(req);
+        const records = Array.isArray(payload) ? payload : [payload];
 
-      let inserted: Row[];
-      db.exec('BEGIN');
-      try {
-        inserted = records.map((record) => {
-          assertNoManagedFields(record, options.managedFields ?? [], tableName);
-          const prepared = options.transformWrite ? options.transformWrite(record, db, scope) : record;
-          const row = insertRow(db, scope, tableName, prepared);
-          rememberSubmission(db, scope, req.user!.id, tableName, shape(row));
-          options.afterWrite?.();
-          return row;
-        });
-        db.exec('COMMIT');
-      } catch (error) {
-        db.exec('ROLLBACK');
-        throw error;
-      }
+        let inserted: Row[];
+        db.exec('BEGIN');
+        try {
+          inserted = records.map((record) => {
+            assertNoManagedFields(record, options.managedFields ?? [], tableName);
+            const prepared = options.transformWrite ? options.transformWrite(record, db, scope) : record;
+            const row = insertRow(db, scope, tableName, prepared);
+            rememberSubmission(db, scope, req.user!.id, tableName, shape(row));
+            options.afterWrite?.(scope);
+            return row;
+          });
+          db.exec('COMMIT');
+        } catch (error) {
+          db.exec('ROLLBACK');
+          throw error;
+        }
 
-      // The rows are shaped on the way out, exactly like a GET would do them, so
-      // the client sees the same column types no matter how it created the row.
-      res.status(201).json({ data: inserted.map(shape), error: null });
-    })),
+        // The rows are shaped on the way out, exactly like a GET would do them, so
+        // the client sees the same column types no matter how it created the row.
+        res.status(201).json({ data: inserted.map(shape), error: null });
+      }, scope);
+    }),
   );
 
   router.get(
@@ -142,56 +145,60 @@ export function createResourceRouter(
   router.patch(
     '/:id',
     requireRole('editor'),
-    asyncHandler(async (req, res) => write(async () => {
-      const payload = readPayload(req);
-      assertNoManagedFields(payload, options.managedFields ?? [], tableName);
-
-      // The identifier is immutable — changing it would break every reference.
-      if ('id' in payload) {
-        throw new RepositoryError('The identifier cannot be changed.', 'immutable_field', 400);
-      }
-
+    asyncHandler(async (req, res) => {
       const scope = tenantOf(req);
-      const row = atomic(db, () => {
-        const existing = findRow(db, scope, tableName, String(req.params.id), []);
-        if (!existing) return null;
-        const prepared = options.transformWrite ? options.transformWrite(payload, db, scope, existing ?? undefined) : payload;
-        const updated = updateRow(db, scope, tableName, String(req.params.id), prepared);
-        options.afterWrite?.();
-        return updated;
-      });
+      return write(async () => {
+        const payload = readPayload(req);
+        assertNoManagedFields(payload, options.managedFields ?? [], tableName);
 
-      if (!row) {
-        res.status(404).json({
-          data: null,
-          error: { message: `${tableName} "${String(req.params.id)}" was not found.`, code: 'not_found' },
+        // The identifier is immutable — changing it would break every reference.
+        if ('id' in payload) {
+          throw new RepositoryError('The identifier cannot be changed.', 'immutable_field', 400);
+        }
+
+        const row = atomic(db, () => {
+          const existing = findRow(db, scope, tableName, String(req.params.id), []);
+          if (!existing) return null;
+          const prepared = options.transformWrite ? options.transformWrite(payload, db, scope, existing ?? undefined) : payload;
+          const updated = updateRow(db, scope, tableName, String(req.params.id), prepared);
+          options.afterWrite?.(scope);
+          return updated;
         });
-        return;
-      }
-      res.json({ data: shape(row), error: null });
-    })),
+
+        if (!row) {
+          res.status(404).json({
+            data: null,
+            error: { message: `${tableName} "${String(req.params.id)}" was not found.`, code: 'not_found' },
+          });
+          return;
+        }
+        res.json({ data: shape(row), error: null });
+      }, scope);
+    }),
   );
 
   router.delete(
     '/:id',
     requireRole('editor'),
-    asyncHandler(async (req, res) => write(async () => {
+    asyncHandler(async (req, res) => {
       const id = String(req.params.id);
       const scope = tenantOf(req);
-      const deleted = options.onDelete ? await options.onDelete(id, scope) : atomic(db, () => {
-        const result = deleteRow(db, scope, tableName, id);
-        options.afterWrite?.();
-        return result;
-      });
-      if (!deleted) {
-        res.status(404).json({
-          data: null,
-          error: { message: `${tableName} "${id}" was not found.`, code: 'not_found' },
+      return write(async () => {
+        const deleted = options.onDelete ? await options.onDelete(id, scope) : atomic(db, () => {
+          const result = deleteRow(db, scope, tableName, id);
+          options.afterWrite?.(scope);
+          return result;
         });
-        return;
-      }
-      res.json({ data: { id, deleted: true }, error: null });
-    })),
+        if (!deleted) {
+          res.status(404).json({
+            data: null,
+            error: { message: `${tableName} "${id}" was not found.`, code: 'not_found' },
+          });
+          return;
+        }
+        res.json({ data: { id, deleted: true }, error: null });
+      }, scope);
+    }),
   );
 
   return router;

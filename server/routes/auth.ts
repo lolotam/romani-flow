@@ -35,13 +35,33 @@ import { getWorkspaceInstance } from '../whatsapp/instance.js';
  */
 
 const MAX_ATTEMPTS = 8;
+const MAX_IP_ATTEMPTS = 20;
 const WINDOW_MS = 10 * 60 * 1000;
+const MAX_ENTRIES = 5000;
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
 
-const attempts = new Map<string, { count: number; resetAt: number }>();
+interface RateLimitEntry { count: number; resetAt: number }
+const attempts = new Map<string, RateLimitEntry>();
 
-function isRateLimited(key: string): boolean {
+function pruneExpiredAttempts(now: number): void {
+  if (attempts.size > MAX_ENTRIES) {
+    for (const [key, entry] of attempts) {
+      if (entry.resetAt <= now) attempts.delete(key);
+    }
+    if (attempts.size > MAX_ENTRIES) {
+      const keysToDelete = Array.from(attempts.keys()).slice(0, 1000);
+      for (const k of keysToDelete) attempts.delete(k);
+    }
+  } else {
+    for (const [key, entry] of attempts) {
+      if (entry.resetAt <= now) attempts.delete(key);
+    }
+  }
+}
+
+function isRateLimited(key: string, limit = MAX_ATTEMPTS): boolean {
   const now = Date.now();
+  pruneExpiredAttempts(now);
   const entry = attempts.get(key);
 
   if (!entry || entry.resetAt <= now) {
@@ -50,7 +70,7 @@ function isRateLimited(key: string): boolean {
   }
 
   entry.count += 1;
-  return entry.count > MAX_ATTEMPTS;
+  return entry.count > limit;
 }
 
 function clearAttempts(key: string): void {
@@ -137,6 +157,17 @@ export function createAuthRouter(
         res.status(400).json({
           data: null,
           error: { message: 'A valid email address is required.', code: 'invalid_email' },
+        });
+        return;
+      }
+
+      if (config.platformAdminEmails.includes(email)) {
+        res.status(403).json({
+          data: null,
+          error: {
+            message: 'Platform administrator accounts cannot be registered publicly.',
+            code: 'platform_email_restricted',
+          },
         });
         return;
       }
@@ -241,17 +272,23 @@ export function createAuthRouter(
 
       if (!checkOrigin(req, res, config)) return;
 
-      const key = `${req.ip ?? 'unknown'}:${typeof req.body?.email === 'string' ? req.body.email.trim().toLowerCase() : ''}`;
-      if (config.env !== 'test' && isRateLimited(key)) {
-        res.status(429).json({
-          data: null,
-          error: { message: 'Too many login attempts. Try again later.', code: 'rate_limited' },
-        });
-        return;
-      }
-
+      const ip = req.ip ?? 'unknown';
       const email = typeof req.body?.email === 'string' ? req.body.email.trim().toLowerCase() : '';
       const password = typeof req.body?.password === 'string' ? req.body.password : '';
+      const ipKey = `login_ip:${ip}`;
+      const accKey = `login_acc:${ip}:${email}`;
+
+      if (config.env !== 'test') {
+        const ipBlocked = isRateLimited(ipKey, MAX_IP_ATTEMPTS);
+        const accBlocked = email ? isRateLimited(accKey, MAX_ATTEMPTS) : false;
+        if (ipBlocked || accBlocked) {
+          res.status(429).json({
+            data: null,
+            error: { message: 'Too many login attempts. Try again later.', code: 'rate_limited' },
+          });
+          return;
+        }
+      }
 
       if (!email || !password) {
         res.status(400).json({
@@ -280,7 +317,7 @@ export function createAuthRouter(
         return;
       }
 
-      clearAttempts(key);
+      clearAttempts(accKey);
       touchLastLogin(db, admin.id);
 
       const user = toSessionUser(admin);

@@ -63,7 +63,18 @@ export function createApp(deps: AppDependencies): Express {
   const { config, db, mailer, cron, storage, documents, staticDir } = deps;
   mailer.setDb(db);
   const reminders = deps.reminders ?? createReminderRuntime(db, config.whatsapp);
-  documents.configureNotifications({ coordinator: reminders.coordinator, changed: () => reminders.reconcile() });
+  const workspaceRuntime = (scope: Scope) => {
+    const inst = getWorkspaceInstance(db, scope.workspaceId, config.whatsapp.instance);
+    return reminders.forWorkspace(scope, inst);
+  };
+  documents.configureNotifications((scope) => {
+    const rt = workspaceRuntime(scope);
+    return {
+      coordinator: rt.coordinator,
+      aroundWrite: (action) => rt.aroundWrite(action),
+      changed: () => rt.reconcile(),
+    };
+  });
   cron.setReminderEnqueueResolver((wsScope: Scope) => {
     const inst = getWorkspaceInstance(db, wsScope.workspaceId, config.whatsapp.instance);
     const rt = reminders.forWorkspace(wsScope, inst);
@@ -131,7 +142,7 @@ export function createApp(deps: AppDependencies): Express {
   app.use('/api/whatsapp/webhook', createPairingWebhook(config.whatsapp));
   app.get('/api/platform/me', signedIn, (req, res) => {
     const email = req.user?.email.toLowerCase() ?? '';
-    const isPlatform = req.user?.role === 'admin' || (email && config.platformAdminEmails.includes(email));
+    const isPlatform = email && config.platformAdminEmails.includes(email);
     res.json({ data: { isPlatformAdmin: Boolean(isPlatform) }, error: null });
   });
 
@@ -144,7 +155,7 @@ export function createApp(deps: AppDependencies): Express {
   app.use('/api/settings', authenticated, createSettingsRouter(config, db, cron, reminders, extraction, mailer));
   app.use('/api/files', authenticated, createFilesRouter(config, db, storage, documents));
   app.use('/api/email', authenticated, createEmailRouter(config, db, mailer, cron, storage));
-  app.use('/api/backup', authenticated, createBackupRouter(db, documents, reminders));
+  app.use('/api/backup', authenticated, createBackupRouter(db, documents, reminders, config.whatsapp.instance));
 
   app.get(
     '/api/cron/status',
@@ -258,8 +269,8 @@ export function createApp(deps: AppDependencies): Express {
       defaultRelations: ['companies'],
       managedFields: ['photo_path', 'photo_mime_type'],
       transformWrite: (payload, db, scope, existing) => prepareEmployee(payload, db, scope, existing),
-      aroundWrite: action => reminders.aroundWrite(action),
-      afterWrite: () => reminders.reconcile(),
+      aroundWrite: (action, scope) => workspaceRuntime(scope).aroundWrite(action),
+      afterWrite: (scope) => workspaceRuntime(scope).reconcile(),
       transformRead: (row) => ({
         ...row,
         is_active: Boolean(row.is_active),
@@ -269,7 +280,8 @@ export function createApp(deps: AppDependencies): Express {
     }),
   );
   app.use('/api/companies', authenticated, createResourceRouter(db, 'companies', {
-    aroundWrite: action => reminders.aroundWrite(action), afterWrite: () => reminders.reconcile(),
+    aroundWrite: (action, scope) => workspaceRuntime(scope).aroundWrite(action),
+    afterWrite: (scope) => workspaceRuntime(scope).reconcile(),
   }));
   app.use('/api/ministries', authenticated, createResourceRouter(db, 'ministries'));
   app.use('/api/document-types', authenticated, createResourceRouter(db, 'document_types'));

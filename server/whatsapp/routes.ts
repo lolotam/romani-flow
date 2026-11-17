@@ -8,10 +8,13 @@ import { asyncHandler } from '../middleware/errorHandler.js';
 import type { NodeEnv } from '../config.js';
 import type { WhatsAppReminders } from '../notifications/whatsapp/service.js';
 import { requireReminderWorkspace } from '../notifications/whatsapp/routes.js';
-import { getNumber, setSetting } from '../repositories/settings.js';
-
-/** Shared, durable end of the 60-second QR window; saved per-workspace. */
-const PENDING_PAIRING_KEY = 'system.whatsapp_pairing_pending_until';
+import {
+  getWorkspaceWhatsAppRecord,
+  getWorkspaceInstance,
+  getPairingPendingUntil,
+  setPairingPendingUntil,
+} from './instance.js';
+export { getWorkspaceInstance };
 
 function fail(res: Response, status: number, code: string): void {
   res.status(status).json({ data: null, error: { code, message: 'WhatsApp connection request could not be completed.' } });
@@ -21,10 +24,6 @@ function emptyInput(req: Request): boolean {
   return !['x-project', 'x-project-id', 'x-instance', 'x-instance-name'].some(name => req.get(name)) && Object.keys(req.query).length === 0 &&
     (req.body === undefined || (typeof req.body === 'object' && req.body !== null && !Array.isArray(req.body) && Object.keys(req.body).length === 0));
 }
-
-import { getWorkspaceInstance } from './instance.js';
-export { getWorkspaceInstance };
-
 
 export function createPairingRouter(config: PairingConfig, env: NodeEnv, reminders: WhatsAppReminders): Router {
   const router = Router();
@@ -41,9 +40,9 @@ export function createPairingRouter(config: PairingConfig, env: NodeEnv, reminde
   router.get('/status', asyncHandler(async (req, res) => {
     if (!emptyInput(req)) { fail(res, 400, 'project_override_forbidden'); return; }
     const scope = tenantOf(req);
-    const instance = getWorkspaceInstance(reminders.db, scope.workspaceId, config.instance);
-    const client = new PairingClient({ ...config, instance });
-    const pendingPairingUntil = () => getNumber(reminders.db, scope, PENDING_PAIRING_KEY, 0);
+    const ws = getWorkspaceWhatsAppRecord(reminders.db, scope.workspaceId, config.instance, config.apiKey);
+    const client = new PairingClient({ ...config, instance: ws.instanceName, apiKey: ws.apiKey });
+    const pendingPairingUntil = () => getPairingPendingUntil(reminders.db, scope.workspaceId);
 
     try {
       const status = await client.status();
@@ -73,11 +72,11 @@ export function createPairingRouter(config: PairingConfig, env: NodeEnv, reminde
 
     connectingWorkspaces.add(wsId);
     lastDisconnectByWorkspace.set(wsId, Date.now());
-    const instance = getWorkspaceInstance(reminders.db, scope.workspaceId, config.instance);
-    const client = new PairingClient({ ...config, instance });
-    const workspaceRuntime = reminders.forWorkspace(scope, instance);
-    const pendingPairingUntil = () => getNumber(reminders.db, scope, PENDING_PAIRING_KEY, 0);
-    const setPendingPairingUntil = (until: number) => setSetting(reminders.db, scope, PENDING_PAIRING_KEY, until);
+    const ws = getWorkspaceWhatsAppRecord(reminders.db, scope.workspaceId, config.instance, config.apiKey);
+    const client = new PairingClient({ ...config, instance: ws.instanceName, apiKey: ws.apiKey });
+    const workspaceRuntime = reminders.forWorkspace(scope, ws.instanceName);
+    const pendingPairingUntil = () => getPairingPendingUntil(reminders.db, wsId);
+    const setPendingPairing = (until: number) => setPairingPendingUntil(reminders.db, wsId, until);
 
     try {
       const { status, logoutVerified } = await workspaceRuntime.withSendingDisabled(
@@ -86,7 +85,7 @@ export function createPairingRouter(config: PairingConfig, env: NodeEnv, reminde
       );
       if (logoutVerified) {
         lastConnectByWorkspace.set(wsId, 0);
-        setPendingPairingUntil(0);
+        setPendingPairing(0);
       }
       res.json({ data: status, error: null });
     } catch (error) {
@@ -114,13 +113,13 @@ export function createPairingRouter(config: PairingConfig, env: NodeEnv, reminde
 
     connectingWorkspaces.add(wsId);
     lastConnectByWorkspace.set(wsId, Date.now());
-    const instance = getWorkspaceInstance(reminders.db, scope.workspaceId, config.instance);
-    const client = new PairingClient({ ...config, instance });
-    const setPendingPairingUntil = (until: number) => setSetting(reminders.db, scope, PENDING_PAIRING_KEY, until);
+    const ws = getWorkspaceWhatsAppRecord(reminders.db, scope.workspaceId, config.instance, config.apiKey);
+    const client = new PairingClient({ ...config, instance: ws.instanceName, apiKey: ws.apiKey });
+    const setPendingPairing = (until: number) => setPairingPendingUntil(reminders.db, wsId, until);
 
     try {
       const result = await client.connect();
-      setPendingPairingUntil(result.qr ? Date.now() + 60_000 : 0);
+      setPendingPairing(result.qr ? Date.now() + 60_000 : 0);
       res.json({ data: result, error: null });
     }
     catch (error) {
