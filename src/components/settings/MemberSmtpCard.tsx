@@ -10,6 +10,7 @@ import { Switch } from '@/components/ui/switch';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { useToast } from '@/hooks/use-toast';
 import { memberSmtp, type MemberSmtpDetails } from '@/lib/api/memberSmtp';
+import { actionFailureMessage } from '@/lib/api/http';
 import { smtpGuidance } from './smtpGuidance';
 
 interface MemberSmtpForm {
@@ -113,7 +114,9 @@ export function MemberSmtpCard() {
     if (error || !data) {
       toast({
         title: t('settings.memberSmtp.saveFailedTitle'),
-        description: error?.message ?? '',
+        // The code travels with the message: `encryption_not_configured` and
+        // `smtp_destination_not_allowed` are what the runbook lists.
+        description: error ? actionFailureMessage(error, 'not_saved') : '',
         variant: 'destructive',
       });
       return;
@@ -150,7 +153,9 @@ export function MemberSmtpCard() {
     if (error || !data?.sent) {
       toast({
         title: t('settings.memberSmtp.testFailedTitle'),
-        description: error?.message ?? '',
+        // The code names the reason, so the operator does not have to guess
+        // from the prose of a gateway error.
+        description: error ? actionFailureMessage(error, 'not_sent') : '',
         variant: 'destructive',
       });
       return;

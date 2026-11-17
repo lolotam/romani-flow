@@ -12,11 +12,14 @@ import { createCredentialEncryption, MEMBER_SMTP_AAD } from '../services/credent
 import { mailErrorCode } from '../services/mailError.js';
 import type { Mailer } from '../services/mailer.js';
 import { assertAllowedSmtpDestination } from '../services/smtpDestination.js';
+import { hasControlCharacter } from '../services/smtpSecurity.js';
 import { startEmailAttempt, finishEmailAttempt } from '../services/emailLog.js';
 import type { AppConfig } from '../config.js';
 
 const inputSchema = z.object({
-  host: z.string().trim().min(1).max(253).regex(/^\S+$/),
+  host: z.string().trim().min(1).max(253).regex(/^\S+$/).refine(value => !hasControlCharacter(value), {
+    message: 'The host must not carry a control character.',
+  }),
   port: z.number().int().min(1).max(65535),
   secure: z.boolean(),
   username: z.string().trim().min(1).max(320),

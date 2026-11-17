@@ -182,3 +182,18 @@ export class SmtpSecurityError extends Error {
     this.name = 'SmtpSecurityError';
   }
 }
+
+/**
+ * Whether a value carries a control character.
+ *
+ * A host is typed by the member, stored and written to the container log. A
+ * control character in it could rewrite the line of a terminal that reads the
+ * log, so it never belongs in one.
+ */
+export function hasControlCharacter(value: string): boolean {
+  for (const character of value) {
+    const code = character.codePointAt(0) ?? 0;
+    if (code < 0x20 || code === 0x7f) return true;
+  }
+  return false;
+}

@@ -11,6 +11,7 @@ import { createSecureLookup } from './smtpSecurity.js';
 import { createSmtpDestinationPolicy, type SmtpDestinationPolicy } from './smtpDestination.js';
 import { createCredentialEncryption, CredentialEncryptionError, MEMBER_SMTP_AAD } from './credentialEncryption.js';
 import { MailError } from './mailError.js';
+import { runtimeSnapshot } from './runtime.js';
 
 export { MailError };
 
@@ -46,6 +47,21 @@ export interface MailResult {
   rejected: string[];
 }
 
+/**
+ * The relay one message leaves through.
+ *
+ * The origin is named so the container log can say which relay answered and
+ * how long it took. It never carries the password: the sealed password is
+ * opened inside the transporter and never leaves it.
+ */
+interface RelayOrigin {
+  transporter: Transporter;
+  from: string;
+  kind: 'member' | 'workspace' | 'platform';
+  host: string;
+  port: number;
+}
+
 /** The relay did not answer inside the deadline of the request. */
 export class MailTimeoutError extends MailError {
   constructor(readonly timeoutMs: number) {
@@ -78,6 +94,35 @@ function withDeadline<T>(work: Promise<T>, deadlineMs: number): Promise<T> {
   return Promise.race([work, deadline]).finally(() => {
     if (timer) clearTimeout(timer);
   });
+}
+
+/**
+ * A host is a value the member typed: it reaches the log, so it never carries
+ * a control character that could rewrite the terminal.
+ */
+function safeHost(host: string): string {
+  let out = '';
+  for (const character of host) {
+    const code = character.codePointAt(0) ?? 0;
+    out += code < 0x20 || code === 0x7f ? '?' : character;
+  }
+  return out.slice(0, 253);
+}
+
+/**
+ * One line about one exchange with a relay.
+ *
+ * The line names the relay and the state of the process. It never carries a
+ * recipient, a subject or a credential: the log states where a message went,
+ * never what it said.
+ */
+function smtpLine(stage: string, relay: { kind: string; host: string; port: number }, extra: string): string {
+  const snapshot = runtimeSnapshot();
+  return (
+    `[smtp] ${stage} kind=${relay.kind} host=${safeHost(relay.host)} port=${relay.port} ` +
+    `uptime=${snapshot.uptimeSeconds}s rss=${snapshot.memory.rssMb}MB heap=${snapshot.memory.heapUsedMb}MB ` +
+    extra.trim()
+  );
 }
 
 export class Mailer {
@@ -121,7 +166,7 @@ export class Mailer {
    * The password is sealed in the database and only opened here, so it never
    * reaches a log, a response or an error message.
    */
-  private memberTransport(scope: Scope): { transporter: Transporter; from: string } | null {
+  private memberTransport(scope: Scope): RelayOrigin | null {
     const record = this.memberRecord(scope);
     if (!record) return null;
     let password: string;
@@ -155,18 +200,21 @@ export class Mailer {
         lookup: createSecureLookup(),
       } as nodemailer.TransportOptions),
       from: record.senderName ? `${record.senderName} <${record.senderAddress}>` : record.senderAddress,
+      kind: 'member',
+      host: record.host,
+      port: record.port,
     };
   }
 
   /** The relay of the workspace, when the workspace saved one. */
-  private workspaceTransport(scope: Scope): { transporter: Transporter; from: string } | null {
+  private workspaceTransport(scope: Scope): RelayOrigin | null {
     if (!this.db) return null;
     const custom = getWorkspaceSmtp(this.db, scope.workspaceId);
     if (!custom || !custom.host || !custom.user || !custom.pass || !custom.from) return null;
     const signature = `${custom.host}:${custom.port}:${custom.user}:${custom.pass}:${custom.from}:${custom.secure}`;
     const cached = this.workspaceTransporters.get(scope.workspaceId);
     if (cached && cached.signature === signature) {
-      return { transporter: cached.transporter, from: cached.from };
+      return { transporter: cached.transporter, from: cached.from, kind: 'workspace', host: custom.host, port: custom.port };
     }
     const transporter = nodemailer.createTransport({
       host: custom.host,
@@ -187,11 +235,11 @@ export class Mailer {
       from: custom.from,
       signature,
     });
-    return { transporter, from: custom.from };
+    return { transporter, from: custom.from, kind: 'workspace', host: custom.host, port: custom.port };
   }
 
   /** The relay of the platform environment, when the environment has one. */
-  private platformTransport(): { transporter: Transporter; from: string } | null {
+  private platformTransport(): RelayOrigin | null {
     if (!isSmtpConfigured(this.config)) return null;
     if (!this.defaultTransporter) {
       this.defaultTransporter = nodemailer.createTransport({
@@ -207,10 +255,16 @@ export class Mailer {
         socketTimeout: SMTP_SOCKET_TIMEOUT_MS,
       });
     }
-    return { transporter: this.defaultTransporter, from: this.config.smtp.from };
+    return {
+      transporter: this.defaultTransporter,
+      from: this.config.smtp.from,
+      kind: 'platform',
+      host: this.config.smtp.host,
+      port: this.config.smtp.port,
+    };
   }
 
-  private getTransport(scope?: Scope, workspaceOnly = false): { transporter: Transporter; from: string } {
+  private getTransport(scope?: Scope, workspaceOnly = false): RelayOrigin {
     if (scope && this.db) {
       // The relay of the member that acts wins over the relay of the workspace,
       // unless the caller asked for the relay of the workspace only.
@@ -269,8 +323,8 @@ export class Mailer {
     scope?: Scope,
     options: { deadlineMs?: number; workspaceOnly?: boolean } = {},
   ): Promise<MailResult> {
-    const { transporter, from } = this.getTransport(scope, options.workspaceOnly === true);
-    return this.deliver(message, transporter, from, options);
+    const relay = this.getTransport(scope, options.workspaceOnly === true);
+    return this.deliver(message, relay, options);
   }
 
   /**
@@ -283,7 +337,7 @@ export class Mailer {
   async sendAsMember(message: MailMessage, scope: Scope, options: { deadlineMs?: number } = {}): Promise<MailResult> {
     const member = this.memberTransport(scope);
     if (!member) throw new MailError('You have not saved an SMTP relay yet.', 'smtp_not_configured', 503);
-    return this.deliver(message, member.transporter, member.from, options);
+    return this.deliver(message, member, options);
   }
 
   /**
@@ -300,10 +354,10 @@ export class Mailer {
   /** One exchange with the relay. The recipients are checked before the network. */
   private async deliver(
     message: MailMessage,
-    transporter: Transporter,
-    from: string,
+    relay: RelayOrigin,
     options: { deadlineMs?: number },
   ): Promise<MailResult> {
+    const { transporter, from } = relay;
     const to = emailIdentities(message.to);
     const cc = message.cc ? emailIdentities(message.cc).filter(address => !to.some(primary => emailIdentity(primary) === emailIdentity(address))) : undefined;
     const bcc = message.bcc ? emailIdentities(message.bcc).filter(address => ![...to, ...(cc ?? [])].some(primary => emailIdentity(primary) === emailIdentity(address))) : undefined;
@@ -318,6 +372,9 @@ export class Mailer {
         502,
       );
     }
+
+    const startedAt = Date.now();
+    console.log(smtpLine('start', relay, `recipients=${to.length}`));
 
     try {
       const info = await withDeadline(
@@ -346,14 +403,21 @@ export class Mailer {
         (address) => !accepted.includes(emailIdentity(address)) && !rejected.includes(emailIdentity(address)),
       );
 
+      const status = rejected.length > 0 || missing.length > 0 ? 'partial' : 'sent';
+      console.log(smtpLine('done', relay, `ms=${Date.now() - startedAt} outcome=${status}`));
       return {
-        status: rejected.length > 0 || missing.length > 0 ? 'partial' : 'sent',
+        status,
         messageId: info.messageId,
         accepted,
         rejected: [...rejected, ...missing],
       };
     } catch (error) {
-      if (error instanceof MailError) throw error;
+      if (error instanceof MailError) {
+        // A deadline and a refusal are failures of the exchange as well: the
+        // log names them, so the stage is never missing from the trail.
+        console.log(smtpLine('fail', relay, `ms=${Date.now() - startedAt} outcome=${error.code}`));
+        throw error;
+      }
       const detail = error instanceof Error ? error.message : String(error);
       const code = error && typeof error === 'object' && 'code' in error ? String(error.code) : '';
       const provenUnsent = ['ENOTFOUND', 'EAI_AGAIN', 'ECONNREFUSED', 'EDNS'].includes(code);
@@ -368,6 +432,9 @@ export class Mailer {
               : provenUnsent
                 ? 'smtp_connection_failed'
                 : 'send_failed';
+      // The line names the stage and the reason code, never the upstream text:
+      // the message may quote a server response that carries an address.
+      console.log(smtpLine('fail', relay, `ms=${Date.now() - startedAt} outcome=${failureCode} upstream=${code || 'none'}`));
       throw new MailError(`The message could not be sent: ${detail}`, failureCode, failureCode === 'smtp_timeout' ? 504 : 502);
     }
   }

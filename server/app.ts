@@ -16,6 +16,7 @@ import { createNotificationSenderRouter } from './routes/notificationSender.js';
 import { createFilesRouter } from './routes/files.js';
 import { createHealthRouter, createRootHealthRouter } from './routes/health.js';
 import { createResourceRouter } from './routes/resources.js';
+import { createRuntimeRouter } from './routes/runtime.js';
 import { createSettingsRouter } from './routes/settings.js';
 import { createFormDefaultsRouter } from './routes/formDefaults.js';
 import { createPairingRouter, createPairingWebhook, getWorkspaceInstance } from './whatsapp/routes.js';
@@ -159,6 +160,7 @@ export function createApp(deps: AppDependencies): Express {
   app.use('/api/email', authenticated, createEmailRouter(config, db, mailer, cron, storage));
   app.use('/api/me/smtp', authenticated, createMemberSmtpRouter(config, db, mailer));
   app.use('/api/workspace/notification-sender', authenticated, createNotificationSenderRouter(db));
+  app.use('/api/runtime', authenticated, requireAdmin, createRuntimeRouter());
   app.use('/api/backup', authenticated, createBackupRouter(db, documents, reminders, config.whatsapp.instance));
 
   app.get(

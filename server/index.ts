@@ -15,6 +15,7 @@ import { StorageService } from './services/storageService.js';
 import { createReminderRuntime } from './whatsapp/runtime.js';
 import { drainApplication } from './shutdown.js';
 import { stopRequestWork } from './middleware/requestWork.js';
+import { runtimeLine, safeErrorLine } from './services/runtime.js';
 
 /**
  * Server bootstrap.
@@ -51,6 +52,37 @@ function assertVolumeIsMounted(dataDir: string, isProduction: boolean): void {
         `  # Dokploy: Mounts → bind ${VOLUME_MARKER} → /data`,
     );
   }
+}
+
+/**
+ * A fatal error stops the process instead of leaving it half-broken.
+ *
+ * An uncaught exception means execution already left its recovery boundary,
+ * so the state of the process is unknown: serving more traffic on it would
+ * turn one failure into many. The process stops accepting traffic, writes
+ * what broke to the log, and exits with a failing code so the supervisor
+ * starts a clean one.
+ */
+function guardProcess(stop: () => void): void {
+  const fatal = (kind: string, error: unknown) => {
+    console.error(`[server] fatal ${kind}, the process stops: ${safeErrorLine(error)}`);
+    console.error(runtimeLine('runtime'));
+    stop();
+  };
+  process.on('uncaughtException', (error: unknown) => fatal('exception', error));
+  process.on('unhandledRejection', (reason: unknown) => fatal('rejection', reason));
+}
+
+/**
+ * A line about the process, once a minute.
+ *
+ * The uptime shows whether the container was restarted, and the memory shows
+ * how close it is to the limit of the host. Both questions have only ever been
+ * answerable from the log of a deployment that is not on this machine.
+ */
+function startHeartbeat(): void {
+  const timer = setInterval(() => console.log(runtimeLine('runtime')), 60_000);
+  timer.unref();
 }
 
 async function main(): Promise<void> {
@@ -129,6 +161,8 @@ async function main(): Promise<void> {
     console.log(`[server] listening on http://0.0.0.0:${config.port}`);
   });
 
+  startHeartbeat();
+
   let shuttingDown = false;
   const shutdown = (signal: string) => {
     if (shuttingDown) return;
@@ -141,6 +175,19 @@ async function main(): Promise<void> {
 
   process.on('SIGTERM', () => shutdown('SIGTERM'));
   process.on('SIGINT', () => shutdown('SIGINT'));
+
+  // A fatal error stops the process. The state after an uncaught exception is
+  // unknown, so the API stops accepting traffic and leaves the restart to the
+  // supervisor. The exit code is a failure, never a success.
+  guardProcess(() => {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    const forced = setTimeout(() => process.exit(1), 5_000);
+    server.close(() => {
+      clearTimeout(forced);
+      process.exit(1);
+    });
+  });
 }
 
 main().catch((error) => {
