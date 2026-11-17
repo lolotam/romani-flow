@@ -7,6 +7,7 @@ import { whatsappPairing, type WhatsAppPairingIssue, type WhatsAppPairingStatus 
 import { ApiRequestError } from '@/lib/api/http';
 import { CheckCircle2, LogOut, QrCode, RefreshCw } from 'lucide-react';
 import { isTransientPairingReadError, startPairingStatusPolling } from '@/lib/whatsappPairingPolling';
+import { pairingFailureCode, type PairingFailureCode } from '@/lib/whatsappPairingFailure';
 import { isOwner } from '@/lib/permissions';
 
 /** The variables the server named as the reason the pairing does not work. */
@@ -24,6 +25,7 @@ export default function WhatsAppPairingSettings({ onDisconnectSettled }: { onDis
   const [qr, setQr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(false);
+  const [failure, setFailure] = useState<PairingFailureCode | null>(null);
   const [expired, setExpired] = useState(false);
   const mounted = useRef(false);
   const operation = useRef(0);
@@ -41,6 +43,7 @@ export default function WhatsAppPairingSettings({ onDisconnectSettled }: { onDis
     const id = ++operation.current;
     setBusy(true);
     setError(false);
+    setFailure(null);
     if (action !== 'status') {
       setQr(null); setExpired(false); expiresAt.current = 0;
       pollDeadline.current = action === 'connect' ? Date.now() + 180_000 : 0;
@@ -49,6 +52,7 @@ export default function WhatsAppPairingSettings({ onDisconnectSettled }: { onDis
     if (action === 'disconnect') setStatus(null);
     const failed = (error: unknown) => {
       setError(true);
+      setFailure(pairingFailureCode(error));
       setIssues(pairingIssuesOf(error));
       if (action === 'status' && Date.now() < pollDeadline.current && isTransientPairingReadError(error)) {
         if (document.hidden || Date.now() >= expiresAt.current) { setQr(null); setExpired(true); }
@@ -85,7 +89,7 @@ export default function WhatsAppPairingSettings({ onDisconnectSettled }: { onDis
   useEffect(() => {
     mounted.current = true;
     void loadConnection('status');
-    return () => { mounted.current = false; operation.current += 1; requestBusy.current = false; pollDeadline.current = 0; setPollingUntil(0); setQr(null); setStatus(null); setIssues([]); };
+    return () => { mounted.current = false; operation.current += 1; requestBusy.current = false; pollDeadline.current = 0; setPollingUntil(0); setQr(null); setStatus(null); setIssues([]); setFailure(null); };
   }, [loadConnection]);
 
   useEffect(() => {
@@ -124,7 +128,10 @@ export default function WhatsAppPairingSettings({ onDisconnectSettled }: { onDis
           {status?.state === 'connected' && !error && <CheckCircle2 aria-hidden="true" className="h-5 w-5" />}
           {error ? t('settings.whatsapp.unavailable') : status?.state === 'connected' ? stateText.connected : busy ? t('settings.whatsapp.loading') : status ? stateText[status.state] : ''}
         </p>
-        {error && <p role="alert" className="text-destructive">{t('settings.whatsapp.error')}</p>}
+        {error && !failure && <p role="alert" className="text-destructive">{t('settings.whatsapp.error')}</p>}
+        {failure && <p role="alert" className="text-destructive text-sm">
+          <span className="font-mono">{failure}</span> — {t(`settings.whatsapp.failures.${failure}`)}
+        </p>}
         {issues.length > 0 && <p role="alert" className="text-destructive text-sm">
           {t('settings.whatsapp.issues')} {issues.map(issue => `${issue.variable} — ${t(issue.problem === 'missing' ? 'settings.whatsapp.issueMissing' : 'settings.whatsapp.issueInvalid')}`).join(' · ')}
         </p>}
