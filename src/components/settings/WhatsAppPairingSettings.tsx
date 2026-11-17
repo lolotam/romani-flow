@@ -7,7 +7,7 @@ import { whatsappPairing, type WhatsAppPairingIssue, type WhatsAppPairingStatus 
 import { ApiRequestError } from '@/lib/api/http';
 import { CheckCircle2, LogOut, QrCode, RefreshCw } from 'lucide-react';
 import { isTransientPairingReadError, startPairingStatusPolling } from '@/lib/whatsappPairingPolling';
-import { pairingFailureCode, type PairingFailureCode } from '@/lib/whatsappPairingFailure';
+import { pairingFailureCode, pairingStateFailure, type PairingFailureCode } from '@/lib/whatsappPairingFailure';
 import { isOwner } from '@/lib/permissions';
 
 /** The variables the server named as the reason the pairing does not work. */
@@ -66,6 +66,9 @@ export default function WhatsAppPairingSettings({ onDisconnectSettled }: { onDis
       if (result.error || !result.data) { failed(result.error); return; }
       setStatus({ configured: result.data.configured, state: result.data.state });
       setIssues(result.data.issues ?? []);
+      // A state the provider did not explain is a failure of its own: the
+      // request succeeded, so nothing else would name the reason.
+      setFailure(pairingStateFailure(result.data.state));
       if (result.data.configured && result.data.state === 'connecting') {
         if (pollDeadline.current > Date.now()) setPollingUntil(pollDeadline.current);
       } else { pollDeadline.current = 0; setPollingUntil(0); setQr(null); }

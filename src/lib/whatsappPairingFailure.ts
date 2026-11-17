@@ -14,6 +14,11 @@ export const PAIRING_FAILURE_CODES = [
   'project_mismatch',
   'connection_state_unknown',
   'invalid_provider_response',
+  'qr_unavailable',
+  'disconnect_pending',
+  'pairing_rate_limited',
+  'invalid_response',
+  'request_timeout',
   'network_error',
   'http_error',
 ] as const;
@@ -31,4 +36,16 @@ export function pairingFailureCode(error: unknown): PairingFailureCode | null {
   const code = (error as { code?: unknown }).code;
   if (typeof code !== 'string') return null;
   return (PAIRING_FAILURE_CODES as readonly string[]).includes(code) ? (code as PairingFailureCode) : null;
+}
+
+/**
+ * The reason a state that carries no meaning deserves.
+ *
+ * The provider answers a request it does not understand with a state the app
+ * cannot read. The request itself succeeds, so the reason has to come from the
+ * state; without it the panel would stay silent about the only thing that
+ * matters.
+ */
+export function pairingStateFailure(state: string | undefined | null): PairingFailureCode | null {
+  return state === 'unknown' ? 'connection_state_unknown' : null;
 }
