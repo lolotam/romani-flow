@@ -42,6 +42,9 @@ const PROBES = {
   // catalog, candidates and models list a provider's models over the network; they read no tenant rows.
   '/api/document-extraction': () => ['/api/document-extraction/status'],
   '/api/whatsapp': () => ['/api/whatsapp/recipients', '/api/whatsapp/log', ['/api/whatsapp/status', 503]],
+  // The relay of the caller and the members of the caller's own workspace.
+  '/api/me/smtp': () => ['/api/me/smtp'],
+  '/api/workspace/notification-sender': () => ['/api/workspace/notification-sender'],
 };
 
 const LEGACY_MARKER = 'legacy-only@example.invalid';

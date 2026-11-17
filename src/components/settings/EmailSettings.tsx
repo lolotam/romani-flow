@@ -3,6 +3,8 @@ import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/hooks/useAuth';
 import { useEmailSettings, type ActionResult } from '@/hooks/useEmailSettings';
 import { SmtpConfigCard } from './SmtpConfigCard';
+import { MemberSmtpCard } from './MemberSmtpCard';
+import { NotificationSenderCard } from './NotificationSenderCard';
 import { EmailConfigCard } from './EmailConfigCard';
 import { EmailLogCard } from './EmailLogCard';
 import { ExpiryPreviewCard } from './ExpiryPreviewCard';
@@ -69,6 +71,8 @@ export default function EmailSettings() {
           );
         }}
       />
+      <MemberSmtpCard />
+      <NotificationSenderCard />
       <EmailConfigCard
         form={state.form}
         setForm={state.setForm}

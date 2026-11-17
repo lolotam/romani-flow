@@ -28,7 +28,7 @@ import path from 'node:path';
 const TENANT_TABLES = ['companies', 'ministries', 'document_types', 'positions', 'employees', 'documents',
   'email_log', 'expiry_notifications', 'pending_uploads', 'form_defaults', 'document_drafts',
   'whatsapp_recipients', 'whatsapp_jobs', 'whatsapp_attempts', 'workspace_settings', 'admin_users',
-  'upload_cleanup_queue', 'workspace_usage'];
+  'upload_cleanup_queue', 'workspace_usage', 'member_smtp_settings'];
 
 /** A table name chosen at run time can be any tenant table, so it is held to the same rule. */
 const INTERPOLATED_TABLE = /\b(?:FROM|INTO|UPDATE|JOIN)\s+"?\$\{/i;

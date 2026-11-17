@@ -42,6 +42,12 @@ export interface AppConfig {
   legacyClaimEmail: string | null;
   smtp: SmtpConfig;
   whatsapp: PairingConfig;
+  /** The key that seals the SMTP password of a member relay. Never leaves the server. */
+  appEncryptionKey: string | null;
+  /** The relay hosts the server may reach even when they resolve to a private address. */
+  smtpAllowedHosts: string[];
+  /** The relay hosts that may use a plaintext session outside production. */
+  smtpAllowPlaintextHosts: string[];
   maxUploadBytes: number;
   maxEmailAttachmentBytes: number;
   /** The size of the encoded MIME message, which is larger than the raw files. */
@@ -195,6 +201,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     platformAdminEmails: readList(env, 'PLATFORM_ADMIN_EMAILS', []).map(email => email.toLowerCase()),
     legacyClaimEmail: readOptionalString(env, 'LEGACY_CLAIM_EMAIL')?.toLowerCase() ?? null,
     whatsapp: readPairingConfig(env),
+  appEncryptionKey: readOptionalString(env, 'APP_ENCRYPTION_KEY'),
+  smtpAllowedHosts: readList(env, 'SMTP_ALLOWED_HOSTS', []).map(host => host.trim().toLowerCase()).filter(Boolean),
+  smtpAllowPlaintextHosts: readList(env, 'SMTP_ALLOW_PLAINTEXT_HOSTS', []).map(host => host.trim().toLowerCase()).filter(Boolean),
     smtp: {
       host: readFirst(env, SMTP_HOST_KEYS, smtpUser || smtpPass || smtpFrom ? 'smtp.gmail.com' : ''),
       port: readFirstInt(env, SMTP_PORT_KEYS, 587),

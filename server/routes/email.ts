@@ -232,13 +232,15 @@ export function createEmailRouter(
       }
 
       try {
+        // The test of the relay of the workspace uses that relay only. A relay
+        // of the member who clicks the button is never a fallback here.
         const result = await mailer.send({
           to: recipients,
           cc,
           subject: 'ROMANI Flow — SMTP test',
           text: 'This is a test message from ROMANI Flow. SMTP is configured correctly.',
           html: '<p style="font-family:Segoe UI,Arial,sans-serif">This is a test message from <strong>ROMANI Flow</strong>. SMTP is configured correctly.</p>',
-        }, scope);
+        }, scope, { workspaceOnly: true });
 
         finishEmailAttempt(db, scope, logId, {
           status: result.status,

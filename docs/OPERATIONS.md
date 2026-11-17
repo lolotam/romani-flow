@@ -61,6 +61,26 @@ For live proof match the designated inbox receipt to subject, timestamp and
 message identity where available. Record rejection, partial or unknown outcomes
 honestly; do not label them delivered.
 
+### Which relay sends
+
+Two relays coexist, and the order decides:
+
+1. the relay of the account that acts, when that account saved one;
+2. the relay of the workspace;
+3. the platform relay of the environment, for the legacy workspace only, and
+   only while that workspace has not retired it.
+
+A workspace names the account that sends its scheduled reminders. That account
+relay wins for the scheduled reports; without one the reports go out through the
+relay of the workspace. Naming a sender never changes a relay.
+
+The password of a member relay is sealed with `APP_ENCRYPTION_KEY` and is never
+returned by the API, printed in a log, or written to a backup in the clear. A
+member relay whose key does not match fails loudly instead of silently sending
+through another relay. `SMTP_ALLOWED_HOSTS` stays empty for a public relay, and
+`SMTP_ALLOW_PLAINTEXT_HOSTS` stays empty because production never allows a
+cleartext session.
+
 Document sends should report attachment count/bytes and durable attempts.
 An attempt left in `sending` after a crash has an unknown outcome: inspect the
 designated mailbox/relay before retrying to avoid duplicates. Failed reminders
