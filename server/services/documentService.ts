@@ -11,6 +11,7 @@ import type { StorageService } from './storageService.js';
 import type { NotificationCoordinator } from '../notifications/coordinator.js';
 import { atomic } from '../notifications/whatsapp/repository.js';
 import { resolveDocumentEntity } from './documentEntity.js';
+import { LEGACY_WORKSPACE_ID } from '../repositories/workspaces.js';
 
 /**
  * Document file lifecycle.
@@ -71,7 +72,8 @@ export class DocumentService {
   private getNotifications(scope?: Scope): NotificationHooks | null {
     if (!this.notifications) return null;
     if (typeof this.notifications === 'function') {
-      return scope ? this.notifications(scope) : null;
+      const targetScope = scope ?? { workspaceId: LEGACY_WORKSPACE_ID };
+      return this.notifications(targetScope);
     }
     return this.notifications;
   }
