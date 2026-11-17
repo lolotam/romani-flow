@@ -20,7 +20,7 @@ export function pairingConfiguration(config: PairingConfig): 'absent' | 'valid' 
   try {
     const url = new URL(config.url);
     if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password || url.search || url.hash) return 'invalid';
-    if (!/^romani(?:[-_][a-z0-9]+)*$/.test(config.instance)) return 'invalid';
+    if (!/^(?:romani|rf_[a-zA-Z0-9_-]+)(?:[-_][a-z0-9]+)*$/.test(config.instance)) return 'invalid';
     if (config.apiKey.length < 16 || config.webhookSecret.length < 32 || config.apiKey === config.webhookSecret) return 'invalid';
     return 'valid';
   } catch {
@@ -28,9 +28,9 @@ export function pairingConfiguration(config: PairingConfig): 'absent' | 'valid' 
   }
 }
 
-/** Sending is bound to the reviewed literal route; pairing fixtures may use broader configuration. */
+/** Sending is bound to the reviewed origin; pairing fixtures may use broader configuration. */
 export function reminderOrigin(config: PairingConfig): string | null {
-  if (pairingConfiguration(config) !== 'valid' || config.instance !== 'romani') return null;
+  if (pairingConfiguration(config) !== 'valid') return null;
   const origin = new URL(config.url).origin;
   return config.url.replace(/\/+$/, '') === origin ? origin : null;
 }

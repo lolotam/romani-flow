@@ -2,14 +2,10 @@ import path from 'node:path';
 import cookieParser from 'cookie-parser';
 import cronEngine from 'node-cron';
 import express, { type Express, type Request, type Response, type NextFunction } from 'express';
-import { clerkMiddleware } from '@clerk/express';
 import type { AppConfig } from './config.js';
 import type { Db } from './db/connection.js';
+import type { Scope } from './repositories/base.js';
 import { requireAuth, requireAdmin, requireRole, tenantOf } from './middleware/auth.js';
-import { createClerkIdentityResolver } from './auth/clerkIdentity.js';
-import { isPlatformAdmin, requireSignedIn, requireWorkspace } from './auth/middleware.js';
-import type { IdentityResolver } from './auth/types.js';
-import { createClerkWebhookRouter } from './auth/webhook.js';
 import { asyncHandler, errorHandler, notFoundHandler } from './middleware/errorHandler.js';
 import { createAuthRouter } from './routes/auth.js';
 import { createBackupRouter } from './routes/backup.js';
@@ -20,7 +16,8 @@ import { createHealthRouter, createRootHealthRouter } from './routes/health.js';
 import { createResourceRouter } from './routes/resources.js';
 import { createSettingsRouter } from './routes/settings.js';
 import { createFormDefaultsRouter } from './routes/formDefaults.js';
-import { createPairingRouter, createPairingWebhook } from './whatsapp/routes.js';
+import { createPairingRouter, createPairingWebhook, getWorkspaceInstance } from './whatsapp/routes.js';
+import { listWorkspaceIds } from './repositories/workspaces.js';
 import { mayChangeSchedule, type CronService } from './services/cronService.js';
 import type { DocumentService } from './services/documentService.js';
 import type { Mailer } from './services/mailer.js';
@@ -60,17 +57,25 @@ export interface AppDependencies {
   extractionClock?: ExtractionClock;
   /** The injected image decoder. The native decoder stays the default. */
   decoderFactory?: DecoderFactory;
-  /** Clerk is the only auth boundary replaced by tests. */
-  identityResolver?: IdentityResolver;
 }
 
 export function createApp(deps: AppDependencies): Express {
   const { config, db, mailer, cron, storage, documents, staticDir } = deps;
+  mailer.setDb(db);
   const reminders = deps.reminders ?? createReminderRuntime(db, config.whatsapp);
   documents.configureNotifications({ coordinator: reminders.coordinator, changed: () => reminders.reconcile() });
-  cron.setReminderEnqueue(reminders.scope, () => reminders.schedule());
+  cron.setReminderEnqueueResolver((wsScope: Scope) => {
+    const inst = getWorkspaceInstance(db, wsScope.workspaceId, config.whatsapp.instance);
+    const rt = reminders.forWorkspace(wsScope, inst);
+    return () => rt.schedule();
+  });
+  for (const wsId of listWorkspaceIds(db)) {
+    const wsScope = { workspaceId: wsId };
+    const inst = getWorkspaceInstance(db, wsId, config.whatsapp.instance);
+    const rt = reminders.forWorkspace(wsScope, inst);
+    cron.setReminderEnqueue(wsScope, () => rt.schedule());
+  }
   const app = express();
-  app.locals.identityResolver = deps.identityResolver ?? createClerkIdentityResolver();
 
   // One service per application. The transport is injected, so the pipeline
   // never reaches a provider by accident.
@@ -103,19 +108,9 @@ export function createApp(deps: AppDependencies): Express {
   // The cookie parser runs before the extraction route: the route needs the
   // session, and it brings its own body parser for the prepared document.
   app.use(cookieParser());
-  if (config.authProvider === 'clerk') {
-    app.use('/api', clerkMiddleware({
-      secretKey: config.clerkSecretKey ?? undefined,
-      publishableKey: config.clerkPublishableKey ?? undefined,
-    }));
-  }
 
-  const authenticated = config.authProvider === 'clerk' ? requireWorkspace(db) : requireAuth(config, db);
-  const signedIn = config.authProvider === 'clerk' ? requireSignedIn(db) : requireAuth(config, db);
-
-  if (config.authProvider === 'clerk') {
-    app.use('/api/webhooks/clerk', express.raw({ type: 'application/json', limit: '2mb' }), createClerkWebhookRouter(config, db));
-  }
+  const authenticated = requireAuth(config, db);
+  const signedIn = requireAuth(config, db);
 
   // The extraction route owns its body parser, so it is mounted before the
   // global parser: the global limit of two megabytes stays untouched.
@@ -132,10 +127,12 @@ export function createApp(deps: AppDependencies): Express {
   // Public endpoints.
   app.use('/health', createRootHealthRouter(db, () => mailer.isConfigured()));
   app.use('/api/health', createHealthRouter(db));
-  app.use('/api/auth', createAuthRouter(config, db, authenticated, reminders.scope.workspaceId));
+  app.use('/api/auth', createAuthRouter(config, db, authenticated, reminders));
   app.use('/api/whatsapp/webhook', createPairingWebhook(config.whatsapp));
   app.get('/api/platform/me', signedIn, (req, res) => {
-    res.json({ data: { isPlatformAdmin: isPlatformAdmin(config, req) }, error: null });
+    const email = req.user?.email.toLowerCase() ?? '';
+    const isPlatform = req.user?.role === 'admin' || (email && config.platformAdminEmails.includes(email));
+    res.json({ data: { isPlatformAdmin: Boolean(isPlatform) }, error: null });
   });
 
   // Everything below requires a session and a tenant selected by the server.
@@ -144,7 +141,7 @@ export function createApp(deps: AppDependencies): Express {
   app.use('/api/form-defaults', authenticated, createFormDefaultsRouter(db));
   app.use('/api/document-drafts', authenticated, createDocumentDraftsRouter(db, reminders.coordinator));
 
-  app.use('/api/settings', authenticated, createSettingsRouter(config, db, cron, reminders, extraction));
+  app.use('/api/settings', authenticated, createSettingsRouter(config, db, cron, reminders, extraction, mailer));
   app.use('/api/files', authenticated, createFilesRouter(config, db, storage, documents));
   app.use('/api/email', authenticated, createEmailRouter(config, db, mailer, cron, storage));
   app.use('/api/backup', authenticated, createBackupRouter(db, documents, reminders));

@@ -9,6 +9,7 @@ import { addWorkspaceB, asB, B, LEG, today } from './fixtures/workspace-b.mjs';
 import { insertRow } from '../server/repositories/base.ts';
 import { getBoolean, getString, setSetting } from '../server/repositories/settings.ts';
 import { startEmailAttempt } from '../server/services/emailLog.ts';
+import { upsertWorkspaceSmtp } from '../server/repositories/smtpSettings.ts';
 
 /**
  * Two workspaces side by side: the legacy one (Romani) and a second tenant B.
@@ -29,6 +30,16 @@ function enableReports(f, scope, to) {
   setSetting(f.db, scope, 'email.recipients', [to]);
   setSetting(f.db, scope, 'email.cc', []);
   setSetting(f.db, scope, 'cron.enabled', true);
+  if (scope.workspaceId !== 'ws_legacy') {
+    upsertWorkspaceSmtp(f.db, scope.workspaceId, {
+      host: '127.0.0.1',
+      port: 2525,
+      secure: false,
+      user: 'tenant-b',
+      pass: 'tenant-b-pass',
+      from: 'tenant-b@example.invalid',
+    });
+  }
 }
 
 function withMail(t, run) {
@@ -146,22 +157,29 @@ test("B's erase removes B's data and files and leaves the legacy workspace intac
   assert.equal(getBoolean(f.db, LEG, 'whatsapp.enabled'), true, "B's erase does not switch off legacy reminders");
 }));
 
-test('the WhatsApp reminder and pairing routes do not exist for B', () => reminderApi(async f => {
+test('the WhatsApp reminder and pairing routes are isolated between workspaces', () => reminderApi(async f => {
   addWorkspaceB(f);
-  for (const url of ['/api/whatsapp/recipients', '/api/whatsapp/log', '/api/whatsapp/status', '/api/whatsapp/template-preview']) {
-    const response = await asB(f, url);
-    assert.equal(response.status, 404, url); assert.equal(response.json.error.code, 'whatsapp_unavailable', url);
-  }
-  assert.equal((await asB(f, '/api/whatsapp/recipients', { method: 'POST', body: { label: 'B', phone: '+99900000098' } })).status, 404);
-  assert.equal(f.db.prepare("SELECT count(*) n FROM whatsapp_recipients WHERE workspace_id='ws_b'").get().n, 0);
-  assert.equal((await f.request('/api/whatsapp/recipients')).status, 200, 'legacy keeps its reminder routes');
-  // Availability is checked before the role: a B viewer gets the same 404, not 403.
-  f.db.prepare("INSERT INTO admin_users(workspace_id,id,email,name,role,password_hash,created_at,updated_at) VALUES('ws_b','viewer-b','viewer-b@example.invalid','Synthetic B viewer','viewer','not-a-login-fixture','2026-01-01','2026-01-01')").run();
-  const viewer = await f.request('/api/whatsapp/recipients', { role: 'viewer', user: 'viewer-b' });
-  assert.equal(viewer.status, 404); assert.equal(viewer.json.error.code, 'whatsapp_unavailable');
+  // Add recipient to legacy
+  await f.request('/api/whatsapp/recipients', { method: 'POST', body: { label: 'Legacy Recipient', phone: '+99900000001' } });
+
+  // B checks their own recipients - starts empty, legacy recipient is hidden
+  const bRecipients = await asB(f, '/api/whatsapp/recipients');
+  assert.equal(bRecipients.status, 200);
+  assert.equal(bRecipients.json.data.total, 0);
+  assert.equal(JSON.stringify(bRecipients.json).includes('Legacy Recipient'), false);
+
+  // B creates their own recipient
+  const bCreate = await asB(f, '/api/whatsapp/recipients', { method: 'POST', body: { label: 'B Recipient', phone: '+99900000098' } });
+  assert.equal(bCreate.status, 201);
+  assert.equal(f.db.prepare("SELECT count(*) n FROM whatsapp_recipients WHERE workspace_id='ws_b'").get().n, 1);
+
+  // Legacy list does not contain B recipient
+  const legacyRecipients = await f.request('/api/whatsapp/recipients');
+  assert.equal(legacyRecipients.status, 200);
+  assert.equal(JSON.stringify(legacyRecipients.json).includes('B Recipient'), false);
 }));
 
-test("B saves its own settings without touching legacy's, and cannot set WhatsApp keys", () => reminderApi(async f => {
+test("B saves its own settings without touching legacy's, and isolates WhatsApp keys", () => reminderApi(async f => {
   addWorkspaceB(f);
   setSetting(f.db, LEG, 'email.recipients', [LEGACY_TO]);
   const schedule = getString(f.db, { platform: true }, 'cron.schedule', '0 8 * * *');
@@ -178,8 +196,9 @@ test("B saves its own settings without touching legacy's, and cannot set WhatsAp
   assert.equal(JSON.stringify(read.json).includes(LEGACY_TO), false, "B's settings read never shows legacy values");
 
   const whatsapp = await asB(f, '/api/settings', { method: 'PUT', body: { settings: { 'whatsapp.enabled': false } } });
-  assert.equal(whatsapp.status, 400);
-  assert.equal(getBoolean(f.db, LEG, 'whatsapp.enabled'), true);
+  assert.equal(whatsapp.status, 200);
+  assert.equal(getBoolean(f.db, B, 'whatsapp.enabled'), false);
+  assert.equal(getBoolean(f.db, LEG, 'whatsapp.enabled'), true, 'legacy whatsapp enabled state remains true');
 }));
 
 test('the settings and the mail log are read by an owner alone', () => reminderApi(async f => {

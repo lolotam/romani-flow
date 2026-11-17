@@ -52,7 +52,7 @@ test('010 moves every existing tenant row into the legacy workspace', () => {
   const db = databaseAt009();
   seedEveryTenantTable(db);
   const result = runMigrations(db, migrationsDir);
-  assert.deepEqual(result.applied, ['010_workspaces.sql', '011_clerk_identity.sql']);
+  assert.deepEqual(result.applied, ['010_workspaces.sql', '011_clerk_identity.sql', '012_native_auth_multitenant.sql']);
 
   assert.deepEqual({ ...db.prepare("SELECT id, name FROM workspaces").get() }, { id: 'ws_legacy', name: 'Romani' });
   for (const table of TENANT_TABLES) {

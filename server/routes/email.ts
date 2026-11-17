@@ -12,6 +12,8 @@ import { parseIntervals } from '../services/intervals.js';
 import { emailIdentity, emailIdentities } from '../services/emailAddress.js';
 import { documentEmailHtml, documentEmailText } from '../services/templates/index.js';
 import type { StorageService } from '../services/storageService.js';
+import { LEGACY_WORKSPACE_ID } from '../repositories/workspaces.js';
+import { getWorkspaceSmtp, upsertWorkspaceSmtp, deleteWorkspaceSmtp } from '../repositories/smtpSettings.js';
 
 /**
  * Email endpoints.
@@ -64,19 +66,104 @@ export function createEmailRouter(
     '/status',
     requireAdmin,
     asyncHandler(async (req, res) => {
-      // Only the fact that mail is configured is published: the host, the port
-      // and the account of the relay are server secrets.
+      const scope = tenantOf(req);
       res.json({
         data: {
-          configured: mailer.isConfigured(),
-          enabled: getBoolean(db, tenantOf(req), 'email.enabled'),
-          recipients: getStringList(db, tenantOf(req), 'email.recipients'),
-          cc: getStringList(db, tenantOf(req), 'email.cc'),
-          lastSentAt: getString(db, tenantOf(req), 'email.last_sent_at'),
-          lastResult: getString(db, tenantOf(req), 'email.last_result'),
+          configured: mailer.isConfigured(scope),
+          enabled: getBoolean(db, scope, 'email.enabled'),
+          recipients: getStringList(db, scope, 'email.recipients'),
+          cc: getStringList(db, scope, 'email.cc'),
+          lastSentAt: getString(db, scope, 'email.last_sent_at'),
+          lastResult: getString(db, scope, 'email.last_result'),
         },
         error: null,
       });
+    }),
+  );
+
+  router.get(
+    '/smtp',
+    requireAdmin,
+    asyncHandler(async (req, res) => {
+      const scope = tenantOf(req);
+      const custom = getWorkspaceSmtp(db, scope.workspaceId);
+      if (custom) {
+        res.json({
+          data: {
+            configured: true,
+            isCustom: true,
+            host: custom.host,
+            port: custom.port,
+            secure: custom.secure,
+            user: custom.user,
+            from: custom.from,
+            updatedAt: custom.updated_at,
+          },
+          error: null,
+        });
+        return;
+      }
+
+      const isLegacy = scope.workspaceId === LEGACY_WORKSPACE_ID;
+      res.json({
+        data: {
+          configured: isLegacy && mailer.isConfigured(scope),
+          isCustom: false,
+          host: isLegacy ? config.smtp.host : '',
+          port: isLegacy ? config.smtp.port : 587,
+          secure: isLegacy ? config.smtp.secure : false,
+          user: isLegacy ? config.smtp.user : '',
+          from: isLegacy ? config.smtp.from : '',
+          updatedAt: null,
+        },
+        error: null,
+      });
+    }),
+  );
+
+  router.put(
+    '/smtp',
+    requireAdmin,
+    asyncHandler(async (req, res) => {
+      const scope = tenantOf(req);
+      const host = typeof req.body?.host === 'string' ? req.body.host.trim() : '';
+      const port = Number(req.body?.port) || 587;
+      const secure = Boolean(req.body?.secure);
+      const user = typeof req.body?.user === 'string' ? req.body.user.trim() : '';
+      const pass = typeof req.body?.pass === 'string' ? req.body.pass : '';
+      const from = typeof req.body?.from === 'string' ? req.body.from.trim() : '';
+
+      if (!host || !user || !pass || !from) {
+        res.status(400).json({
+          data: null,
+          error: { message: 'host, user, pass, and from address are required.', code: 'invalid_smtp_settings' },
+        });
+        return;
+      }
+
+      upsertWorkspaceSmtp(db, scope.workspaceId, { host, port, secure, user, pass, from });
+      res.json({
+        data: {
+          configured: true,
+          isCustom: true,
+          host,
+          port,
+          secure,
+          user,
+          from,
+        },
+        error: null,
+      });
+    }),
+  );
+
+  router.delete(
+    '/smtp',
+    requireAdmin,
+    asyncHandler(async (req, res) => {
+      const scope = tenantOf(req);
+      deleteWorkspaceSmtp(db, scope.workspaceId);
+      res.json({ data: { deleted: true }, error: null });
     }),
   );
 
@@ -84,9 +171,10 @@ export function createEmailRouter(
     '/test',
     requireAdmin,
     asyncHandler(async (req, res) => {
+      const scope = tenantOf(req);
       const { valid, invalid: invalidTo } = parseAddressList(req.body?.to);
-      const recipients = emailIdentities(Object.hasOwn(req.body ?? {}, 'to') ? valid : getStringList(db, tenantOf(req), 'email.recipients'));
-      const copies = parseAddressList(Object.hasOwn(req.body ?? {}, 'cc') ? req.body.cc : getStringList(db, tenantOf(req), 'email.cc'));
+      const recipients = emailIdentities(Object.hasOwn(req.body ?? {}, 'to') ? valid : getStringList(db, scope, 'email.recipients'));
+      const copies = parseAddressList(Object.hasOwn(req.body ?? {}, 'cc') ? req.body.cc : getStringList(db, scope, 'email.cc'));
       const cc = emailIdentities(copies.valid).filter(address => !recipients.some(primary => emailIdentity(primary) === emailIdentity(address)));
       const invalid = [...invalidTo, ...copies.invalid];
       const allRecipients = [...recipients, ...cc];
@@ -99,12 +187,12 @@ export function createEmailRouter(
         return;
       }
 
-      const logId = startEmailAttempt(db, tenantOf(req), {
+      const logId = startEmailAttempt(db, scope, {
         kind: 'test', recipients: allRecipients, subject: 'ROMANI Flow — SMTP test', details: { invalid },
       });
-      const verification = await mailer.verify();
+      const verification = await mailer.verify(scope);
       if (!verification.ok) {
-        finishEmailAttempt(db, tenantOf(req), logId, { status: 'failed', error: verification.message });
+        finishEmailAttempt(db, scope, logId, { status: 'failed', error: verification.message });
         res.status(502).json({
           data: null,
           error: { message: verification.message, code: 'smtp_unavailable' },
@@ -119,9 +207,9 @@ export function createEmailRouter(
           subject: 'ROMANI Flow — SMTP test',
           text: 'This is a test message from ROMANI Flow. SMTP is configured correctly.',
           html: '<p style="font-family:Segoe UI,Arial,sans-serif">This is a test message from <strong>ROMANI Flow</strong>. SMTP is configured correctly.</p>',
-        });
+        }, scope);
 
-        finishEmailAttempt(db, tenantOf(req), logId, {
+        finishEmailAttempt(db, scope, logId, {
           status: result.status,
           error: result.rejected.length ? 'Some recipients were rejected by the relay.' : undefined,
           details: { invalid, messageId: result.messageId, accepted: result.accepted, rejected: result.rejected },
@@ -135,7 +223,7 @@ export function createEmailRouter(
         res.json({ data: { sent: true, recipients: allRecipients, invalid, messageId: result.messageId }, error: null });
       } catch (error) {
         const detail = error instanceof Error ? error.message : String(error);
-        finishEmailAttempt(db, tenantOf(req), logId, { status: 'failed', error: detail });
+        finishEmailAttempt(db, scope, logId, { status: 'failed', error: detail });
         res.status(502).json({ data: null, error: { message: detail, code: 'send_failed' } });
       }
     }),
@@ -342,7 +430,7 @@ export function createEmailRouter(
             language,
           }),
           attachments,
-        });
+        }, tenantOf(req));
 
         finishEmailAttempt(db, tenantOf(req), logId, {
           status: result.status,

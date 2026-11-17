@@ -4,7 +4,6 @@ import type { AppConfig } from '../config.js';
 import { findAdminById, type AdminUser } from '../repositories/adminUsers.js';
 import type { Scope } from '../repositories/base.js';
 import type { Db } from '../db/connection.js';
-import type { Identity } from '../auth/types.js';
 
 /** Re-exported so request-bound code can type its scope without a second import. */
 export type { Scope };
@@ -30,8 +29,6 @@ declare global {
       user?: SessionUser;
       /** Set by the selected auth middleware from the database, never from the request. */
       tenant?: Scope;
-      /** Present only for a Clerk-authenticated request; platform checks require its verified email. */
-      identity?: Identity;
       db?: Db;
     }
   }
@@ -106,6 +103,27 @@ export function requireAuth(config: AppConfig, db: Db) {
       res.status(401).json({
         data: null,
         error: { message: 'Session is no longer valid.', code: 'unauthenticated' },
+      });
+      return;
+    }
+
+    const ws = db.prepare('SELECT id, suspended_at FROM workspaces WHERE id = ?').get(admin.workspace_id) as
+      | { id: string; suspended_at: string | null }
+      | undefined;
+
+    if (!ws) {
+      clearSessionCookie(config, res);
+      res.status(401).json({
+        data: null,
+        error: { message: 'Workspace does not exist.', code: 'workspace_not_found' },
+      });
+      return;
+    }
+
+    if (ws.suspended_at) {
+      res.status(403).json({
+        data: null,
+        error: { message: 'This workspace is suspended.', code: 'workspace_suspended' },
       });
       return;
     }
