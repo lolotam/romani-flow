@@ -36,6 +36,8 @@ export type Row = Record<string, unknown>;
  */
 export interface Scope {
   readonly workspaceId: string;
+  /** The account that acts for the request. Absent for work that has no account. */
+  readonly accountId?: string;
 }
 
 /** SQL fragment and parameter restricting a tenant table to the scope. */

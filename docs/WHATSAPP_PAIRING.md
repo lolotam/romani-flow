@@ -50,6 +50,12 @@ Leave all four empty to keep pairing unconfigured without affecting email/app bo
 Partial/invalid values fail closed for pairing; no global credential fallback.
 Ordinary settings and business exports never contain this configuration.
 
+When the pairing is unusable, the Settings panel names the variables that block
+it. `GET /api/whatsapp/status` reports them as `issues`, each with the variable
+name and whether it is missing or malformed, and the panel prints the same
+names. Only names and problems are reported: no value, secret or prefix of a
+secret is ever returned.
+
 ## Administrator experience and API
 
 Settings → WhatsApp is administrator-only; the API rechecks current database role.

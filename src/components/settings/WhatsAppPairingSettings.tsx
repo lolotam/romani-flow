@@ -3,16 +3,24 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { useAuth } from '@/hooks/useAuth';
 import { useLanguage } from '@/contexts/LanguageContext';
-import { whatsappPairing, type WhatsAppPairingStatus } from '@/lib/api/whatsapp';
+import { whatsappPairing, type WhatsAppPairingIssue, type WhatsAppPairingStatus } from '@/lib/api/whatsapp';
+import { ApiRequestError } from '@/lib/api/http';
 import { CheckCircle2, LogOut, QrCode, RefreshCw } from 'lucide-react';
 import { isTransientPairingReadError, startPairingStatusPolling } from '@/lib/whatsappPairingPolling';
 import { isOwner } from '@/lib/permissions';
+
+/** The variables the server named as the reason the pairing does not work. */
+function pairingIssuesOf(error: unknown): WhatsAppPairingIssue[] {
+  const issues = error instanceof ApiRequestError ? error.details?.issues : undefined;
+  return Array.isArray(issues) ? (issues as WhatsAppPairingIssue[]) : [];
+}
 
 /** Transient QR only. Never stores credentials, QR codes, chats or session data. */
 export default function WhatsAppPairingSettings({ onDisconnectSettled }: { onDisconnectSettled?: () => void }) {
   const { user, workspaceId } = useAuth();
   const { t, isRTL } = useLanguage();
   const [status, setStatus] = useState<WhatsAppPairingStatus | null>(null);
+  const [issues, setIssues] = useState<WhatsAppPairingIssue[]>([]);
   const [qr, setQr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(false);
@@ -41,6 +49,7 @@ export default function WhatsAppPairingSettings({ onDisconnectSettled }: { onDis
     if (action === 'disconnect') setStatus(null);
     const failed = (error: unknown) => {
       setError(true);
+      setIssues(pairingIssuesOf(error));
       if (action === 'status' && Date.now() < pollDeadline.current && isTransientPairingReadError(error)) {
         if (document.hidden || Date.now() >= expiresAt.current) { setQr(null); setExpired(true); }
         return;
@@ -52,6 +61,7 @@ export default function WhatsAppPairingSettings({ onDisconnectSettled }: { onDis
       if (!mounted.current || id !== operation.current || currentIdentity.current !== identity) return;
       if (result.error || !result.data) { failed(result.error); return; }
       setStatus({ configured: result.data.configured, state: result.data.state });
+      setIssues(result.data.issues ?? []);
       if (result.data.configured && result.data.state === 'connecting') {
         if (pollDeadline.current > Date.now()) setPollingUntil(pollDeadline.current);
       } else { pollDeadline.current = 0; setPollingUntil(0); setQr(null); }
@@ -75,7 +85,7 @@ export default function WhatsAppPairingSettings({ onDisconnectSettled }: { onDis
   useEffect(() => {
     mounted.current = true;
     void loadConnection('status');
-    return () => { mounted.current = false; operation.current += 1; requestBusy.current = false; pollDeadline.current = 0; setPollingUntil(0); setQr(null); setStatus(null); };
+    return () => { mounted.current = false; operation.current += 1; requestBusy.current = false; pollDeadline.current = 0; setPollingUntil(0); setQr(null); setStatus(null); setIssues([]); };
   }, [loadConnection]);
 
   useEffect(() => {
@@ -115,6 +125,9 @@ export default function WhatsAppPairingSettings({ onDisconnectSettled }: { onDis
           {error ? t('settings.whatsapp.unavailable') : status?.state === 'connected' ? stateText.connected : busy ? t('settings.whatsapp.loading') : status ? stateText[status.state] : ''}
         </p>
         {error && <p role="alert" className="text-destructive">{t('settings.whatsapp.error')}</p>}
+        {issues.length > 0 && <p role="alert" className="text-destructive text-sm">
+          {t('settings.whatsapp.issues')} {issues.map(issue => `${issue.variable} — ${t(issue.problem === 'missing' ? 'settings.whatsapp.issueMissing' : 'settings.whatsapp.issueInvalid')}`).join(' · ')}
+        </p>}
         <div className="flex flex-wrap gap-2">
           <Button type="button" disabled={busy} variant="outline" onClick={() => void loadConnection('status')}>
             <RefreshCw aria-hidden="true" className="h-4 w-4 me-2" />{t('settings.whatsapp.refresh')}

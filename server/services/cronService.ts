@@ -3,6 +3,7 @@ import type { Db } from '../db/connection.js';
 import type { Scope } from '../repositories/base.js';
 import { getBoolean, getString, PLATFORM, setSetting } from '../repositories/settings.js';
 import { LEGACY_WORKSPACE_ID, isWorkspaceSuspended, listWorkspaceIds } from '../repositories/workspaces.js';
+import { notificationSenderAccountId } from '../repositories/memberSmtp.js';
 import type { Mailer } from './mailer.js';
 import {
   recordAutomatedRun,
@@ -171,7 +172,13 @@ export class CronService {
       if (source === 'cron' && shouldSkipAutomatedRun(this.db, scope)) {
         return { sent: false, skipped: 'already_run_today' };
       }
-      const result = await sendExpiryReport(this.db, scope, this.mailer, source);
+      // A scheduled report speaks for the member the workspace named as its
+      // sender. That member relay overrides the relay of the workspace; without
+      // a named sender the report uses the relay of the workspace.
+      const sender = source === 'cron'
+        ? { ...scope, accountId: notificationSenderAccountId(this.db, scope.workspaceId) ?? undefined }
+        : scope;
+      const result = await sendExpiryReport(this.db, sender, this.mailer, source);
       if (source === 'cron') {
         const completed = result.sent || COMPLETED_SKIPS.has(result.skipped ?? '');
         recordAutomatedRun(this.db, scope, result.sent ? 'sent' : (result.skipped ?? 'skipped'), completed);

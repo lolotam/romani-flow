@@ -129,7 +129,7 @@ export function requireAuth(config: AppConfig, db: Db) {
     }
 
     req.user = { ...session, role: admin.role };
-    req.tenant = { workspaceId: admin.workspace_id };
+    req.tenant = { workspaceId: admin.workspace_id, accountId: admin.id };
     next();
   };
 }

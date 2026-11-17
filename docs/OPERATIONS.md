@@ -61,11 +61,55 @@ For live proof match the designated inbox receipt to subject, timestamp and
 message identity where available. Record rejection, partial or unknown outcomes
 honestly; do not label them delivered.
 
+### Which relay sends
+
+Two relays coexist, and the order decides:
+
+1. the relay of the account that acts, when that account saved one;
+2. the relay of the workspace;
+3. the platform relay of the environment, for the legacy workspace only, and
+   only while that workspace has not retired it.
+
+A workspace names the account that sends its scheduled reminders. That account
+relay wins for the scheduled reports; without one the reports go out through the
+relay of the workspace. Naming a sender never changes a relay.
+
+The password of a member relay is sealed with `APP_ENCRYPTION_KEY` and is never
+returned by the API, printed in a log, or written to a backup in the clear. A
+member relay whose key does not match fails loudly instead of silently sending
+through another relay. `SMTP_ALLOWED_HOSTS` stays empty for a public relay, and
+`SMTP_ALLOW_PLAINTEXT_HOSTS` stays empty because production never allows a
+cleartext session.
+
 Document sends should report attachment count/bytes and durable attempts.
 An attempt left in `sending` after a crash has an unknown outcome: inspect the
 designated mailbox/relay before retrying to avoid duplicates. Failed reminders
 remain retryable; a successful automated day is deduplicated. Selection is based
 on enabled intervals and due dates, not on the mere existence of a document.
+
+### Reading an SMTP test failure
+
+The test button answers with a reason, and the reason is a stable code. The
+message in the toast carries the same code:
+
+| Code | Meaning | Next step |
+| --- | --- | --- |
+| `invalid_smtp_settings` | The saved sender carries no mailbox | Save the sender as `Company <no-reply@example.com>` |
+| `smtp_not_configured` | The workspace has no relay | Save a relay in Settings |
+| `smtp_host_forbidden` | The host resolves to a private or reserved address | Use a public relay host |
+| `smtp_timeout` | The relay did not answer inside the connection timeout or the 20-second test deadline | Check egress to the relay port from the container |
+| `smtp_auth_failed` | The relay refused the credentials | Correct the user or the app password |
+| `smtp_sender_rejected` | The relay refused the sender address | Correct the sender address |
+| `smtp_tls_required` | The relay did not offer a secure session | Use a relay that offers TLS |
+| `smtp_connection_failed` | The relay was never reached | Check DNS and the outbound relay port |
+| `invalid_response` | A proxy answered instead of the application | Check the reverse proxy and the container state |
+| `network_error` | The browser never reached the application | Check the origin, the certificate and the container logs |
+
+`invalid_response` and `network_error` never come from the SMTP exchange: the
+request did not reach the application, or the answer was not a JSON envelope.
+Read the container logs and the proxy before changing the relay. The test uses
+one SMTP exchange with a 20-second deadline, so a relay that never answers
+still produces a reason instead of a request that hangs.
 
 The scheduler runs inside the single API process. It uses the process timezone.
 Production's configured expression is `0 8 * * *`; a separate read-only runtime

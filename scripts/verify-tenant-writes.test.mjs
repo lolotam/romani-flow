@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { reminderApi } from './fixtures/whatsapp-api.mjs';
 import { addWorkspaceB, asB, B, LEG, plantLegacyFiles } from './fixtures/workspace-b.mjs';
+import { APP_ENCRYPTION_KEY } from './fixtures/member-smtp.mjs';
 
 /**
  * Write inventory: every POST, PUT, PATCH and DELETE handler under `server/` is either
@@ -34,9 +35,10 @@ const NO_FOREIGN_ROWS = {
   'routes/documentExtraction.ts POST /': 'The body carries the caller\'s images only, never a row id.',
   'routes/email.ts POST /test': 'Sends a test message to an address the caller types; no row id.',
   'routes/email.ts POST /expiry-report': 'Reports the caller\'s workspace only; the tick test proves the per-workspace report.',
-  'routes/email.ts PUT /smtp': 'Saves custom SMTP for caller workspace only; proved in verify-tenant-isolation.',
-  'routes/email.ts DELETE /smtp': 'Deletes custom SMTP for caller workspace only; proved in verify-tenant-isolation.',
+  'routes/emailSmtp.ts PUT /smtp': 'Saves custom SMTP for caller workspace only; proved in verify-tenant-isolation.',
+  'routes/emailSmtp.ts DELETE /smtp': 'Deletes custom SMTP for caller workspace only; proved in verify-tenant-isolation.',
   'routes/files.ts POST /upload': 'Stages new files into the caller\'s workspace; no row id.',
+  'routes/memberSmtp.ts POST /test': 'Sends a test to the account email of the caller through the relay of that caller; proved in verify-member-smtp-api.',
   'whatsapp/routes.ts POST /': 'Provider webhook without a session; carries no tenant rows.',
   'notifications/whatsapp/routes.ts POST /recipients': 'Refused for B in verify-tenant-isolation.',
 };
@@ -72,6 +74,12 @@ function attempts(ids) {
     { covers: 'notifications/whatsapp/routes.ts POST /jobs/:id/retry', method: 'POST', url: '/api/whatsapp/jobs/synthetic/retry', body: {}, status: 404, code: 'not_found' },
     { covers: 'whatsapp/routes.ts POST /connect', method: 'POST', url: '/api/whatsapp/connect', body: {}, status: 503, code: 'whatsapp_not_configured' },
     { covers: 'whatsapp/routes.ts POST /disconnect', method: 'POST', url: '/api/whatsapp/disconnect', body: {}, status: 503, code: 'whatsapp_not_configured' },
+    // The relay of the member is B's own row; the relay of legacy is untouched.
+    { covers: 'routes/memberSmtp.ts PUT /', method: 'PUT', url: '/api/me/smtp', body: { host: 'smtp.example.invalid', port: 587, secure: false, username: 'b', password: 'b-secret', sender_address: 'admin-b@example.invalid' }, status: 200 },
+    { covers: 'routes/memberSmtp.ts DELETE /', method: 'DELETE', url: '/api/me/smtp', status: 200 },
+    // B cannot name a legacy account as the sender of the reminders.
+    { covers: 'routes/notificationSender.ts PUT /', method: 'PUT', url: '/api/workspace/notification-sender', body: { account_id: 'admin' }, status: 400, code: 'notification_sender_ineligible' },
+    { covers: 'routes/notificationSender.ts PUT /', method: 'PUT', url: '/api/workspace/notification-sender', body: { account_id: 'admin-b' }, status: 200 },
   ];
 }
 
@@ -88,6 +96,11 @@ const legacyState = f => JSON.stringify(['companies', 'employees', 'documents', 
 
 test('no write lets B change, delete, reference or reach legacy rows and uploads', () => reminderApi(async f => {
   const b = addWorkspaceB(f); plantLegacyFiles(f);
+  // Legacy keeps a relay of its own, so the survival of that relay is a fact about
+  // the writes of B and not about an empty table.
+  f.db.prepare(`INSERT INTO member_smtp_settings
+    (workspace_id,account_id,host,port,secure,username,password_ciphertext,sender_address,sender_name,created_at,updated_at)
+    VALUES('ws_legacy','admin',?,587,0,'legacy','cipher','legacy@example.invalid',null,'2026-01-01','2026-01-01')`).run('smtp.example.invalid');
   const [legacyUpload] = await f.documents.stageUploads(LEG, [file]);
   const [bUpload, bOwnUpload] = await f.documents.stageUploads(B, [file, file]);
   const { revision } = (await asBDraft(f, '/api/document-drafts/new')).json.data;
@@ -106,6 +119,10 @@ test('no write lets B change, delete, reference or reach legacy rows and uploads
   }
 
   assert.equal(legacyState(f), before, 'legacy rows are unchanged');
+  assert.equal(f.db.prepare("SELECT count(*) n FROM member_smtp_settings WHERE workspace_id='ws_legacy'").get().n, 1,
+    'the relay of legacy survives the writes of B');
+  assert.equal(f.db.prepare("SELECT count(*) n FROM member_smtp_settings WHERE workspace_id='ws_b'").get().n, 0,
+    'the relay of B is gone with the delete of B');
   assert.equal(f.db.prepare("SELECT workspace_id FROM companies WHERE id=?").get(b.company.id).workspace_id, 'ws_b');
   assert.equal(f.db.prepare("SELECT count(*) n FROM documents WHERE title='Points at legacy'").get().n, 0);
   assert.equal(f.db.prepare("SELECT count(*) n FROM employees WHERE name='Points at legacy'").get().n, 0);
@@ -124,7 +141,7 @@ test('no write lets B change, delete, reference or reach legacy rows and uploads
   const legacySend = await f.request('/api/email/send-documents', { method: 'POST', body: { document_ids: [f.document.id], to: ['legacy@example.invalid'] } });
   // The fixture has no SMTP, so legacy gets past the lookup that refuses B and fails only at sending.
   assert.equal(legacySend.json.error.code, 'send_failed');
-}));
+}, undefined, { SMTP_ALLOWED_HOSTS: 'smtp.example.invalid', APP_ENCRYPTION_KEY }));
 
 test('a draft of another workspace is refused, and a draft without the header is allowed', () => reminderApi(async f => {
   addWorkspaceB(f);

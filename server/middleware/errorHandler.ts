@@ -1,5 +1,7 @@
 import type { NextFunction, Request, Response } from 'express';
 import { RepositoryError } from '../repositories/base.js';
+import { MailError } from '../services/mailError.js';
+import { CredentialEncryptionError } from '../services/credentialEncryption.js';
 import { runRequestWork } from './requestWork.js';
 
 /** Reads the SQLite error code from a driver error, when there is one. */
@@ -52,6 +54,17 @@ export function errorHandler(
   _next: NextFunction,
 ): void {
   if (error instanceof RepositoryError) {
+    res.status(error.status).json({
+      data: null,
+      error: { message: error.message, code: error.code },
+    });
+    return;
+  }
+
+  // A mail failure carries its own reason and status: the relay refused the
+  // credentials, the destination is not allowed, or nothing is configured. The
+  // operator needs that reason, not a server fault.
+  if (error instanceof MailError || error instanceof CredentialEncryptionError) {
     res.status(error.status).json({
       data: null,
       error: { message: error.message, code: error.code },

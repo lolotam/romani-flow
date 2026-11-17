@@ -7,9 +7,20 @@ import { setSetting, getString } from '../server/repositories/settings.ts';
 import { startEmailAttempt } from '../server/services/emailLog.ts';
 import { sendExpiryReport } from '../server/services/expiryService.ts';
 import { validEmailSettings, writeLoadedEmailSettings } from '../src/lib/emailSettingsWrite.ts';
+import { getWorkspaceSmtp, upsertWorkspaceSmtp } from '../server/repositories/smtpSettings.ts';
 import { insertRow } from '../server/repositories/base.ts';
+import { ApiRequestError, actionFailureMessage } from '../src/lib/api/http.ts';
 
 const TO = ['first@example.invalid', 'second@example.invalid'], CC = 'copy@example.invalid';
+
+test('a failed test action keeps the stable SMTP code in its toast message', () => {
+  const failure = new ApiRequestError('The mail server did not answer within 20 seconds.', 'smtp_timeout', 504);
+  const message = actionFailureMessage(failure, 'not_sent');
+  assert.match(message, /^smtp_timeout:/);
+  assert.match(message, /did not answer/);
+  assert.equal(actionFailureMessage(null, 'not_sent'), 'not_sent');
+  assert.equal(actionFailureMessage(new Error('plain failure'), 'not_sent'), 'plain failure');
+});
 test('an explicit empty To override never restores saved recipients', t => withMail(t, async (f, calls) => {
   setSetting(f.db, { workspaceId: 'ws_legacy' }, 'email.recipients', TO); setSetting(f.db, { workspaceId: 'ws_legacy' }, 'email.cc', [CC]);
   assert.equal((await f.request('/api/email/test', { method: 'POST', body: { to: [], cc: [CC] } })).status, 200);
@@ -153,7 +164,7 @@ test('a failed settings load cannot send default configuration writes; successfu
   assert.equal(saved.error, null); assert.equal(writes, 1); assert.equal(getString(f.db, { workspaceId: 'ws_legacy' }, 'email.language'), 'ar');
 }));
 
-for (const code of ['ETIMEDOUT','ECONNRESET','ECONNREFUSED','EDNS','ESOCKET','ECONNECTION']) test('SMTP failure '+code+' preserves uncertainty classification', t => withMail(t, async f => {
+for (const code of ['ECONNRESET','ECONNREFUSED','EDNS','ESOCKET','ECONNECTION']) test('SMTP failure '+code+' preserves uncertainty classification', t => withMail(t, async f => {
  f.db.prepare('UPDATE documents SET expiry_date=?').run(new Date().toISOString().slice(0,10));
  setSetting(f.db, { workspaceId: 'ws_legacy' }, 'email.recipients',[TO[0]]);
  await sendExpiryReport(f.db, { workspaceId: 'ws_legacy' },f.mailer,'cron');
@@ -289,3 +300,47 @@ test('suspension before the next expiry handoff stops the remaining groups', t =
     SMTP_HOST: '127.0.0.1', SMTP_PORT: '2525', SMTP_USER: 'synthetic', SMTP_PASS: randomBytes(24).toString('hex'), SMTP_FROM: 'synthetic@example.invalid',
   });
 });
+
+test('a sender without a mailbox is refused before the settings are stored', t => reminderApi(async f => {
+  const response = await f.request('/api/email/smtp', {
+    method: 'PUT',
+    body: { host: 'smtp.example.invalid', port: 587, user: 'sender@example.invalid', pass: randomBytes(24).toString('hex'), from: 'Curemed Company' },
+  });
+  assert.equal(response.status, 400);
+  assert.equal(response.json.error.code, 'invalid_smtp_settings');
+  assert.match(response.json.error.message, /email address/);
+  assert.equal(getWorkspaceSmtp(f.db, 'ws_legacy'), null);
+}));
+
+test('a stored sender without a mailbox never reaches the relay', t => withMail(t, async (f, calls) => {
+  upsertWorkspaceSmtp(f.db, 'ws_legacy', { host: 'smtp.example.invalid', port: 587, secure: false, user: 'sender@example.invalid', pass: randomBytes(24).toString('hex'), from: 'Curemed Company' });
+  await assert.rejects(
+    () => f.mailer.send({ to: [TO[0]], subject: 'Synthetic', text: 'Synthetic' }, { workspaceId: 'ws_legacy' }),
+    error => error.code === 'smtp_from_invalid' && error.status === 502,
+  );
+  assert.equal(calls.length, 0);
+}));
+
+test('a Nodemailer connection timeout is a smtp_timeout, not a generic send failure', t => reminderApi(async f => {
+  t.mock.method(nodemailer, 'createTransport', () => ({
+    sendMail: () => Promise.reject(Object.assign(new Error('Synthetic timeout'), { code: 'ETIMEDOUT' })),
+  }));
+  await assert.rejects(
+    () => f.mailer.send({ to: [TO[0]], subject: 'Synthetic', text: 'Synthetic' }, { workspaceId: 'ws_legacy' }),
+    error => error.code === 'smtp_timeout' && error.status === 504,
+  );
+}, undefined, {
+  SMTP_HOST: '127.0.0.1', SMTP_PORT: '2525', SMTP_USER: 'synthetic', SMTP_PASS: randomBytes(24).toString('hex'), SMTP_FROM: 'synthetic@example.invalid',
+}));
+
+test('a relay that never answers fails inside the deadline instead of hanging', t => reminderApi(async f => {
+  t.mock.method(nodemailer, 'createTransport', () => ({ sendMail: () => new Promise(() => {}) }));
+  const started = Date.now();
+  await assert.rejects(
+    () => f.mailer.send({ to: [TO[0]], subject: 'Synthetic', text: 'Synthetic' }, { workspaceId: 'ws_legacy' }, { deadlineMs: 50 }),
+    error => error.code === 'smtp_timeout' && error.status === 504,
+  );
+  assert.ok(Date.now() - started < 5_000, 'the deadline ends the wait');
+}, undefined, {
+  SMTP_HOST: '127.0.0.1', SMTP_PORT: '2525', SMTP_USER: 'synthetic', SMTP_PASS: randomBytes(24).toString('hex'), SMTP_FROM: 'synthetic@example.invalid',
+}));
