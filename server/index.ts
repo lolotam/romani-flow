@@ -15,6 +15,7 @@ import { StorageService } from './services/storageService.js';
 import { createReminderRuntime } from './whatsapp/runtime.js';
 import { drainApplication } from './shutdown.js';
 import { stopRequestWork } from './middleware/requestWork.js';
+import { runtimeLine } from './services/runtime.js';
 
 /**
  * Server bootstrap.
@@ -53,7 +54,45 @@ function assertVolumeIsMounted(dataDir: string, isProduction: boolean): void {
   }
 }
 
+/**
+ * The API must not die because one request failed.
+ *
+ * An uncaught error used to take the whole process down: the proxy then
+ * answered the open request with its own error page, and the operator saw a
+ * gateway error instead of the reason. The error is written to the log with
+ * the state of the process, and the process keeps serving the other requests.
+ */
+function guardProcess(): void {
+  process.on('uncaughtException', (error: unknown) => {
+    console.error(`[server] uncaught exception, the API keeps serving: ${describe(error)}`);
+    console.error(runtimeLine('runtime'));
+  });
+  process.on('unhandledRejection', (reason: unknown) => {
+    console.error(`[server] unhandled rejection, the API keeps serving: ${describe(reason)}`);
+    console.error(runtimeLine('runtime'));
+  });
+}
+
+/** One short description of an unknown failure. No stack, no secret. */
+function describe(error: unknown): string {
+  if (error instanceof Error) return `${error.name}: ${error.message.slice(0, 300)}`;
+  return String(error).slice(0, 300);
+}
+
+/**
+ * A line about the process, once a minute.
+ *
+ * The uptime shows whether the container was restarted, and the memory shows
+ * how close it is to the limit of the host. Both questions have only ever been
+ * answerable from the log of a deployment that is not on this machine.
+ */
+function startHeartbeat(): void {
+  const timer = setInterval(() => console.log(runtimeLine('runtime')), 60_000);
+  timer.unref();
+}
+
 async function main(): Promise<void> {
+  guardProcess();
   const config = loadConfig();
   validateConfig(config);
   if (!isSmtpConfigured(config)) console.warn('[server] WARNING: mail not configured');
@@ -128,6 +167,8 @@ async function main(): Promise<void> {
   const server = app.listen(config.port, () => {
     console.log(`[server] listening on http://0.0.0.0:${config.port}`);
   });
+
+  startHeartbeat();
 
   let shuttingDown = false;
   const shutdown = (signal: string) => {
