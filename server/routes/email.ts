@@ -162,11 +162,12 @@ export function createEmailRouter(
 
       try {
         await assertPublicHost(host);
-      } catch (err: any) {
+      } catch (err: unknown) {
+        const error = err instanceof Error ? err : new Error(String(err));
         const code = err instanceof SmtpSecurityError ? err.code : 'smtp_host_forbidden';
         res.status(400).json({
           data: null,
-          error: { message: err.message || 'SMTP host is forbidden.', code },
+          error: { message: error.message || 'SMTP host is forbidden.', code },
         });
         return;
       }

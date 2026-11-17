@@ -125,8 +125,9 @@ export async function assertPublicHost(host: string): Promise<void> {
   let records: dns.LookupAddress[];
   try {
     records = await dns.promises.lookup(normalized, { all: true });
-  } catch (err: any) {
-    throw new SmtpSecurityError(`Could not resolve host "${normalized}": ${err.message || 'DNS resolution failed'}.`);
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    throw new SmtpSecurityError(`Could not resolve host "${normalized}": ${message || 'DNS resolution failed'}.`);
   }
 
   if (!records || records.length === 0) {
@@ -149,8 +150,8 @@ export async function assertPublicHost(host: string): Promise<void> {
 export function createSecureLookup() {
   return (
     hostname: string,
-    options: any,
-    callback: (err: Error | null, address?: any, family?: number) => void,
+    options: dns.LookupOptions,
+    callback: (err: NodeJS.ErrnoException | null, address?: string | dns.LookupAddress[], family?: number) => void,
   ) => {
     dns.lookup(hostname, options, (err, address, family) => {
       if (err) return callback(err);

@@ -205,8 +205,8 @@ export function createAuthRouter(
         admin = atomic(db, () => {
           const doubleCheck = findAdminByEmail(db, email);
           if (doubleCheck) {
-            const err = new Error('email_already_exists');
-            (err as any).code = 'EMAIL_EXISTS';
+            const err = new Error('email_already_exists') as Error & { code?: string };
+            err.code = 'EMAIL_EXISTS';
             throw err;
           }
           createWorkspace(db, { id: wsId, name: workspaceName });
@@ -218,13 +218,14 @@ export function createAuthRouter(
             workspaceId: wsId,
           });
         });
-      } catch (err: any) {
+      } catch (err: unknown) {
+        const error = err as { code?: string; errcode?: number; message?: string };
         if (
-          err.code === 'EMAIL_EXISTS' ||
-          err.code === 'SQLITE_CONSTRAINT_UNIQUE' ||
-          err.code === 'SQLITE_CONSTRAINT' ||
-          err.errcode === 2067 ||
-          err.message?.includes('UNIQUE constraint failed')
+          error.code === 'EMAIL_EXISTS' ||
+          error.code === 'SQLITE_CONSTRAINT_UNIQUE' ||
+          error.code === 'SQLITE_CONSTRAINT' ||
+          error.errcode === 2067 ||
+          error.message?.includes('UNIQUE constraint failed')
         ) {
           res.status(409).json({
             data: null,

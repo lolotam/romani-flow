@@ -95,7 +95,7 @@ export class Mailer {
           greetingTimeout: 15_000,
           socketTimeout: 30_000,
           lookup: createSecureLookup(),
-        } as any);
+        } as nodemailer.TransportOptions);
         this.workspaceTransporters.set(scope.workspaceId, {
           transporter,
           from: custom.from,
