@@ -235,8 +235,15 @@ export class Mailer {
       const detail = error instanceof Error ? error.message : String(error);
       const code = error && typeof error === 'object' && 'code' in error ? String(error.code) : '';
       const provenUnsent = ['ENOTFOUND', 'EAI_AGAIN', 'ECONNREFUSED', 'EDNS'].includes(code);
-      const rejectedBeforeData = code === 'EAUTH' || code === 'EENVELOPE';
-      const failureCode = provenUnsent ? 'connection_failed' : rejectedBeforeData ? 'smtp_rejected' : 'send_failed';
+      const failureCode = code === 'EAUTH'
+        ? 'smtp_auth_failed'
+        : code === 'EENVELOPE'
+          ? 'smtp_sender_rejected'
+          : code === 'ETLS'
+            ? 'smtp_tls_required'
+            : provenUnsent
+              ? 'smtp_connection_failed'
+              : 'send_failed';
       throw new MailError(`The message could not be sent: ${detail}`, failureCode, 502);
     }
   }

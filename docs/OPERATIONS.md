@@ -78,8 +78,10 @@ message in the toast carries the same code:
 | `smtp_not_configured` | The workspace has no relay | Save a relay in Settings |
 | `smtp_host_forbidden` | The host resolves to a private or reserved address | Use a public relay host |
 | `smtp_timeout` | The relay did not answer inside 20 seconds | Check egress to the relay port from the container |
-| `smtp_rejected` | The relay refused the credentials or the envelope | Correct the user, the app password or the sender |
-| `connection_failed` | The relay was never reached | Check DNS and the outbound relay port |
+| `smtp_auth_failed` | The relay refused the credentials | Correct the user or the app password |
+| `smtp_sender_rejected` | The relay refused the sender address | Correct the sender address |
+| `smtp_tls_required` | The relay did not offer a secure session | Use a relay that offers TLS |
+| `smtp_connection_failed` | The relay was never reached | Check DNS and the outbound relay port |
 | `invalid_response` | A proxy answered instead of the application | Check the reverse proxy and the container state |
 | `network_error` | The browser never reached the application | Check the origin, the certificate and the container logs |
 
