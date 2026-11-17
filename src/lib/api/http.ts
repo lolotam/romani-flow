@@ -65,6 +65,19 @@ export class ApiRequestError extends Error {
   }
 }
 
+/**
+ * A failed action keeps its stable code in the message shown to the operator.
+ *
+ * The runbook lists codes such as `smtp_timeout`; a toast with only the prose
+ * gives the operator nothing to look up.
+ */
+export function actionFailureMessage(error: unknown, fallback: string): string {
+  if (error instanceof ApiRequestError) {
+    return error.code && error.code !== 'http_error' ? `${error.code}: ${error.message}` : error.message;
+  }
+  return error instanceof Error && error.message ? error.message : fallback;
+}
+
 /** Notifies the application when the session is gone, so it can sign out. */
 type UnauthorizedHandler = () => void;
 

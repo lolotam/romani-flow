@@ -19,6 +19,8 @@ import { stopRequestWork } from '../server/middleware/requestWork.ts';
 import { createReminderRuntime } from '../server/whatsapp/runtime.ts';
 import { whatsappPairing } from '../src/lib/api/whatsapp.ts';
 import { setSetting } from '../server/repositories/settings.ts';
+import { reminderApi } from './fixtures/whatsapp-api.mjs';
+import { addWorkspaceB, asB } from './fixtures/workspace-b.mjs';
 
 // Synthetic loopback provider only; no .env, production accounts or real QR scan.
 const PNG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jGDkAAAAASUVORK5CYII=';
@@ -97,6 +99,21 @@ test('absent config preserves status and makes no provider calls', () => fixture
   assert.equal((await f.request('/api/whatsapp/connect', { method: 'POST', body: {} })).status, 503);
   assert.equal(f.calls.length, 0);
 }, { ROMANI_EVOLUTION_URL: '', ROMANI_EVOLUTION_API_KEY: '', ROMANI_EVOLUTION_INSTANCE: '', ROMANI_EVOLUTION_WEBHOOK_SECRET: '' }));
+
+test('a synthesised workspace instance without pairing variables still names them', () => reminderApi(async f => {
+  addWorkspaceB(f);
+  const r = await asB(f, '/api/whatsapp/status');
+  assert.equal(r.status, 503, JSON.stringify(r.json));
+  assert.equal(r.json.error.code, 'whatsapp_not_configured');
+  assert.deepEqual(r.json.error.issues, [
+    { variable: 'ROMANI_EVOLUTION_URL', problem: 'missing' },
+    { variable: 'ROMANI_EVOLUTION_INSTANCE', problem: 'missing' },
+    { variable: 'ROMANI_EVOLUTION_API_KEY', problem: 'missing' },
+    { variable: 'ROMANI_EVOLUTION_WEBHOOK_SECRET', problem: 'missing' },
+  ]);
+}, undefined, {
+  ROMANI_EVOLUTION_URL: '', ROMANI_EVOLUTION_API_KEY: '', ROMANI_EVOLUTION_INSTANCE: '', ROMANI_EVOLUTION_WEBHOOK_SECRET: '',
+}));
 
 test('a malformed server configuration names the variables that block the pairing', () => fixture(async f => {
   const r = await f.request('/api/whatsapp/status');

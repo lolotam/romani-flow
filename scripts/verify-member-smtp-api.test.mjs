@@ -73,6 +73,14 @@ test('a deleted relay is gone', () => reminderApi(async f => {
   assert.equal(f.db.prepare('SELECT count(*) n FROM member_smtp_settings').get().n, 0);
 }, undefined, environment()));
 
+test('a member relay alone never advertises the workspace relay as configured', () => reminderApi(async f => {
+  const saved = await f.request('/api/me/smtp', { method: 'PUT', body: RELAY });
+  assert.equal(saved.status, 200, JSON.stringify(saved.json));
+  const status = await f.request('/api/email/smtp');
+  assert.equal(status.status, 200, JSON.stringify(status.json));
+  assert.equal(status.json.data.configured, false, 'the workspace card must not claim a relay its own test cannot use');
+}, undefined, environment()));
+
 test('the test message goes to the account email of the caller only', async t => {
   const relay = await startFakeSmtp(t);
   await reminderApi(async f => {

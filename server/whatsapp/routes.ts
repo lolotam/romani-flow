@@ -49,10 +49,12 @@ export function createPairingRouter(config: PairingConfig, env: NodeEnv, reminde
     const ws = getWorkspaceWhatsAppRecord(reminders.db, scope.workspaceId, config.instance, config.apiKey);
     const client = new PairingClient({ ...config, instance: ws.instanceName, apiKey: ws.apiKey });
     const pendingPairingUntil = () => getPairingPendingUntil(reminders.db, scope.workspaceId);
+    // Compute diagnostics before the provider call: a synthesised workspace
+    // instance can make the client throw before it reaches its own status path.
+    const issues = pairingConfigurationIssues(config);
 
     try {
       const status = await client.status();
-      const issues = pairingConfigurationIssues(config);
       const data = status.configured && status.state === 'disconnected' && pendingPairingUntil() > Date.now()
         ? { ...status, state: 'connecting' }
         : status;
@@ -60,7 +62,7 @@ export function createPairingRouter(config: PairingConfig, env: NodeEnv, reminde
     }
     catch (error) {
       const e = error instanceof PairingError ? error : new PairingError('provider_unavailable');
-      fail(res, e.status, e.code);
+      fail(res, e.status, e.code, e.code === 'whatsapp_not_configured' && issues.length ? { issues } : undefined);
     }
   }));
 

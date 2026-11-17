@@ -97,7 +97,7 @@ message in the toast carries the same code:
 | `invalid_smtp_settings` | The saved sender carries no mailbox | Save the sender as `Company <no-reply@example.com>` |
 | `smtp_not_configured` | The workspace has no relay | Save a relay in Settings |
 | `smtp_host_forbidden` | The host resolves to a private or reserved address | Use a public relay host |
-| `smtp_timeout` | The relay did not answer inside 20 seconds | Check egress to the relay port from the container |
+| `smtp_timeout` | The relay did not answer inside the connection timeout or the 20-second test deadline | Check egress to the relay port from the container |
 | `smtp_auth_failed` | The relay refused the credentials | Correct the user or the app password |
 | `smtp_sender_rejected` | The relay refused the sender address | Correct the sender address |
 | `smtp_tls_required` | The relay did not offer a secure session | Use a relay that offers TLS |

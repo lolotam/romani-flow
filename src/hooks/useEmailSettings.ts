@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { endpoints, rejectedSettings } from '@/lib/api';
 import type { CronStatus, EmailLogEntry, ExpiryPreview, SmtpDetails, SmtpStatus } from '@/lib/api';
-import { ApiRequestError } from '@/lib/api/http';
+import { actionFailureMessage, ApiRequestError } from '@/lib/api/http';
 import { validEmailSettings, writeLoadedEmailSettings } from '@/lib/emailSettingsWrite';
 import { useAuth } from './useAuth';
 import { isOwner } from '@/lib/permissions';
@@ -302,7 +302,7 @@ export function useEmailSettings() {
     const { data, error } = await endpoints.email.sendTest(splitAddresses(form.recipients), splitAddresses(form.cc));
     setBusy(null);
     await loadStatus();
-    if (error || !data?.sent) return { ok: false, message: error?.message ?? 'not_sent' };
+    if (error || !data?.sent) return { ok: false, message: error ? actionFailureMessage(error, 'not_sent') : 'not_sent' };
     return { ok: true, message: '' };
   };
 

@@ -49,7 +49,7 @@ export function registerWorkspaceSmtpRoutes(
       const isLegacy = scope.workspaceId === LEGACY_WORKSPACE_ID;
       res.json({
         data: {
-          configured: isLegacy && mailer.isConfigured(scope),
+          configured: isLegacy && mailer.isConfigured({ workspaceId: scope.workspaceId }),
           isCustom: false,
           host: isLegacy ? config.smtp.host : '',
           port: isLegacy ? config.smtp.port : 587,
