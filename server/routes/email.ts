@@ -11,6 +11,7 @@ import { collectExpiring, startEmailAttempt, finishEmailAttempt } from '../servi
 import { parseIntervals } from '../services/intervals.js';
 import { emailIdentity, emailIdentities } from '../services/emailAddress.js';
 import { documentEmailHtml, documentEmailText } from '../services/templates/index.js';
+import { resolveSenderName } from '../services/senderName.js';
 import type { StorageService } from '../services/storageService.js';
 import { registerWorkspaceSmtpRoutes } from './emailSmtp.js';
 
@@ -87,6 +88,14 @@ export function createEmailRouter(
     }),
   );
 
+  router.get(
+    '/sender-name',
+    requireAdmin,
+    asyncHandler(async (req, res) => {
+      res.json({ data: { senderName: resolveSenderName(db, req) }, error: null });
+    }),
+  );
+
   registerWorkspaceSmtpRoutes(router, { config, db, mailer });
 
   router.post(
@@ -109,8 +118,9 @@ export function createEmailRouter(
         return;
       }
 
+      const senderName = resolveSenderName(db, req);
       const logId = startEmailAttempt(db, scope, {
-        kind: 'test', recipients: allRecipients, subject: 'ROMANI Flow — SMTP test', details: { invalid },
+        kind: 'test', recipients: allRecipients, subject: `SMTP test — ${senderName}`, details: { invalid },
       });
 
       try {
@@ -121,7 +131,7 @@ export function createEmailRouter(
         const result = await mailer.send({
           to: recipients,
           cc,
-          subject: 'ROMANI Flow — SMTP test',
+          subject: `SMTP test — ${senderName}`,
           text: 'This is a test message from ROMANI Flow. SMTP is configured correctly.',
           html: '<p style="font-family:Segoe UI,Arial,sans-serif">This is a test message from <strong>ROMANI Flow</strong>. SMTP is configured correctly.</p>',
         }, scope, { workspaceOnly: true, deadlineMs: SMTP_TEST_DEADLINE_MS });
@@ -298,10 +308,13 @@ export function createEmailRouter(
         return;
       }
 
-      const subject = String(req.body?.subject ?? '').trim() || 'Documents from ROMANI Flow';
       const message = typeof req.body?.message === 'string' ? req.body.message : '';
-      const senderName = getString(db, tenantOf(req), 'email.from_name', 'ROMANI Flow');
+      const senderName = resolveSenderName(db, req);
       const language = getString(db, tenantOf(req), 'email.language', 'ar') === 'en' ? 'en' : 'ar';
+      const fallbackSubject = language === 'ar'
+        ? 'مستندات من ' + senderName
+        : 'Documents from ' + senderName;
+      const subject = String(req.body?.subject ?? '').trim() || fallbackSubject;
 
       // The attempt is recorded before the files are read and handed to SMTP.
       const logId = startEmailAttempt(db, tenantOf(req), {

@@ -142,6 +142,8 @@ const email = {
       method: 'POST',
     }),
   expiryPreview: () => request<ExpiryPreview>('/api/email/expiry-preview'),
+  /** The display name the caller's emails are signed with; pre-fills the send dialog subject. */
+  senderName: () => request<{ senderName: string }>('/api/email/sender-name'),
   sendDocuments: (payload: {
     document_ids: string[];
     to: string[];

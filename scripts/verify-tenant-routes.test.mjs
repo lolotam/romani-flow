@@ -34,7 +34,7 @@ const PROBES = {
   '/api/documents': ids => ['/api/documents', [`/api/documents/${ids.document}`, 404]],
   '/api/files': ids => [[`/api/files/${ids.document}`, 404], [`/api/files/${ids.document}/download`, 404],
     [`/api/files/${ids.document}/preview`, 404], [`/api/files/employees/${ids.employee}/photo`, 404]],
-  '/api/email': () => ['/api/email/log', '/api/email/status', '/api/email/expiry-preview'],
+  '/api/email': () => ['/api/email/log', '/api/email/status', '/api/email/expiry-preview', '/api/email/sender-name'],
   '/api/backup': () => ['/api/backup/export'],
   '/api/settings': () => ['/api/settings'],
   '/api/cron/status': () => ['/api/cron/status'],
