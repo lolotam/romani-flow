@@ -11,6 +11,7 @@ import {
 import { createCredentialEncryption, MEMBER_SMTP_AAD } from '../services/credentialEncryption.js';
 import { mailErrorCode } from '../services/mailError.js';
 import type { Mailer } from '../services/mailer.js';
+import { resolveSenderName } from '../services/senderName.js';
 import { assertAllowedSmtpDestination } from '../services/smtpDestination.js';
 import { hasControlCharacter } from '../services/smtpSecurity.js';
 import { startEmailAttempt, finishEmailAttempt } from '../services/emailLog.js';
@@ -73,15 +74,16 @@ export function createMemberSmtpRouter(config: AppConfig, db: Db, mailer: Mailer
     const scope = tenantOf(req);
     const recipient = req.user?.email.trim();
     if (!recipient) throw new RepositoryError('The account has no email address.', 'account_email_required', 409);
+    const senderName = resolveSenderName(db, req);
     const logId = startEmailAttempt(db, scope, {
-      kind: 'member_smtp_test', recipients: [recipient], subject: 'ROMANI Flow — SMTP test', triggerSource: 'manual',
+      kind: 'member_smtp_test', recipients: [recipient], subject: `SMTP test — ${senderName}`, triggerSource: 'manual',
     });
     try {
       // The test only ever uses the relay of the member. The relay of the
       // workspace is not a fallback here, so a green test never belongs to
       // another relay.
       const result = await mailer.sendAsMember({
-        to: [recipient], subject: 'ROMANI Flow — SMTP test',
+        to: [recipient], subject: `SMTP test — ${senderName}`,
         text: 'This is a test message from ROMANI Flow. SMTP is configured correctly.',
       }, scope, { deadlineMs: 20_000 });
       if (result.status !== 'sent') throw new RepositoryError('The test was not accepted.', 'send_failed', 502);

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
@@ -62,8 +62,12 @@ export function SendDocumentDialog({
   const [bcc, setBcc] = useState('');
   const [subject, setSubject] = useState('');
   const [message, setMessage] = useState('');
+  const [senderName, setSenderName] = useState<string | null>(null);
   const [isSending, setIsSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  /** The last value this dialog pre-filled, so a later pre-fill never overwrites a typed subject. */
+  const lastDefaultSubjectRef = useRef('');
 
   /** Falls back to the built-in copy when a translation key is missing. */
   const label = (key: string, ar: string, en: string): string => {
@@ -71,11 +75,41 @@ export function SendDocumentDialog({
     return value === key ? (isRTL ? ar : en) : value;
   };
 
+  // The server resolves the sender display name (personal relay name, then the
+  // account name, then the workspace setting); the pre-fill matches that so
+  // the subject a person sends with is their own name, not the product's.
+  // Until the name resolves the field stays empty, so what is shown is what is
+  // sent: an empty subject lets the server apply its own sender-name default.
+  const defaultSubject = useMemo(() => {
+    const name = senderName?.trim();
+    if (!name) return '';
+    return isRTL ? `مستندات من ${name}` : `Documents from ${name}`;
+  }, [senderName, isRTL]);
+
+  useEffect(() => {
+    if (!open) return;
+    let active = true;
+    // A name from an earlier opening may be stale; the subject waits for this lookup.
+    setSenderName(null);
+    endpoints.email.senderName().then(({ data }) => {
+      if (active) setSenderName(data?.senderName ?? null);
+    });
+    return () => {
+      active = false;
+    };
+  }, [open]);
+
   useEffect(() => {
     if (!open) return;
     setError(null);
-    setSubject((current) => current || label('email.sendDialog.defaultSubject', 'مستندات من روماني فلو', 'Documents from ROMANI Flow'));
-  }, [open, isRTL]);
+    setSubject((current) => {
+      if (!current || current === lastDefaultSubjectRef.current) {
+        lastDefaultSubjectRef.current = defaultSubject;
+        return defaultSubject;
+      }
+      return current;
+    });
+  }, [open, defaultSubject]);
 
   const recipients = useMemo(() => splitAddresses(to), [to]);
   const ccRecipients = useMemo(() => splitAddresses(cc), [cc]);
@@ -222,6 +256,11 @@ export function SendDocumentDialog({
               id="send-subject"
               value={subject}
               onChange={(event) => setSubject(event.target.value)}
+              placeholder={label(
+                'email.sendDialog.subjectPlaceholder',
+                'اتركه فارغاً ليُنشأ الموضوع باسم المرسل',
+                'Leave empty to use a subject with the sender name',
+              )}
               dir="ltr"
             />
           </div>
