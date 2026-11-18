@@ -27,7 +27,7 @@ for (const [path, passwordId, usernameId] of [
   ['SmtpConfigCard.tsx', 'smtp_pass', 'smtp_user'],
   ['MemberSmtpCard.tsx', 'member_smtp_pass', 'member_smtp_user'],
 ]) {
-  test(`${path} keeps the browser from autofilling the site login into the SMTP credentials`, () => {
+  test(`${path} declares the SMTP credential autocomplete attributes`, () => {
     assert.equal(inputAttributes(path, passwordId).autoComplete, '"new-password"');
     assert.equal(inputAttributes(path, usernameId).autoComplete, '"off"');
   });
