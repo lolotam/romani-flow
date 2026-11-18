@@ -9,9 +9,13 @@ permissions:
   contents: read
 
 jobs:
-  node-gates:
+  node-shards:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [quality, extraction, services]
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
@@ -23,27 +27,52 @@ jobs:
         with:
           node-version: '24'
           cache: npm
+      - name: Runner capacity
+        run: |
+          free -m
+          df -h .
       - run: npm ci
-      - run: npm run typecheck
-      - run: npm run lint
-      - run: npm run build
-      - run: npm run test:extraction
-      - run: npm run test:config
-      - run: npm run test:forms
-      - run: npm run test:operations
-      - run: npm run test:email
-      - run: npm run test:whatsapp-pairing
-      - run: npm run test:whatsapp
-      - run: npm run test:workspace
-      - run: npm run test:smtp
-      - run: npm run test:runtime
-      - run: npm run verify:api:local
+      - name: quality gates
+        if: matrix.shard == 'quality'
+        run: |
+          set -euo pipefail
+          npm run build
+          npm run typecheck
+          npm run lint
+      - name: extraction gates
+        if: matrix.shard == 'extraction'
+        run: |
+          set -euo pipefail
+          npm run test:extraction
+          npm run test:config
+          npm run test:forms
+      - name: services gates
+        if: matrix.shard == 'services'
+        run: |
+          set -euo pipefail
+          npm run test:operations
+          npm run test:email
+          npm run test:whatsapp-pairing
+          npm run test:whatsapp
+          npm run test:workspace
+          npm run test:smtp
+          npm run test:runtime
+          npm run verify:api:local
+  node-gates:
+    runs-on: ubuntu-24.04
+    needs: [node-shards]
+    if: always()
+    steps:
+      - name: Require every Node shard
+        env:
+          SHARDS_RESULT: ${{ needs.node-shards.result }}
+        run: test "$SHARDS_RESULT" = success
   browser-gates:
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     strategy:
       fail-fast: false
-      max-parallel: 1
+      max-parallel: 2
       matrix:
         browser: [chromium, firefox]
     env:
@@ -58,6 +87,10 @@ jobs:
         with:
           node-version: '24'
           cache: npm
+      - name: Runner capacity
+        run: |
+          free -m
+          df -h .
       - run: npm ci
       - run: npx --no-install playwright install --with-deps ${{ matrix.browser }}
       - run: node scripts/verify-extraction-browser.mjs

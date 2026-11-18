@@ -1,0 +1,200 @@
+[
+  {
+    "url": "https://github.com/lolotam/romani-flow/actions/runs/44191325138",
+    "head": "56ca6c21f5a8a6604bcf8ad686b5205c24a10b66",
+    "attempt": 1,
+    "event": "pull_request",
+    "wall_seconds": 460.0,
+    "runner_minutes": 9.67,
+    "jobs": [
+      {
+        "name": "browser-gates (chromium)",
+        "runner": "GitHub Actions 1000043190",
+        "labels": [
+          "ubuntu-24.04"
+        ]
+      },
+      {
+        "name": "browser-gates (firefox)",
+        "runner": "GitHub Actions 1000043192",
+        "labels": [
+          "ubuntu-24.04"
+        ]
+      },
+      {
+        "name": "node-gates",
+        "runner": "GitHub Actions 1000043191",
+        "labels": [
+          "ubuntu-24.04"
+        ]
+      }
+    ],
+    "changed_paths": [
+      "package.json",
+      "scripts/verify-whatsapp-pairing-failure.test.mjs",
+      "src/components/settings/WhatsAppPairingSettings.tsx",
+      "src/lib/whatsappPairingFailure.ts",
+      "src/translations/ar/settings.ts",
+      "src/translations/en/settings.ts"
+    ],
+    "cache": "not established from logs",
+    "pressure": "not measured historically"
+  },
+  {
+    "url": "https://github.com/lolotam/romani-flow/actions/runs/44190473474",
+    "head": "41ee0b04ad4560aa0f65c392404f01e8843f1b96",
+    "attempt": 1,
+    "event": "pull_request",
+    "wall_seconds": 344.0,
+    "runner_minutes": 7.88,
+    "jobs": [
+      {
+        "name": "node-gates",
+        "runner": "GitHub Actions 1000043187",
+        "labels": [
+          "ubuntu-24.04"
+        ]
+      },
+      {
+        "name": "browser-gates (firefox)",
+        "runner": "GitHub Actions 1000043189",
+        "labels": [
+          "ubuntu-24.04"
+        ]
+      },
+      {
+        "name": "browser-gates (chromium)",
+        "runner": "GitHub Actions 1000043188",
+        "labels": [
+          "ubuntu-24.04"
+        ]
+      }
+    ],
+    "changed_paths": [
+      "package.json",
+      "scripts/verify-whatsapp-pairing-failure.test.mjs",
+      "src/components/settings/WhatsAppPairingSettings.tsx",
+      "src/lib/whatsappPairingFailure.ts",
+      "src/translations/ar/settings.ts",
+      "src/translations/en/settings.ts"
+    ],
+    "cache": "not established from logs",
+    "pressure": "not measured historically"
+  },
+  {
+    "url": "https://github.com/lolotam/romani-flow/actions/runs/44189267020",
+    "head": "47519b42134ed2f178eaf2bded5b10fac9ee5b87",
+    "attempt": 1,
+    "event": "pull_request",
+    "wall_seconds": 336.0,
+    "runner_minutes": 7.53,
+    "jobs": [
+      {
+        "name": "node-gates",
+        "runner": "GitHub Actions 1000043184",
+        "labels": [
+          "ubuntu-24.04"
+        ]
+      },
+      {
+        "name": "browser-gates (firefox)",
+        "runner": "GitHub Actions 1000043186",
+        "labels": [
+          "ubuntu-24.04"
+        ]
+      },
+      {
+        "name": "browser-gates (chromium)",
+        "runner": "GitHub Actions 1000043185",
+        "labels": [
+          "ubuntu-24.04"
+        ]
+      }
+    ],
+    "changed_paths": [
+      "package.json",
+      "scripts/verify-whatsapp-pairing-failure.test.mjs",
+      "src/components/settings/WhatsAppPairingSettings.tsx",
+      "src/lib/whatsappPairingFailure.ts",
+      "src/translations/ar/settings.ts",
+      "src/translations/en/settings.ts"
+    ],
+    "cache": "not established from logs",
+    "pressure": "not measured historically"
+  },
+  {
+    "url": "https://github.com/lolotam/romani-flow/actions/runs/44187843966",
+    "head": "12a5d3a0f31051cfb9af9b63b3f7e089836e2d79",
+    "attempt": 1,
+    "event": "pull_request",
+    "wall_seconds": 237.0,
+    "runner_minutes": 6.23,
+    "jobs": [
+      {
+        "name": "browser-gates (firefox)",
+        "runner": "GitHub Actions 1000043183",
+        "labels": [
+          "ubuntu-24.04"
+        ]
+      },
+      {
+        "name": "browser-gates (chromium)",
+        "runner": "GitHub Actions 1000043181",
+        "labels": [
+          "ubuntu-24.04"
+        ]
+      },
+      {
+        "name": "node-gates",
+        "runner": "GitHub Actions 1000043182",
+        "labels": [
+          "ubuntu-24.04"
+        ]
+      }
+    ],
+    "changed_paths": [
+      "package.json",
+      "scripts/verify-whatsapp-pairing-failure.test.mjs",
+      "src/components/settings/WhatsAppPairingSettings.tsx",
+      "src/lib/whatsappPairingFailure.ts",
+      "src/translations/ar/settings.ts",
+      "src/translations/en/settings.ts"
+    ],
+    "cache": "not established from logs",
+    "pressure": "not measured historically"
+  },
+  {
+    "url": "https://github.com/lolotam/romani-flow/actions/runs/44094627887",
+    "head": "099249b3d9c5ff24b1a22e1058b314f51dcee629",
+    "attempt": 1,
+    "event": "pull_request",
+    "wall_seconds": 272.0,
+    "runner_minutes": 6.62,
+    "jobs": [
+      {
+        "name": "browser-gates (chromium)",
+        "runner": "GitHub Actions 1000043061",
+        "labels": [
+          "ubuntu-24.04"
+        ]
+      },
+      {
+        "name": "browser-gates (firefox)",
+        "runner": "GitHub Actions 1000043063",
+        "labels": [
+          "ubuntu-24.04"
+        ]
+      },
+      {
+        "name": "node-gates",
+        "runner": "GitHub Actions 1000043062",
+        "labels": [
+          "ubuntu-24.04"
+        ]
+      }
+    ],
+    "changed_paths": [],
+    "cache": "not established from logs",
+    "pressure": "not measured historically"
+  }
+]
