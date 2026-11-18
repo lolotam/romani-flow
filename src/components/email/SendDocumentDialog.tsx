@@ -89,6 +89,8 @@ export function SendDocumentDialog({
   useEffect(() => {
     if (!open) return;
     let active = true;
+    // A name from an earlier opening may be stale; the subject waits for this lookup.
+    setSenderName(null);
     endpoints.email.senderName().then(({ data }) => {
       if (active) setSenderName(data?.senderName ?? null);
     });
