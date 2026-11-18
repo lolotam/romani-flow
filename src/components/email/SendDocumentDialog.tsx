@@ -78,10 +78,12 @@ export function SendDocumentDialog({
   // The server resolves the sender display name (personal relay name, then the
   // account name, then the workspace setting); the pre-fill matches that so
   // the subject a person sends with is their own name, not the product's.
+  // Until the name resolves the field stays empty, so what is shown is what is
+  // sent: an empty subject lets the server apply its own sender-name default.
   const defaultSubject = useMemo(() => {
     const name = senderName?.trim();
-    if (name) return isRTL ? `مستندات من ${name}` : `Documents from ${name}`;
-    return label('email.sendDialog.defaultSubject', 'مستندات من روماني فلو', 'Documents from ROMANI Flow');
+    if (!name) return '';
+    return isRTL ? `مستندات من ${name}` : `Documents from ${name}`;
   }, [senderName, isRTL]);
 
   useEffect(() => {
@@ -130,16 +132,12 @@ export function SendDocumentDialog({
     setIsSending(true);
     setError(null);
 
-    // Until the sender name resolves, the pre-fill is the product-branded fallback;
-    // leaving the subject out lets the server sign it with the resolved sender name.
-    const unresolvedFallback = !senderName?.trim() && subject === lastDefaultSubjectRef.current;
-
     const { data, error: sendError } = await endpoints.email.sendDocuments({
       document_ids: documents.map((document) => document.id),
       to: recipients,
       cc: ccRecipients.length > 0 ? ccRecipients : undefined,
       bcc: bccRecipients.length > 0 ? bccRecipients : undefined,
-      subject: unresolvedFallback ? undefined : subject.trim() || undefined,
+      subject: subject.trim() || undefined,
       message: message.trim() || undefined,
     });
 
