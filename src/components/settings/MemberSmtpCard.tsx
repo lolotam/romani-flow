@@ -258,6 +258,7 @@ export function MemberSmtpCard() {
                 <Input
                   id="member_smtp_user"
                   dir="ltr"
+                  autoComplete="off"
                   required
                   placeholder="your-email@gmail.com"
                   value={form.username}
@@ -271,6 +272,8 @@ export function MemberSmtpCard() {
                   <Input
                     id="member_smtp_pass"
                     type={showPassword ? 'text' : 'password'}
+                    // The browser must not fill the site login password into the SMTP app password.
+                    autoComplete="new-password"
                     dir="ltr"
                     placeholder={details?.hasPassword ? '••••••••••••••••' : ''}
                     value={form.password}

@@ -111,6 +111,7 @@ export function SmtpConfigCard({
               <Input
                 id="smtp_user"
                 dir="ltr"
+                autoComplete="off"
                 required
                 placeholder="your-email@gmail.com"
                 value={form.user}
@@ -124,6 +125,8 @@ export function SmtpConfigCard({
                 <Input
                   id="smtp_pass"
                   type={showPassword ? 'text' : 'password'}
+                  // The browser must not fill the site login password into the SMTP app password.
+                  autoComplete="new-password"
                   dir="ltr"
                   placeholder={details?.isCustom ? '••••••••••••••••' : ''}
                   value={form.pass}
