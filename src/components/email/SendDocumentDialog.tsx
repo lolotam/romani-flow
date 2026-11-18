@@ -256,6 +256,11 @@ export function SendDocumentDialog({
               id="send-subject"
               value={subject}
               onChange={(event) => setSubject(event.target.value)}
+              placeholder={label(
+                'email.sendDialog.subjectPlaceholder',
+                'اتركه فارغاً ليُنشأ الموضوع باسم المرسل',
+                'Leave empty to use a subject with the sender name',
+              )}
               dir="ltr"
             />
           </div>
