@@ -130,12 +130,16 @@ export function SendDocumentDialog({
     setIsSending(true);
     setError(null);
 
+    // Until the sender name resolves, the pre-fill is the product-branded fallback;
+    // leaving the subject out lets the server sign it with the resolved sender name.
+    const unresolvedFallback = !senderName?.trim() && subject === lastDefaultSubjectRef.current;
+
     const { data, error: sendError } = await endpoints.email.sendDocuments({
       document_ids: documents.map((document) => document.id),
       to: recipients,
       cc: ccRecipients.length > 0 ? ccRecipients : undefined,
       bcc: bccRecipients.length > 0 ? bccRecipients : undefined,
-      subject: subject.trim() || undefined,
+      subject: unresolvedFallback ? undefined : subject.trim() || undefined,
       message: message.trim() || undefined,
     });
 
